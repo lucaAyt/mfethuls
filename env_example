@@ -1,0 +1,11 @@
+# User details for path construction
+
+# Name of folder where data is stored
+PATH_TO_DATA = /home/user/Documents
+
+# Name of folders asssociated with instruments
+UV_FOLDER_NAME = UV_Vis
+FTIR_FOLDER_NAME = FTIR
+TGA_FOLDER_NAME = TGA
+DSC_FOLDER_NAME = DSC
+NMR_FOLDER_NAME = NMR
