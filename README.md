@@ -29,8 +29,9 @@ pip install -e .
 ## 🚁 Usage
 
 
-For usage you will need to edit the **.env_example** file after installation.<br>Consult the notebook ``notebooks\tutorial_basic_usecase`` for an example.
-For developers, please work on a suitable branch and send a pull request.
+- For usage you will need to edit the `env_example` file after installation and save as `.env` in the same location.
+- Consult the notebook ``notebooks\tutorial_basic_usecase`` for an example.
+- For developers, please work on a suitable branch and send a pull request.
 
 ## 📃 License
 
