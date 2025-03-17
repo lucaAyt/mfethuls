@@ -37,3 +37,5 @@ pip install -e .
 
 MIT
 
+## Notes
+This package is still under development and is in no way a production ready service.
