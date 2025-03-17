@@ -12,7 +12,7 @@ setup(
     author="LAB PYTHON Peeps",
     author_email="lucabertossi@gmail.com",
     package_dir={'': 'src'},
-    packages=[''] + find_packages("src"),
+    packages=find_packages(where="src"),
     python_requires=">=3.7, <4",
     install_requires=[dependecies],
     extras_require={
