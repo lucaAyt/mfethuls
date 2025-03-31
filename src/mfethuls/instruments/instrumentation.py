@@ -20,7 +20,6 @@ class UV(InstrumentParser):
     def parse(self, path):
         if '.txt' in path[-4:]:
 
-            # self.df = pd.concat([self.df, self.get_data_df(path)], axis=1).dropna(how='all', axis=1)
             self.df = pd.concat([self.df, self.get_data_df(path)], axis=0)
 
         else:
@@ -28,6 +27,8 @@ class UV(InstrumentParser):
 
     def get_data_df(self, path):
         data_df = pd.read_csv(path, header=1, sep='\t').astype(float)
+
+        # Additional 'meta' data: You can use underscore for titration meta data. Delete post if not needed in output
         titrant_info = os.path.basename(os.path.normpath(path)).split('_')[-1].rstrip('.txt').lstrip('0')
         data_df.loc[:, 'titrant'] = titrant_info if not titrant_info == '' else '0'
 
@@ -82,8 +83,8 @@ class TGA(InstrumentParser):
             for line in f.readlines():
 
                 if take == 1:
-                    l = re.split('\s+', line.strip(), maxsplit=5)
-                    lines.append(l)
+                    curate_line = re.split('\s+', line.strip(), maxsplit=5)
+                    lines.append(curate_line)
 
                 if 'Index' in line:
                     cols = re.split('\s+', line.strip(), maxsplit=5)
@@ -121,8 +122,8 @@ class DSC(InstrumentParser):
             for line in f.readlines():
 
                 if take == 1:
-                    l = re.split('\s+', line.strip(), maxsplit=5)
-                    lines.append(l)
+                    curate_line = re.split('\s+', line.strip(), maxsplit=5)
+                    lines.append(curate_line)
 
                 if 'Index' in line:
                     cols = re.split('\s+', line.strip(), maxsplit=5)
@@ -222,7 +223,7 @@ class RHEOMETER(InstrumentParser):
             .drop(columns=['Interval data:', 'Point No.'])
 
         # Rename columns
-        df.columns = df.columns.get_level_values(0) + [f' {col}' if 'Unnamed' not in col else f'' for col in
+        df.columns = df.columns.get_level_values(0) + [f' {col}' if 'Unnamed' not in col else '' for col in
                                                        df.columns.get_level_values(1)]
         df.loc[:, 'name'] = os.path.basename(os.path.normpath(path)).split('$')[0]
         df.loc[:, 'test_type'] = os.path.basename(os.path.normpath(path)).split('$')[-1].rstrip('.csv').strip('0')

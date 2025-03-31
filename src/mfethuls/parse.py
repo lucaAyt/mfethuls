@@ -20,7 +20,7 @@ def path_constructor(instrmnt_kw, *args):
     if [*args]:
         args = [*args]
     else:
-        print(f'No files to lookup given therefore look all files in root')
+        print('No files to lookup given therefore look all files in root')
         args = [os.environ.get(env_suffix)]
 
     # Create dictionary of folders in accordance with args and folders present
@@ -47,10 +47,8 @@ def get_data(dict_paths, instrmnt_kw):
     instrmnt_kw_lwr = instrmnt_kw.lower()
     obj = None
 
-    # dict_df = {}
     df = pd.DataFrame()
     for name, paths in dict_paths.items():
-        # df = pd.DataFrame()
         for path in paths:
             print(path)
 
@@ -59,25 +57,21 @@ def get_data(dict_paths, instrmnt_kw):
                 if not obj:
                     obj = instrm.UV()
                 obj.parse(path)
-                # df = ip.parse_uvvis(df, path)
 
             elif instrmnt_kw_lwr == 'ftir':
                 if not obj:
                     obj = instrm.FTIR()
                 obj.parse(path)
-                # df = ip.parse_ftir(df, path)
 
             elif instrmnt_kw_lwr == 'tga':
                 if not obj:
                     obj = instrm.TGA()
                 obj.parse(path)
-                # df = ip.parse_tga(df, path)
 
             elif instrmnt_kw_lwr == 'dsc':
                 if not obj:
                     obj = instrm.DSC()
                 obj.parse(path)
-                # df = ip.parse_dsc(df, path)
 
             elif instrmnt_kw_lwr == 'rheology':
                 if not obj:
@@ -100,3 +94,8 @@ def get_data(dict_paths, instrmnt_kw):
             obj.clear()
 
     return df
+
+
+if __name__ == '__main__':
+    kw = 'uv'
+    df = get_data(path_constructor(kw, 'LUB038'), kw)

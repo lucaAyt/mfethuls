@@ -1,0 +1,26 @@
+[project]
+name = "mfethuls"
+version = "0.0.4"
+description = "A suite of utility functions designed for the python people around labs"
+authors = [{name = "Luca Bertossi", email = "lucabertossi@gmail.com"}]
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.10.1",
+    "nmrglue>=0.11",
+    "notebook>=6.5.3",
+    "numpy>=1.24.2",
+    "pandas>=1.5.3",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mfethuls = ["py.typed"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
