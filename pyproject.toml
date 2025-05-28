@@ -1,6 +1,6 @@
 [project]
 name = "mfethuls"
-version = "0.0.4"
+version = "0.0.5"
 description = "A suite of utility functions designed for the python people around labs"
 authors = [{name = "Luca Bertossi", email = "lucabertossi@gmail.com"}]
 readme = "README.md"
@@ -12,6 +12,7 @@ dependencies = [
     "notebook>=6.5.3",
     "numpy>=1.24.2",
     "pandas>=1.5.3",
+    "pyarrow>=20.0.0",
     "python-dotenv>=1.0.0",
 ]
 

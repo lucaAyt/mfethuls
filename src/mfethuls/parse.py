@@ -97,5 +97,5 @@ def get_data(dict_paths, instrmnt_kw):
 
 
 if __name__ == '__main__':
-    kw = 'uv'
-    df = get_data(path_constructor(kw, 'LUB038'), kw)
+    kw = 'inSitu_UV'
+    df = get_data(path_constructor(kw, '2cycle'), kw)

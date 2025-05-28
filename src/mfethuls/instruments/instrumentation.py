@@ -1,8 +1,9 @@
 import os
 import re
-import pytz
 
-from datetime import datetime as dt
+from datetime import timedelta
+from dateutil.tz import gettz, UTC
+from dateutil.parser import parse
 import pandas as pd
 import nmrglue as ng
 
@@ -256,10 +257,14 @@ class UVinSitu(InstrumentParser):
     def get_data_df(self, path):
 
         def handle_tz(ts: str):
-            local_tz = pytz.timezone('Europe/Zurich')
-            tz_code = dt.now().astimezone(pytz.timezone('Europe/Zurich')).strftime("%Z") # Can be handled better !
-            timestamp_eu = local_tz.localize(dt.strptime(ts, f'%a %b %d %H:%M:%S {tz_code} %Y'))
-            return pd.to_datetime(timestamp_eu.astimezone(pytz.utc).isoformat())
+            tzinfos = {"CET": gettz("Europe/Zurich"), "CEST": gettz("Europe/Zurich")}
+            timestamp_eu = parse(ts, tzinfos=tzinfos)
+            return pd.to_datetime(timestamp_eu.astimezone(UTC).isoformat())
+
+        # Get milliseconds from timestamp in filename if data was saved with timestamp suffix
+        filenname_suffix = os.path.basename(path).split('_')[-1].rstrip('.txt')
+        milliseconds = timedelta(milliseconds=float(filenname_suffix.split('-')[-1])) if '-' in filenname_suffix \
+                        else timedelta(0)
 
         with open(path) as file:
             for line in file:
@@ -270,7 +275,7 @@ class UVinSitu(InstrumentParser):
             data_df = pd.read_csv(file, sep='\t', header=1)
 
         data_df.columns = ['wavelength (nm)', 'transmission']
-        data_df.loc[:, 'timestamp'] = handle_tz(timestamp)
+        data_df.loc[:, 'timestamp'] = handle_tz(timestamp) + milliseconds
 
         # cut data
         data_df = data_df[data_df['wavelength (nm)'].between(280, 900)]
