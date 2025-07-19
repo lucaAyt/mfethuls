@@ -16,7 +16,13 @@ class InstrumentParser(ABC):
     def get_data_df(self):
         pass
 
-    @ abstractmethod
+    @abstractmethod
     def clear(self):
         pass
 
+
+class InstrumentMethod(ABC):
+
+    @abstractmethod
+    def characterise_data(self, df: pd.DataFrame):
+        pass

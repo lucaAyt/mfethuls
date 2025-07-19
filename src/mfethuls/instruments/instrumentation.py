@@ -7,7 +7,7 @@ from dateutil.parser import parse
 import pandas as pd
 import nmrglue as ng
 
-from ..abstractions import InstrumentParser
+from ..abstractions import InstrumentParser, InstrumentMethod
 
 
 # Collection of instruments which perform a bunch of collective functions
@@ -102,41 +102,44 @@ class TGA(InstrumentParser):
         self.df = pd.DataFrame()
 
 
-class DSC(InstrumentParser):
+class DSC(InstrumentParser, InstrumentMethod):
 
     def __init__(self):
         super().__init__()
         self.df = pd.DataFrame()
 
-    def parse(self, path):
+    def parse(self, path, *args, **kwargs):
         if '.txt' in path[-4:]:
 
-            self.df = pd.concat([self.df, self.get_data_df(path)], axis=0).dropna(how='all', axis=1)
+            self.df = pd.concat([self.df, self.get_data_df(path, *args, **kwargs)], axis=0).dropna(how='all', axis=1)
 
         else:
             print(f'Not reading: {path}')
 
-    def get_data_df(self, path):
+    def get_data_df(self, path, char_start='\s+Index', char_end='Result', delim='\s+'):
+
+        pattern_start = re.compile(char_start)
+        pattern_end = re.compile(char_end)
+
         lines = []
         with open(path) as f:
-            take = 0
+            take = False
             for line in f.readlines():
 
-                if take == 1:
-                    curate_line = re.split('\s+', line.strip(), maxsplit=5)
+                if take:
+                    curate_line = re.split(delim, line.strip())
                     lines.append(curate_line)
 
-                if 'Index' in line:
-                    cols = re.split('\s+', line.strip(), maxsplit=5)
+                if pattern_start.match(line):
+                    cols = re.split(delim, line.strip())
                     take = 1
-                elif 'Results' in line:
+                elif pattern_end.match(line):
                     take = 0
 
-        df = pd.DataFrame(lines, columns=cols).apply(pd.to_numeric, errors='coerce').dropna() \
-            .drop(columns=['Index', 't', 'Ts'])
-        df['name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(".txt")}'] * len(df.Tr)
+        df = pd.DataFrame(lines, columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
+        df['name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(".txt")}'] * df.shape[0]
 
-        # TODO: Make more elegant >:
+        # TODO: Make more elegant >: AND PULL OUT of get_data_df !!!!!!
         # Cut heating, cooling and isothermal cycles - label accordingly
         df['cycle'] = ['Isothermal'] * len(df.Tr)
         df['differ'] = df.Tr.diff()
@@ -171,6 +174,44 @@ class DSC(InstrumentParser):
                     cooling_cycle_num += 1
 
         return df.drop(columns=['differ', 'differ_1'])
+
+    def characterise_data(self, temp_name: str = 'Tr [°C]', sensitivity: float = 0.01):
+
+        # TODO: Make more elegant >:
+        # Cut heating, cooling and isothermal cycles - label accordingly
+        self.df['cycle'] = ['Isothermal'] * len(self.df[temp_name])
+        self.df['differ'] = self.df[temp_name].diff()
+        self.df['differ_1'] = self.df.differ.diff()
+
+        self.df.loc[self.df.differ > 0, 'cycle'] = 'Heating'
+        self.df.loc[self.df.differ < 0, 'cycle'] = 'Cooling'
+        self.df.loc[(self.df.differ_1 < -sensitivity) & (self.df.cycle != 'Isothermal'), 'cycle'] = 'Cooling_start'
+        self.df.loc[(self.df.differ_1 < -sensitivity) & (self.df.cycle == 'Isothermal'), 'cycle'] = 'Heating_end'
+        self.df.loc[(self.df.differ_1 > sensitivity) & (self.df.cycle != 'Isothermal'), 'cycle'] = 'Heating_start'
+        self.df.loc[(self.df.differ_1 > sensitivity) & (self.df.cycle == 'Isothermal'), 'cycle'] = 'Cooling_end'
+
+        heating_cycle_num = 0
+        cooling_cycle_num = 0
+        for index, row in self.df.iterrows():
+            if row.differ > 0.0:
+                if 'Heating_end' not in row.cycle:
+                    self.df.loc[index, 'cycle'] = self.df.loc[index, 'cycle'] + f'_{str(heating_cycle_num)}'
+                else:
+                    heating_cycle_num += 1
+
+            elif row.differ < 0.0:
+                if 'Cooling_end' not in row.cycle:
+                    self.df.loc[index, 'cycle'] = self.df.loc[index, 'cycle'] + f'_{str(cooling_cycle_num)}'
+                else:
+                    cooling_cycle_num += 1
+
+            else:
+                if 'Heating_end' in row.cycle:
+                    heating_cycle_num += 1
+                elif 'Cooling_end' in row.cycle:
+                    cooling_cycle_num += 1
+
+        return self.df.drop(columns=['differ', 'differ_1'])
 
     def clear(self):
         self.df = pd.DataFrame()
@@ -264,7 +305,7 @@ class UVinSitu(InstrumentParser):
         # Get milliseconds from timestamp in filename if data was saved with timestamp suffix
         filenname_suffix = os.path.basename(path).split('_')[-1].rstrip('.txt')
         milliseconds = timedelta(milliseconds=float(filenname_suffix.split('-')[-1])) if '-' in filenname_suffix \
-                        else timedelta(0)
+            else timedelta(0)
 
         with open(path) as file:
             for line in file:

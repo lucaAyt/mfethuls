@@ -43,7 +43,7 @@ def check_parquet(files):
 
 
 # Construct dataframe from different instruments via walk through paths
-def get_data(dict_paths, instrmnt_kw):
+def get_data(dict_paths, instrmnt_kw, *args, **kwargs):
     instrmnt_kw_lwr = instrmnt_kw.lower()
     obj = None
 
@@ -71,7 +71,7 @@ def get_data(dict_paths, instrmnt_kw):
             elif instrmnt_kw_lwr == 'dsc':
                 if not obj:
                     obj = instrm.DSC()
-                obj.parse(path)
+                obj.parse(path, *args, **kwargs)
 
             elif instrmnt_kw_lwr == 'rheology':
                 if not obj:
