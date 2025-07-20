@@ -42,12 +42,16 @@ class DSCPriorParser:
                 if 'Index' in line:
                     cols = re.split('\s+', line.strip(), maxsplit=5)
                     take = 1
+
                 elif 'Results' in line:
                     take = 0
 
-        df = pd.DataFrame(lines, columns=cols).apply(pd.to_numeric, errors='coerce').dropna() \
-               .drop(columns=['Index', 't', 'Ts'])
-        df['name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * len(df.Tr)
+        # Make up columns by combining 1st and 2nd lines
+        cols_row_2 = [''] + lines[0]
+        cols = [' '.join([col1.strip(), col2.strip()]).strip() for col1, col2 in zip(cols, cols_row_2)]
+
+        df = pd.DataFrame(lines[1:], columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
+        df['name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
 
         return df
 
