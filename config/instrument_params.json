@@ -3,6 +3,7 @@
     "type": "dsc",
     "model": "prior",
     "name": "dsc",
+    "experiments": [],
     "characterizer": {
       "type": "dsc_profiling",
       "name_program_temperature": "Tr [°C]",
@@ -13,6 +14,7 @@
     "type": "dsc",
     "model": "perkin_elmer",
     "name": "dsc_perkin_elmer",
+    "experiments": [],
     "characterizer": {
       "type": "dsc_profiling",
       "name_program_temperature": "Program Temperature",

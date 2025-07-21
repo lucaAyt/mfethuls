@@ -3,9 +3,9 @@ from mfethuls.instruments.generic import GenericInstrument
 from mfethuls.characterizers.dsc import DSCProfiling
 
 
-def create_instrument(type_, name, model, characterizer=None):
+def create_instrument(type_, name, model, characterizer=None, data_root_path=None):
     parser = get_parser(type_, model)
-    return GenericInstrument(type_, name, model, parser, characterizer)
+    return GenericInstrument(type_, name, model, parser, characterizer, data_root_path)
 
 
 def create_characterizer(type_, config):
