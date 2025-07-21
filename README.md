@@ -2,9 +2,7 @@
 
 ## 🚀 About
 
-A package housing an array of python based tools or utilities for the lab.<br> 
-The focus is on creating a library of analytical instrumentation and 
-writing utilities for each.
+A scalable, extensible Python framework for parsing, characterizing, and handling data from laboratory instruments.
 
 ## 🔧 Install
 It is recommended to build from within a virtual environment:<br> 
