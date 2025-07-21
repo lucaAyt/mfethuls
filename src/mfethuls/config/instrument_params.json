@@ -1,0 +1,60 @@
+[
+  {
+    "type": "dsc",
+    "model": "prior",
+    "name": "dsc",
+    "experiments": [],
+    "characterizer": {
+      "type": "dsc_profiling",
+      "name_program_temperature": "Tr [°C]",
+      "sensitivity": 0.1
+    }
+  },
+  {
+    "type": "dsc",
+    "model": "perkin_elmer",
+    "name": "dsc_perkin_elmer",
+    "experiments": [],
+    "characterizer": {
+      "type": "dsc_profiling",
+      "name_program_temperature": "Program Temperature",
+      "sensitivity": 0.01
+    }
+  },
+  {
+    "type": "uv_vis",
+    "model": "flame",
+    "name": "uv_insitu",
+    "experiments": []
+  },
+  {
+    "type": "uv_vis",
+    "model": "Shimadzu",
+    "name": "uv_vis",
+    "experiments": []
+  },
+  {
+    "type": "rheometer",
+    "model": "anton_paar",
+    "name": "rheometer",
+    "experiments": []
+  },
+  {
+    "type": "tga",
+    "model": "tgaX",
+    "name": "tga",
+    "experiments": []
+  },
+  {
+    "type": "nmr",
+    "model": "bruker_nmr",
+    "name": "nmr",
+    "experiments": []
+  },
+  {
+    "type": "ftir",
+    "model": "bruker",
+    "name": "ftir",
+    "experiments": []
+  }
+]

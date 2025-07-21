@@ -1,7 +1,7 @@
 [project]
 name = "mfethuls"
-version = "0.0.5"
-description = "A suite of utility functions designed for the python people around labs"
+version = "0.0.6"
+description = "Composable framework for lab instrument data parsing, characterization and analysis for python people in labs."
 authors = [{name = "Luca Bertossi", email = "lucabertossi@gmail.com"}]
 readme = "README.md"
 license = "MIT"
@@ -21,7 +21,11 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 mfethuls = ["py.typed"]
+"mfethuls.config" = ["*.json"]
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[project.scripts]
+mfethuls = "mfethuls.main:main"
