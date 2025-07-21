@@ -48,7 +48,7 @@ def instrument_data_path_constructor(instrument_keyword, *args):
     dict_paths = {}
 
     # Folders/Files interested in for analysis
-    args = [*args]
+    args = args[0] if len(args) == 1 and isinstance(args[0], list) else [*args]
     if not args:
         print('No files to lookup given therefore look all files in root')
         dict_paths[os.environ.get(env_suffix)] = [os.path.join(path, f) for f in os.listdir(path) \

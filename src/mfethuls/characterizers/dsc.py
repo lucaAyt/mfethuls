@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 
 class DSCProfiling:
@@ -6,49 +7,64 @@ class DSCProfiling:
         self.name_program_temperature = name_program_temperature
         self.sensitivity = sensitivity
 
-    # TODO: Characterise Isothermal too
+    # Characterize vectorized
     def characterize(self, df: pd.DataFrame) -> pd.DataFrame:
-        def process_group(group):
-            group = group.copy()  # safe but can be memery intensive
+        def process_group(group: pd.DataFrame) -> pd.DataFrame:
+            group = group.copy(deep=False)
 
-            # Initialize profile
-            group['profile'] = 'Isothermal'
-            group['diff'] = group[self.name_program_temperature].diff()
-            group['diff2'] = group['diff'].diff()
+            temperature = group[self.name_program_temperature]
+            diff = temperature.diff()
+            diff2 = diff.diff()
 
-            # Label transitions
-            group.loc[group['diff'] > 0, 'profile'] = 'Heating'
-            group.loc[group['diff'] < 0, 'profile'] = 'Cooling'
-            group.loc[
-                (group['diff2'] < -self.sensitivity) & (group['profile'] != 'Isothermal'), 'profile'] = 'Cooling_start'
-            group.loc[
-                (group['diff2'] < -self.sensitivity) & (group['profile'] == 'Isothermal'), 'profile'] = 'Heating_end'
-            group.loc[
-                (group['diff2'] > self.sensitivity) & (group['profile'] != 'Isothermal'), 'profile'] = 'Heating_start'
-            group.loc[
-                (group['diff2'] > self.sensitivity) & (group['profile'] == 'Isothermal'), 'profile'] = 'Cooling_end'
+            profile = np.full(len(group), 'Isothermal', dtype=object)
 
-            # Add cycle numbering
-            heating_cycle = 0
-            cooling_cycle = 0
-            for idx, row in group.iterrows():
-                profile = row['profile']
-                if row['diff'] > 0:
-                    if 'Heating_end' not in profile:
-                        group.at[idx, 'profile'] += f'_{heating_cycle}'
-                    else:
-                        heating_cycle += 1
-                elif row['diff'] < 0:
-                    if 'Cooling_end' not in profile:
-                        group.at[idx, 'profile'] += f'_{cooling_cycle}'
-                    else:
-                        cooling_cycle += 1
-                else:
-                    if 'Heating_end' in profile:
-                        heating_cycle += 1
-                    elif 'Cooling_end' in profile:
-                        cooling_cycle += 1
+            # Assign base profile
+            profile[diff > 0] = 'Heating'
+            profile[diff < 0] = 'Cooling'
+            profile[(diff2 < -self.sensitivity) & (profile != 'Isothermal')] = 'Cooling_start'
+            profile[(diff2 < -self.sensitivity) & (profile == 'Isothermal')] = 'Heating_end'
+            profile[(diff2 > self.sensitivity) & (profile != 'Isothermal')] = 'Heating_start'
+            profile[(diff2 > self.sensitivity) & (profile == 'Isothermal')] = 'Cooling_end'
 
+            group = group.assign(diff=diff, diff2=diff2, profile=profile)
+            profile = profile.astype(str, copy=False)
+
+            # Identify segment ends
+            heating_ends = np.char.find(profile, 'Heating_end') != -1
+            cooling_ends = np.char.find(profile, 'Cooling_end') != -1
+
+            # Segment masks
+            heating_mask = np.char.startswith(profile, 'Heating')
+            cooling_mask = np.char.startswith(profile, 'Cooling')
+            isothermal_mask = profile == 'Isothermal'
+
+            # Vectorized cycle IDs via cumulative sum of ends
+            heating_ids = np.cumsum(heating_ends)
+            cooling_ids = np.cumsum(cooling_ends)
+
+            # For isothermal: define start of a new block as when previous label wasn’t Isothermal
+            prev_profile = np.insert(profile[:-1], 0, '')
+            isothermal_starts = isothermal_mask & (prev_profile != 'Isothermal')
+            isothermal_ids = np.cumsum(isothermal_starts) - 1
+
+            # Apply cycle numbers
+            profile[heating_mask & ~heating_ends] = [
+                f"{label}_{cycle}" for label, cycle in zip(
+                    profile[heating_mask & ~heating_ends],
+                    heating_ids[heating_mask & ~heating_ends])
+            ]
+
+            profile[cooling_mask & ~cooling_ends] = [
+                f"{label}_{cycle}" for label, cycle in zip(
+                    profile[cooling_mask & ~cooling_ends],
+                    cooling_ids[cooling_mask & ~cooling_ends])
+            ]
+
+            profile[isothermal_mask] = [
+                f"Isothermal_{cycle}" for cycle in isothermal_ids[isothermal_mask]
+            ]
+
+            group['profile'] = profile
             return group.drop(columns=['diff', 'diff2'])
 
         return df.groupby('name', group_keys=False).apply(process_group)
