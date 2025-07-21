@@ -67,4 +67,4 @@ class DSCProfiling:
             group['profile'] = profile
             return group.drop(columns=['diff', 'diff2'])
 
-        return df.groupby('name', group_keys=False).apply(process_group)
+        return df.groupby('name', group_keys=False).apply(process_group).reset_index(drop=True)
