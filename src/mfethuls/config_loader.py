@@ -4,16 +4,17 @@ import json
 from dotenv import load_dotenv
 from mfethuls.factory import create_instrument, create_characterizer
 
+# Load environment variables from .env
 load_dotenv()
 data_root_path = os.environ.get('PATH_TO_DATA')
 
+# Load config
+instrument_config_path = os.path.join(os.path.dirname(__file__), 'config', 'instrument_params.json')
+with open(instrument_config_path, encoding='utf8') as f:
+    config = json.load(f)
 
-# instrument_config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'instrument_params.json')
 
-
-def load_instruments_from_json(instrument_config_path, filters=None, experiments=None):
-    with open(instrument_config_path, encoding='utf8') as f:
-        config = json.load(f)
+def load_instruments_from_json(filters=None, experiments=None):
 
     instruments = {}
     dict_data_paths = {}
