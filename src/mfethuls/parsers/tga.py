@@ -3,7 +3,7 @@ import re
 
 import pandas as pd
 
-from mfethuls.parsers import register_parser
+from mfethuls.parsers.registry import register_parser
 
 
 @register_parser('tga', 'tgaX')
@@ -20,7 +20,7 @@ class TGAXParser:
             for path in paths:
 
                 if path.endswith(self.file_extension):
-                    df = pd.concat([df, self.parse_raw_data(path)], axis=1).dropna(how='all', axis=1)
+                    df = pd.concat([df, self.parse_raw_data(path)], axis=0)
 
                 elif path.endswith('.parquet'):
                     df = pd.concat([df, pd.read_parquet(path)], axis=0)
@@ -37,17 +37,21 @@ class TGAXParser:
             for line in f.readlines():
 
                 if take == 1:
-                    curate_line = re.split(self.delimiter, line.strip(), maxsplit=5)
+                    curate_line = re.split('\s+', line.strip(), maxsplit=5)
                     lines.append(curate_line)
 
                 if 'Index' in line:
-                    cols = re.split(self.delimiter, line.strip(), maxsplit=5)
+                    cols = re.split('\s+', line.strip(), maxsplit=5)
                     take = 1
 
                 elif 'Results' in line:
                     take = 0
 
-        return pd.DataFrame(lines, columns=cols).apply(pd.to_numeric, errors='coerce').dropna() \
-            .rename(columns={'Value': f'Value_{os.path.basename(os.path.normpath(path)).rstrip(".txt")}'}) \
-            .set_index('Tr') \
-            .drop(columns=['Index', 't', 'Ts'])
+        # Make up columns by combining 1st and 2nd lines
+        cols_row_2 = [''] + lines[0]
+        cols = [' '.join([col1.strip(), col2.strip()]).strip() for col1, col2 in zip(cols, cols_row_2)]
+
+        df = pd.DataFrame(lines[1:], columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
+        df['name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
+
+        return df

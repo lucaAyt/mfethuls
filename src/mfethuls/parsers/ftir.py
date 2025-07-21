@@ -19,7 +19,7 @@ class BrukerFTIRParser:
             for path in paths:
 
                 if path.endswith(self.file_extension):
-                    df = pd.concat([df, self.parse_raw_data(path)], axis=1).dropna(how='all', axis=1)
+                    df = pd.concat([df, self.parse_raw_data(path)], axis=0)
 
                 elif path.endswith('.parquet'):
                     df = pd.concat([df, pd.read_parquet(path)], axis=0)
@@ -30,7 +30,7 @@ class BrukerFTIRParser:
         return df
 
     def parse_raw_data(self, path):
-        return pd.read_csv(path, skiprows=lambda x: x in [0, 0], sep=self.delimiter) \
-                 .set_index('cm-1') \
-                 .rename(columns={'%T': os.path.basename(os.path.normpath(path)).split('_')[-1].rstrip(self.file_extension).lstrip('0')}) \
-                 .astype(float)
+        df = pd.read_csv(path, skiprows=lambda x: x in [0, 0], sep=self.delimiter).astype(float)
+        df.loc[:, 'name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
+
+        return df

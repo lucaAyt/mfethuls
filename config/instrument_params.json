@@ -20,5 +20,41 @@
       "name_program_temperature": "Program Temperature",
       "sensitivity": 0.01
     }
+  },
+  {
+    "type": "uv_vis",
+    "model": "flame",
+    "name": "uv_insitu",
+    "experiments": []
+  },
+  {
+    "type": "uv_vis",
+    "model": "Shimadzu",
+    "name": "uv_vis",
+    "experiments": []
+  },
+  {
+    "type": "rheometer",
+    "model": "anton_paar",
+    "name": "rheometer",
+    "experiments": []
+  },
+  {
+    "type": "tga",
+    "model": "tgaX",
+    "name": "tga",
+    "experiments": []
+  },
+  {
+    "type": "nmr",
+    "model": "bruker_nmr",
+    "name": "nmr",
+    "experiments": []
+  },
+  {
+    "type": "ftir",
+    "model": "bruker",
+    "name": "ftir",
+    "experiments": []
   }
 ]

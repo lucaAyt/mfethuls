@@ -3,7 +3,7 @@ import os
 import pandas as pd
 import nmrglue as ng
 
-from mfethuls.parsers import register_parser
+from mfethuls.parsers.registry import register_parser
 
 
 @register_parser('nmr', 'bruker_nmr')

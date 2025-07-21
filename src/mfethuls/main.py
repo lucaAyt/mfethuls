@@ -6,11 +6,11 @@ def main():
     # Load instrument
     # Example filter: only load specific instruments by name, type, or model
     filters = {
-        "name": ["dsc"],
+        "name": ["ftir"],
         # "type": ["dsc"],
         # "model": ["prior"]
     }
-    path = r'C:\\Users\\BertossL\\dev\\mfethuls\\config\\instrument_params.json'
+    path = r'C:\Users\BertossL\dev\mfethuls\config\instrument_params.json'
     dict_instr, dict_data_paths = load_instruments_from_json(path, filters=filters, experiments=None)
     print(f'Loaded Instruments:\n{dict_instr}')
     print(f'Data Paths:\n{dict_data_paths}\n')

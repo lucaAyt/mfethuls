@@ -2,7 +2,7 @@ import os
 
 import pandas as pd
 
-from mfethuls.parsers import register_parser
+from mfethuls.parsers.registry import register_parser
 
 
 @register_parser('rheometer', 'anton_paar')
@@ -42,6 +42,7 @@ class RheometerAntPaarParser:
         df.columns = df.columns.get_level_values(0) + [f' {col}' if 'Unnamed' not in col else '' for col in
                                                        df.columns.get_level_values(1)]
         df.loc[:, 'name'] = os.path.basename(os.path.normpath(path)).split('$')[0]
-        df.loc[:, 'test_type'] = os.path.basename(os.path.normpath(path)).split('$')[-1].rstrip(self.file_extension).strip('0')
+        df.loc[:, 'test_type'] = os.path.basename(os.path.normpath(path)).split('$')[-1].rstrip(
+            self.file_extension).strip('0')
 
         return df

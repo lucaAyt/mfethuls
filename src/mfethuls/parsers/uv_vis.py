@@ -6,7 +6,7 @@ from dateutil.parser import parse
 from datetime import timedelta
 from dateutil.tz import gettz, UTC
 
-from mfethuls.parsers import register_parser
+from mfethuls.parsers.registry import register_parser
 
 
 @register_parser('uv_vis', 'flame')
@@ -84,6 +84,7 @@ class ShimadzuUVVisParser:
         # Additional 'meta' data: You can use underscore for titration meta data. Delete post if not needed in output
         titrant_info = os.path.basename(os.path.normpath(path)).split('_')[-1].rstrip(self.file_extension).lstrip('0')
         df.loc[:, 'titrant'] = titrant_info if not titrant_info == '' else '0'  # I DNA
+        df.loc[:, 'name'] = [f'{os.path.basename(os.path.dirname(path))}'] * df.shape[0]
 
         return df
 
