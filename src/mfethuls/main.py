@@ -1,5 +1,5 @@
 import mfethuls.parsers
-from mfethuls.config_loader import load_instruments_from_json, instrument_data_path_constructor
+from mfethuls.config_loader import load_instruments_from_json
 
 
 def main():
@@ -11,20 +11,15 @@ def main():
         # "model": ["prior"]
     }
     path = r'C:\\Users\\BertossL\\dev\\mfethuls\\config\\instrument_params.json'
-    dsc = load_instruments_from_json(path, filters=filters).get('dsc')
-    print(f'Loaded Instrument:\n{dsc}')
+    dict_instr, dict_data_paths = load_instruments_from_json(path, filters=filters, experiments=None)
+    print(f'Loaded Instruments:\n{dict_instr}')
+    print(f'Data Paths:\n{dict_data_paths}\n')
 
     # Load paths to data for instrument and specific experiments
-    # experiment_names = ['gabs']
-    data_paths = instrument_data_path_constructor(dsc.type_)
-    print(data_paths)
-    df = dsc.parse_data(data_paths)
-
-    print(df)
-
-    # print("Loaded instruments:")
-    # for name, instr in instruments.items():
-    #     print(f"  {name}: {instr}")
+    dict_data_df = {}
+    for name, instr in dict_instr.items():
+        dict_data_df[name] = instr.parse_data(dict_data_paths[name])
+    print(dict_data_df)
 
 
 if __name__ == "__main__":
