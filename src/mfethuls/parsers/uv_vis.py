@@ -9,7 +9,7 @@ from dateutil.tz import gettz, UTC
 from mfethuls.parsers.registry import register_parser
 
 
-@register_parser('uv_vis', 'flame')
+@register_parser('inSitu_UV', 'flame')
 class FlameOceanOpticsParser:
     def __init__(self, file_extension='.txt'):
         self.file_extension = file_extension
@@ -30,7 +30,7 @@ class FlameOceanOpticsParser:
                 else:
                     print(f'Not reading: {path}')
 
-        return df
+        return df.reset_index(drop=True)
 
     def parse_raw_data(self, path):
         # Get milliseconds from timestamp in filename if data was saved with timestamp suffix
@@ -76,7 +76,7 @@ class ShimadzuUVVisParser:
                 else:
                     print(f'Not reading: {path}')
 
-        return df
+        return df.reset_index(drop=True)
 
     def parse_raw_data(self, path):
         df = pd.read_csv(path, header=1, sep='\t').astype(float)

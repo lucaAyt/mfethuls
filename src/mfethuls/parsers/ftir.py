@@ -27,7 +27,7 @@ class BrukerFTIRParser:
                 else:
                     print(f'Not reading: {path}')
 
-        return df
+        return df.reset_index(drop=True)
 
     def parse_raw_data(self, path):
         df = pd.read_csv(path, skiprows=lambda x: x in [0, 0], sep=self.delimiter).astype(float)

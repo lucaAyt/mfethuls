@@ -22,7 +22,7 @@
     }
   },
   {
-    "type": "uv_vis",
+    "type": "inSitu_UV",
     "model": "flame",
     "name": "uv_insitu",
     "experiments": []

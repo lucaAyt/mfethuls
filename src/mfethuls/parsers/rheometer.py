@@ -27,7 +27,7 @@ class RheometerAntPaarParser:
                 else:
                     print(f'Not reading: {path}')
 
-        return df
+        return df.reset_index(drop=True)
 
     def parse_raw_data(self, path):
         # Quite a shitty parse
