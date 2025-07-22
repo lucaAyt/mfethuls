@@ -10,6 +10,7 @@ from mfethuls.parsers.registry import register_parser
 
 
 @register_parser('inSitu_UV', 'flame')
+@register_parser('reflection', 'flame')
 class FlameOceanOpticsParser:
     def __init__(self, file_extension='.txt'):
         self.file_extension = file_extension
