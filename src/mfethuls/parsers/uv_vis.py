@@ -53,6 +53,9 @@ class FlameOceanOpticsParser:
         # cut data
         df = df[df['wavelength (nm)'].between(280, 900)]
 
+        # Add name of experiment
+        df.loc[:, 'name'] = [f'{os.path.basename(os.path.dirname(path))}'] * df.shape[0]
+
         return df
 
 
