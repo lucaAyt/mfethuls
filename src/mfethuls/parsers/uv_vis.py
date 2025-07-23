@@ -83,7 +83,7 @@ class ShimadzuUVVisParser:
         return df.reset_index(drop=True)
 
     def parse_raw_data(self, path):
-        df = pd.read_csv(path, header=1, sep='\t').astype(float)
+        df = pd.read_csv(path, header=1, sep='\t').apply(pd.to_numeric, errors='coerce')
 
         # Additional 'meta' data: You can use underscore for titration meta data. Delete post if not needed in output
         titrant_info = os.path.basename(os.path.normpath(path)).split('_')[-1].rstrip(self.file_extension).lstrip('0')
