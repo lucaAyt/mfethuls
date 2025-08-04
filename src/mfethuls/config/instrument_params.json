@@ -62,5 +62,11 @@
     "model": "agilent",
     "name": "sec",
     "experiments": []
+  },
+  {
+    "type": "dma",
+    "model": "ta_q800",
+    "name": "dma",
+    "experiments": []
   }
 ]
