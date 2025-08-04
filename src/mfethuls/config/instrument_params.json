@@ -56,5 +56,11 @@
     "model": "bruker",
     "name": "ftir",
     "experiments": []
+  },
+  {
+    "type": "sec",
+    "model": "agilent",
+    "name": "sec",
+    "experiments": []
   }
 ]
