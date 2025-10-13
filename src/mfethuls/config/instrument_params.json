@@ -22,6 +22,17 @@
     }
   },
   {
+    "type": "dsc",
+    "model": "mettler_toledo",
+    "name": "dsc_mettler_toledo",
+    "experiments": [],
+    "characterizer": {
+      "type": "dsc_profiling",
+      "name_program_temperature": "Tr [°C]",
+      "sensitivity": 0.1
+    }
+  },
+  {
     "type": "inSitu_UV",
     "model": "flame",
     "name": "uv_insitu",
