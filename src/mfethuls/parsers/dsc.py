@@ -74,6 +74,9 @@ class DSCPerkinElmerParser:
                 if path.endswith(self.file_extension):
                     df = pd.concat([df, self.parse_raw_data(path)], axis=0)
 
+                elif path.endswith('.csv'):
+                    df = pd.concat([df, self.parse_raw_data(path)], axis=0)
+
                 elif path.endswith('.parquet'):
                     df = pd.concat([df, pd.read_parquet(path)], axis=0)
 
@@ -84,31 +87,38 @@ class DSCPerkinElmerParser:
 
     def parse_raw_data(self, path):
 
-        pattern_start = re.compile(self.parse_char_start)
-        pattern_end = re.compile(self.parse_char_end)
+        if not path.endswith('.csv'):
 
-        lines = []
-        with open(path) as f:
-            take = False
-            for line in f.readlines():
+            pattern_start = re.compile(self.parse_char_start)
+            pattern_end = re.compile(self.parse_char_end)
 
-                if take:
-                    l = re.split(self.delimiter, line.strip())
-                    lines.append(l)
+            lines = []
+            with open(path) as f:
+                take = False
+                for line in f.readlines():
 
-                if pattern_start.match(line):
-                    cols = re.split(self.delimiter, line.strip())
-                    take = True
+                    if take:
+                        l = re.split(self.delimiter, line.strip())
+                        lines.append(l)
 
-                elif pattern_end.match(line):
-                    take = False
+                    if pattern_start.match(line):
+                        cols = re.split(self.delimiter, line.strip())
+                        take = True
 
-        # Make up columns by combining 1st and 2nd lines
-        cols_row_2 = [''] + lines[0]
-        cols = [' '.join([col1.strip(), col2.strip()]).strip() for col1, col2 in zip(cols, cols_row_2)]
+                    elif pattern_end.match(line):
+                        take = False
 
-        df = pd.DataFrame(lines[1:], columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
-        df.loc[:, 'name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
+            # Make up columns by combining 1st and 2nd lines
+            cols_row_2 = [''] + lines[0]
+            cols = [' '.join([col1.strip(), col2.strip()]).strip() for col1, col2 in zip(cols, cols_row_2)]
+
+            df = pd.DataFrame(lines[1:], columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
+            df.loc[:, 'name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
+
+        else:
+
+            filename = f'{os.path.basename(os.path.normpath(path)).rstrip(".csv")}'
+            df = pd.read_csv(path).assign(name=filename)
 
         return df
 
