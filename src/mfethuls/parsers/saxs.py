@@ -30,7 +30,7 @@ class AntonPaarSAXS:
         return df.reset_index(drop=True)
 
     def parse_raw_data(self, path):
-        df = pd.read_csv(path, sep=self.delimiter).dropna(how='all', axis=0) \
+        df = pd.read_csv(path, sep=self.delimiter).dropna(how='any', axis=0) \
                .apply(pd.to_numeric, errors='coerce')
         name = f'{os.path.basename(os.path.dirname(os.path.normpath(path))).casefold()}'
         df.loc[:, 'name'] = [name] * df.shape[0]
