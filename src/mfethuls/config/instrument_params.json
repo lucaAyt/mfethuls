@@ -79,5 +79,11 @@
     "model": "ta_q800",
     "name": "dma",
     "experiments": []
+  },
+  {
+    "type": "saxs",
+    "model": "anton_paar",
+    "name": "saxs",
+    "experiments": []
   }
 ]
