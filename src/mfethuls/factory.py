@@ -5,6 +5,9 @@ from dotenv import load_dotenv
 from mfethuls.parsers import get_parser
 from mfethuls.instruments.generic import GenericInstrument
 from mfethuls.characterizers.dsc import DSCProfiling
+from mfethuls.dataset import Dataset
+from mfethuls.experiments import Experiment
+from mfethuls.ids import validate_experiment_id, validate_sample_id, validate_run_id
 
 # Load environment variables from .env
 load_dotenv()
@@ -58,3 +61,42 @@ def create_instrument(type_, name, model, characterizer=None, data_root_path=Non
 def create_characterizer(type_, config):
     if type_ == 'dsc' and config.get('type') == 'dsc_profiling':
         return DSCProfiling(config.get('name_program_temperature', 'Tr [°C]'), config.get('sensitivity', 0.1))
+
+
+def parse_experiment(
+    experiment: Experiment,
+    dict_data_paths,
+    instrument,
+):
+    """High-level helper to parse data for a given Experiment.
+
+    This function is an initial glue layer between the new Experiment / Dataset
+    abstractions and the existing instrument + parser machinery. It does not
+    alter existing code paths but provides a single-place entry point for the
+    new flow.
+    """
+
+    parser = instrument.parser if hasattr(instrument, "parser") else get_parser(instrument.type_, instrument.model)
+
+    experiment_id = validate_experiment_id(experiment.experiment_id)
+    sample_id = validate_sample_id(experiment.sample_id)
+    run_id = validate_run_id(experiment.run_id)
+
+    # For now we expect the parser to still return a DataFrame. We wrap it in
+    # a Dataset here without changing existing parser implementations. Later
+    # we can migrate parsers to construct Dataset directly.
+    parsed = parser.parse(dict_data_paths)
+
+    metadata = {
+        "schema_version": "1.0",
+        "experiment_id": experiment_id,
+        "sample_id": sample_id,
+        "run_id": run_id,
+        "instrument_type": instrument.type_,
+        "instrument_model": instrument.model,
+        "instrument_name": instrument.name,
+        "experiment_name": experiment.name,
+    }
+    metadata.update(experiment.metadata)
+
+    return Dataset(data=parsed, metadata=metadata)
