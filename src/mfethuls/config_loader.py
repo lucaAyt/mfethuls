@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 
 from collections import namedtuple
 
@@ -11,6 +12,13 @@ from mfethuls.factory import (
     parse_experiment as _parse_experiment,
 )
 from mfethuls.experiments import get_experiment
+from mfethuls.storage import (
+    dataset_in_storage,
+    load_dataset_from_storage,
+    save_dataset_to_storage,
+)
+
+logger = logging.getLogger(__name__)
 
 # Load config
 instrument_config_path = os.path.join(os.path.dirname(__file__), 'config', 'instrument_params.json')
@@ -53,7 +61,7 @@ def filter_entries(filters):
     ]
 
 
-def load_experiment_dataset(experiment_name):
+def load_experiment_dataset(experiment_name, use_storage: bool = True, refresh: bool = False):
     """Load and parse data for a given experiment name into a Dataset.
 
     This is a high-level helper that ties together the Experiment registry,
@@ -63,6 +71,22 @@ def load_experiment_dataset(experiment_name):
     """
 
     exp = get_experiment(experiment_name)
+
+    # Allow a global switch to disable storage via environment for debugging.
+    disable_storage_env = os.environ.get("MFETHULS_DISABLE_STORAGE", "").lower()
+    effective_use_storage = use_storage and disable_storage_env not in {"1", "true", "yes"}
+
+    # If requested, try to serve from local storage cache first.
+    if effective_use_storage and not refresh:
+        try:
+            if dataset_in_storage(exp):
+                if os.environ.get("MFETHULS_STORAGE_DEBUG"):
+                    logger.info("Loading Dataset for experiment %s from local storage cache", experiment_name)
+                return load_dataset_from_storage(exp)
+        except Exception:  # noqa: BLE001
+            # Best-effort cache: fall back to parsing on any storage issue.
+            if os.environ.get("MFETHULS_STORAGE_DEBUG"):
+                logger.exception("Falling back to fresh parse for experiment %s due to storage error", experiment_name)
 
     # Restrict to the instrument associated with this experiment.
     filters = {"name": [exp.instrument_name]}
@@ -78,4 +102,17 @@ def load_experiment_dataset(experiment_name):
         ) from exc
 
     # Delegate parsing + Dataset construction to the factory helper.
-    return _parse_experiment(exp, dict_data_paths, instrument)
+    dataset = _parse_experiment(exp, dict_data_paths, instrument)
+
+    # Persist to local storage for future fast loading, but never fail the
+    # call if persistence itself has issues.
+    if effective_use_storage:
+        try:
+            save_dataset_to_storage(exp, dataset)
+            if os.environ.get("MFETHULS_STORAGE_DEBUG"):
+                logger.info("Saved Dataset for experiment %s to local storage", experiment_name)
+        except Exception:  # noqa: BLE001
+            if os.environ.get("MFETHULS_STORAGE_DEBUG"):
+                logger.exception("Failed to save Dataset for experiment %s to local storage", experiment_name)
+
+    return dataset

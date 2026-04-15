@@ -3,11 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
+import logging
 import os
 
 import pandas as pd
 
 from .ids import validate_experiment_id, validate_run_id, validate_sample_id
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -35,6 +39,19 @@ class Experiment:
 # Minimal in-memory registry placeholder.
 # In the future this can be backed by JSON/CSV or a database.
 _EXPERIMENT_REGISTRY: Dict[str, Experiment] = {}
+
+
+def _normalize_optional_str(value: Any) -> Optional[str]:
+    """Normalize optional text fields coming from pandas records.
+
+    Treats NaN / empty strings as ``None`` and returns a stripped string
+    otherwise.
+    """
+
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def register_experiment(exp: Experiment) -> None:
@@ -100,10 +117,30 @@ def load_experiment_registry(path: str) -> pd.DataFrame:
     for rec in records:
         name = rec.get("name")
         experiment_id = rec.get("experiment_id")
-        instrument_name = rec.get("instrument_name")
 
-        sample_id = rec.get("sample_id")
-        run_id = rec.get("run_id") or "R001"
+        # Normalise optional identifiers so that empty cells / NaN from
+        # Excel/CSV are treated as missing.
+        sample_id = _normalize_optional_str(rec.get("sample_id"))
+
+        raw_run_id = _normalize_optional_str(rec.get("run_id"))
+        run_id = raw_run_id or "R001"
+
+        # Instrument name is required *per experiment* for analysis. Allow the
+        # column to exist but individual rows may be empty/NaN to represent an
+        # experiment that has not (yet) been analysed on an instrument.
+        instrument_name = _normalize_optional_str(rec.get("instrument_name"))
+
+        if instrument_name is None:
+            # Do not register this experiment for analysis; it cannot be
+            # resolved by load_experiment_dataset. Emit a warning so users
+            # understand why it is skipped.
+            logger.warning(
+                "Skipping experiment %r (id %r): no instrument_name provided in registry; "
+                "experiment cannot be analysed.",
+                name,
+                experiment_id,
+            )
+            continue
 
         # Everything else becomes metadata.
         metadata: Dict[str, Any] = {}
@@ -116,8 +153,8 @@ def load_experiment_registry(path: str) -> pd.DataFrame:
             name=name,
             experiment_id=str(experiment_id),
             instrument_name=str(instrument_name),
-            sample_id=str(sample_id) if sample_id is not None else None,
-            run_id=str(run_id) if run_id is not None else None,
+            sample_id=sample_id,
+            run_id=run_id,
             metadata=metadata,
         )
         register_experiment(exp)

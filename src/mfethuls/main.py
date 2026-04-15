@@ -1,4 +1,5 @@
 import os
+import logging
 
 import mfethuls.parsers
 from mfethuls.config_loader import prepare_instruments, load_experiment_dataset
@@ -12,7 +13,13 @@ def main():
     than performing any heavy analysis. It can be adapted or removed later
     once a more formal CLI is in place.
     """
-
+    # Logging config
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s:%(name)s:%(message)s",
+    )
+    
+    
     # Example: load the template registry shipped with the package.
     registry_path = os.environ.get('PATH_TO_REGISTRY')
 

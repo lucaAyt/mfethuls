@@ -6,6 +6,11 @@ import pandas as pd
 from mfethuls.dataset import Dataset
 from mfethuls.experiments import load_experiment_registry
 from mfethuls.config_loader import load_experiment_dataset
+from mfethuls.storage import (
+    dataset_in_storage,
+    load_dataset_from_storage,
+    save_dataset_to_storage,
+)
 
 
 def _write_registry(tmpdir: str) -> str:
@@ -167,3 +172,41 @@ def test_load_experiment_dataset_returns_dataset_even_when_missing_files():
             else:
                 assert isinstance(ds, Dataset)
                 assert ds.experiment_id == expected_experiment_id
+
+
+def test_dataset_storage_roundtrip_uses_temp_folder(monkeypatch):
+    """Basic roundtrip test for the local Dataset storage helper.
+
+    This test does not depend on any real instrument data. It verifies that
+    a Dataset can be saved to and loaded from the configured storage
+    location, and that the storage paths live under the expected root.
+    """
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Ensure storage writes into our temporary directory.
+        monkeypatch.setenv("PATH_TO_LOCAL_STORAGE", tmpdir)
+
+        from mfethuls.experiments import Experiment
+
+        exp = Experiment(
+            name="test_exp_storage",
+            experiment_id="EXP999",
+            instrument_name="dummy_instrument",
+            sample_id="S001",
+            run_id="R001",
+        )
+
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        ds = Dataset(data=df, metadata={"key": "value"})
+
+        parquet_path, meta_path = save_dataset_to_storage(exp, ds)
+
+        assert os.path.commonpath([tmpdir, parquet_path]) == os.path.abspath(tmpdir)
+        assert os.path.exists(parquet_path)
+        assert os.path.exists(meta_path)
+        assert dataset_in_storage(exp)
+
+        loaded = load_dataset_from_storage(exp)
+        assert isinstance(loaded, Dataset)
+        assert loaded.data.equals(df)
+        assert loaded.metadata.get("key") == "value"
