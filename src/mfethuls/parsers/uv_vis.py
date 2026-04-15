@@ -1,11 +1,12 @@
 import os
+from datetime import timedelta
+from typing import Any, Dict, Optional
 
 import pandas as pd
-
 from dateutil.parser import parse
-from datetime import timedelta
 from dateutil.tz import gettz, UTC
 
+from mfethuls.dataset import Dataset
 from mfethuls.parsers.registry import register_parser
 
 
@@ -15,8 +16,25 @@ class FlameOceanOpticsParser:
     def __init__(self, file_extension='.txt'):
         self.file_extension = file_extension
 
-    def parse(self, dict_paths):
-        # Store data here
+    def parse(
+        self,
+        dict_paths,
+        *,
+        experiment_id: Optional[str] = None,
+        sample_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        instrument_type: Optional[str] = None,
+        instrument_model: Optional[str] = None,
+        instrument_name: Optional[str] = None,
+        experiment_name: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """Parse in-situ UV or reflection data from Ocean Optics Flame.
+
+        Returns a Dataset when experiment context is provided, otherwise a
+        plain DataFrame for backward compatibility.
+        """
+
         df = pd.DataFrame()
 
         for name, paths in dict_paths.items():
@@ -31,7 +49,32 @@ class FlameOceanOpticsParser:
                 else:
                     print(f'Not reading: {path}')
 
-        return df.reset_index(drop=True)
+        df = df.reset_index(drop=True)
+
+        if experiment_id is None:
+            return df
+
+        if "experiment_id" not in df.columns:
+            df["experiment_id"] = experiment_id
+        if sample_id is not None and "sample_id" not in df.columns:
+            df["sample_id"] = sample_id
+        if run_id is not None and "run_id" not in df.columns:
+            df["run_id"] = run_id
+
+        meta: Dict[str, Any] = {
+            "schema_version": "1.0",
+            "experiment_id": experiment_id,
+            "sample_id": sample_id,
+            "run_id": run_id,
+            "instrument_type": instrument_type,
+            "instrument_model": instrument_model,
+            "instrument_name": instrument_name,
+            "experiment_name": experiment_name,
+        }
+        if metadata:
+            meta.update(metadata)
+
+        return Dataset(data=df, metadata=meta)
 
     def parse_raw_data(self, path):
         # Get milliseconds from timestamp in filename if data was saved with timestamp suffix
@@ -64,8 +107,25 @@ class ShimadzuUVVisParser:
     def __init__(self, file_extension='.txt'):
         self.file_extension = file_extension
 
-    def parse(self, dict_paths):
-        # Store data here
+    def parse(
+        self,
+        dict_paths,
+        *,
+        experiment_id: Optional[str] = None,
+        sample_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        instrument_type: Optional[str] = None,
+        instrument_model: Optional[str] = None,
+        instrument_name: Optional[str] = None,
+        experiment_name: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """Parse Shimadzu UV-Vis data.
+
+        Returns a Dataset when experiment context is provided, otherwise a
+        plain DataFrame for backward compatibility.
+        """
+
         df = pd.DataFrame()
 
         for name, paths in dict_paths.items():
@@ -80,7 +140,32 @@ class ShimadzuUVVisParser:
                 else:
                     print(f'Not reading: {path}')
 
-        return df.reset_index(drop=True)
+        df = df.reset_index(drop=True)
+
+        if experiment_id is None:
+            return df
+
+        if "experiment_id" not in df.columns:
+            df["experiment_id"] = experiment_id
+        if sample_id is not None and "sample_id" not in df.columns:
+            df["sample_id"] = sample_id
+        if run_id is not None and "run_id" not in df.columns:
+            df["run_id"] = run_id
+
+        meta: Dict[str, Any] = {
+            "schema_version": "1.0",
+            "experiment_id": experiment_id,
+            "sample_id": sample_id,
+            "run_id": run_id,
+            "instrument_type": instrument_type,
+            "instrument_model": instrument_model,
+            "instrument_name": instrument_name,
+            "experiment_name": experiment_name,
+        }
+        if metadata:
+            meta.update(metadata)
+
+        return Dataset(data=df, metadata=meta)
 
     def parse_raw_data(self, path):
         df = pd.read_csv(path, header=1, sep='\t').apply(pd.to_numeric, errors='coerce')

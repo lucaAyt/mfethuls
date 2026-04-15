@@ -76,17 +76,31 @@ def parse_experiment(
     new flow.
     """
 
-    parser = instrument.parser if hasattr(instrument, "parser") else get_parser(instrument.type_, instrument.model)
-
     experiment_id = validate_experiment_id(experiment.experiment_id)
     sample_id = validate_sample_id(experiment.sample_id)
     run_id = validate_run_id(experiment.run_id)
 
-    # For now we expect the parser to still return a DataFrame. We wrap it in
-    # a Dataset here without changing existing parser implementations. Later
-    # we can migrate parsers to construct Dataset directly.
-    parsed = parser.parse(dict_data_paths)
+    parser = instrument.parser if hasattr(instrument, "parser") else get_parser(instrument.type_, instrument.model)
 
+    # Prefer parsers that understand experiment context and can return a
+    # Dataset directly. Fallback to the old behaviour (DataFrame + wrapper)
+    # when they don't.
+    parsed = parser.parse(
+        dict_data_paths,
+        experiment_id=experiment_id,
+        sample_id=sample_id,
+        run_id=run_id,
+        instrument_type=instrument.type_,
+        instrument_model=instrument.model,
+        instrument_name=instrument.name,
+        experiment_name=experiment.name,
+        metadata=experiment.metadata,
+    )
+
+    if isinstance(parsed, Dataset):
+        return parsed
+
+    # Backwards-compatible wrapper for parsers that still return DataFrames.
     metadata = {
         "schema_version": "1.0",
         "experiment_id": experiment_id,

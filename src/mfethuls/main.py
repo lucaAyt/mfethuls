@@ -1,28 +1,45 @@
+import os
+
 import mfethuls.parsers
-from mfethuls.config_loader import prepare_instruments
+from mfethuls.config_loader import prepare_instruments, load_experiment_dataset
+from mfethuls.experiments import load_experiment_registry
 
 
 def main():
+    """Small demo for manual testing of the experiment/Dataset flow.
 
-    # Example filter: only load specific instruments by name, type, or model
-    filters = {
-        "name": ["rheometer"],
-        # "type": ["dsc"],
-        # "model": ["prior"]
-    }
+    This function is intentionally simple and prints shapes / metadata rather
+    than performing any heavy analysis. It can be adapted or removed later
+    once a more formal CLI is in place.
+    """
 
-    # Load instruments and data paths for each
-    bundle = prepare_instruments(filters=filters, experiments='CL_uv')
+    # Example: load the template registry shipped with the package.
+    registry_path = os.environ.get('PATH_TO_REGISTRY')
 
-    for name, instr in bundle.instruments.items():
-        print(f"{name}: {instr}")
-        print("Data paths:", bundle.data_paths[name])
+    print(f"Loading experiment registry from: {registry_path}")
+    df_registry = load_experiment_registry(registry_path)
+    print("Registered experiments:\n", df_registry[["name", "experiment_id", "instrument_name"]])
 
-    # Load data for instrument and specific experiments
-    dict_data_df = {}
-    for name, instr in bundle.instruments.items():
-        dict_data_df[name] = instr.parse_data(bundle.data_paths[name])
-    print(dict_data_df)
+    # Choose experiments to analyse; here we filter by status when available.
+    if "status" in df_registry.columns:
+        selected = df_registry[df_registry["status"] == "to_analyse"]["name"].tolist()
+    else:
+        selected = df_registry["name"].tolist()
+
+    print("Selected experiments:", selected)
+
+    for name in selected:
+        print(f"\nLoading dataset for experiment: {name}")
+        try:
+            ds = load_experiment_dataset(name)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  Failed to load dataset: {exc!r}")
+            continue
+
+        print(f"  Dataset type: {type(ds).__name__}")
+        print(f"  experiment_id: {ds.experiment_id}")
+        print(f"  data shape: {ds.data.shape}")
+        print(f"  metadata keys: {sorted(ds.metadata.keys())}")
 
 
 if __name__ == "__main__":

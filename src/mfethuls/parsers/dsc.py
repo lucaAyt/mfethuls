@@ -1,8 +1,10 @@
 import os
 import re
+from typing import Any, Dict, Optional
 
 import pandas as pd
 
+from mfethuls.dataset import Dataset
 from mfethuls.parsers.registry import register_parser
 
 
@@ -11,8 +13,26 @@ class DSCPriorParser:
     def __init__(self, file_extension='.txt'):
         self.file_extension = file_extension
 
-    def parse(self, dict_paths):
-        # Store data here
+    def parse(
+        self,
+        dict_paths,
+        *,
+        experiment_id: Optional[str] = None,
+        sample_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        instrument_type: Optional[str] = None,
+        instrument_model: Optional[str] = None,
+        instrument_name: Optional[str] = None,
+        experiment_name: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """Parse raw DSC data.
+
+        When experiment context (experiment_id, etc.) is provided, this returns
+        a Dataset; otherwise it returns a plain DataFrame for backward
+        compatibility.
+        """
+
         df = pd.DataFrame()
 
         for name, paths in dict_paths.items():
@@ -27,7 +47,33 @@ class DSCPriorParser:
                 else:
                     print(f'Not reading: {path}')
 
-        return df.reset_index(drop=True)
+        df = df.reset_index(drop=True)
+
+        if experiment_id is None:
+            # Old behaviour: just return the DataFrame.
+            return df
+
+        # New behaviour: wrap into a Dataset with provided metadata and id columns.
+        if "experiment_id" not in df.columns:
+            df["experiment_id"] = experiment_id
+        if sample_id is not None and "sample_id" not in df.columns:
+            df["sample_id"] = sample_id
+        if run_id is not None and "run_id" not in df.columns:
+            df["run_id"] = run_id
+        meta: Dict[str, Any] = {
+            "schema_version": "1.0",
+            "experiment_id": experiment_id,
+            "sample_id": sample_id,
+            "run_id": run_id,
+            "instrument_type": instrument_type,
+            "instrument_model": instrument_model,
+            "instrument_name": instrument_name,
+            "experiment_name": experiment_name,
+        }
+        if metadata:
+            meta.update(metadata)
+
+        return Dataset(data=df, metadata=meta)
 
     def parse_raw_data(self, path):
         lines = []
@@ -53,6 +99,10 @@ class DSCPriorParser:
         df = pd.DataFrame(lines[1:], columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
         df.loc[:, 'name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
 
+    # TODO: map instrument-specific column names to a standard DSC schema
+    # (e.g. temperature_C, heat_flow_mW) once lab/company-specific
+    # conventions are agreed.
+
         return df
 
 
@@ -64,8 +114,25 @@ class DSCPerkinElmerParser:
         self.parse_char_end = parse_char_end
         self.delimiter = delimiter
 
-    def parse(self, dict_paths):
-        # Store data here
+    def parse(
+        self,
+        dict_paths,
+        *,
+        experiment_id: Optional[str] = None,
+        sample_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        instrument_type: Optional[str] = None,
+        instrument_model: Optional[str] = None,
+        instrument_name: Optional[str] = None,
+        experiment_name: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """Parse raw Perkin Elmer DSC data.
+
+        Returns a Dataset when experiment context is provided, otherwise a
+        plain DataFrame for backward compatibility.
+        """
+
         df = pd.DataFrame()
 
         for name, paths in dict_paths.items():
@@ -83,7 +150,32 @@ class DSCPerkinElmerParser:
                 else:
                     print(f'Not reading: {path}')
 
-        return df.reset_index(drop=True)
+        df = df.reset_index(drop=True)
+
+        if experiment_id is None:
+            return df
+
+        if "experiment_id" not in df.columns:
+            df["experiment_id"] = experiment_id
+        if sample_id is not None and "sample_id" not in df.columns:
+            df["sample_id"] = sample_id
+        if run_id is not None and "run_id" not in df.columns:
+            df["run_id"] = run_id
+
+        meta: Dict[str, Any] = {
+            "schema_version": "1.0",
+            "experiment_id": experiment_id,
+            "sample_id": sample_id,
+            "run_id": run_id,
+            "instrument_type": instrument_type,
+            "instrument_model": instrument_model,
+            "instrument_name": instrument_name,
+            "experiment_name": experiment_name,
+        }
+        if metadata:
+            meta.update(metadata)
+
+        return Dataset(data=df, metadata=meta)
 
     def parse_raw_data(self, path):
 
@@ -115,6 +207,10 @@ class DSCPerkinElmerParser:
             df = pd.DataFrame(lines[1:], columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
             df.loc[:, 'name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
 
+            # TODO: map instrument-specific column names to a standard DSC
+            # schema (e.g. temperature_C, heat_flow_mW) once conventions are
+            # defined for this setup.
+
         else:
 
             filename = f'{os.path.basename(os.path.normpath(path)).rstrip(".csv")}'
@@ -131,8 +227,25 @@ class DSCMettlerToledoParser:
         self.parse_char_end = parse_char_end
         self.delimiter = delimiter
 
-    def parse(self, dict_paths):
-        # Store data here
+    def parse(
+        self,
+        dict_paths,
+        *,
+        experiment_id: Optional[str] = None,
+        sample_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        instrument_type: Optional[str] = None,
+        instrument_model: Optional[str] = None,
+        instrument_name: Optional[str] = None,
+        experiment_name: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """Parse raw Mettler Toledo DSC data.
+
+        Returns a Dataset when experiment context is provided, otherwise a
+        plain DataFrame for backward compatibility.
+        """
+
         df = pd.DataFrame()
 
         for name, paths in dict_paths.items():
@@ -147,7 +260,32 @@ class DSCMettlerToledoParser:
                 else:
                     print(f'Not reading: {path}')
 
-        return df.reset_index(drop=True)
+        df = df.reset_index(drop=True)
+
+        if experiment_id is None:
+            return df
+
+        if "experiment_id" not in df.columns:
+            df["experiment_id"] = experiment_id
+        if sample_id is not None and "sample_id" not in df.columns:
+            df["sample_id"] = sample_id
+        if run_id is not None and "run_id" not in df.columns:
+            df["run_id"] = run_id
+
+        meta: Dict[str, Any] = {
+            "schema_version": "1.0",
+            "experiment_id": experiment_id,
+            "sample_id": sample_id,
+            "run_id": run_id,
+            "instrument_type": instrument_type,
+            "instrument_model": instrument_model,
+            "instrument_name": instrument_name,
+            "experiment_name": experiment_name,
+        }
+        if metadata:
+            meta.update(metadata)
+
+        return Dataset(data=df, metadata=meta)
 
     def parse_raw_data(self, path):
 
@@ -175,5 +313,9 @@ class DSCMettlerToledoParser:
 
         df = pd.DataFrame(lines[1:], columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
         df.loc[:, 'name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
+
+        # TODO: map instrument-specific column names to a standard DSC schema
+        # (e.g. temperature_C, heat_flow_mW) once lab/company-specific
+        # naming conventions are set.
 
         return df
