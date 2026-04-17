@@ -85,8 +85,7 @@ def parse_experiment(
     # Prefer parsers that understand experiment context and can return a
     # Dataset directly. Fallback to the old behaviour (DataFrame + wrapper)
     # when they don't.
-    parsed = parser.parse(
-        dict_data_paths,
+    parse_kwargs = dict(
         experiment_id=experiment_id,
         sample_id=sample_id,
         run_id=run_id,
@@ -96,6 +95,10 @@ def parse_experiment(
         experiment_name=experiment.name,
         metadata=experiment.metadata,
     )
+    if instrument.type_ in {"rheometer", "dma"}:
+        parse_kwargs["measurement_profile"] = experiment.metadata.get("measurement_profile")
+
+    parsed = parser.parse(dict_data_paths, **parse_kwargs)
 
     if isinstance(parsed, Dataset):
         return parsed

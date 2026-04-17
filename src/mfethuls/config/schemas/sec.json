@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "required_columns": [
+    "retention_time_min",
+    "detector_response_a_u"
+  ],
+  "dtypes": {
+    "retention_time_min": "float64",
+    "detector_response_a_u": "float64"
+  },
+  "models": {
+    "agilent": {
+      "aliases": {
+        "retention_time_min": [
+          "time (min)",
+          "Time (min)",
+          "Retention Time [min]"
+        ],
+        "detector_response_a_u": [
+          "value",
+          "Value",
+          "Detector Response",
+          "Signal"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "required_columns": [
+    "mz",
+    "intensity_a_u"
+  ],
+  "dtypes": {
+    "mz": "float64",
+    "intensity_a_u": "float64"
+  },
+  "models": {
+    "bruker": {
+      "aliases": {
+        "mz": [
+          "m/z",
+          "mz",
+          "Mass/Charge"
+        ],
+        "intensity_a_u": [
+          "intensity",
+          "Intensity",
+          "signal"
+        ]
+      }
+    }
+  }
+}

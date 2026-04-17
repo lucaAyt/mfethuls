@@ -5,6 +5,7 @@ import pandas as pd
 
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.registry import register_parser
+from mfethuls.schema_normalization import apply_dataframe_schema
 
 
 @register_parser('saxs', 'anton_paar')
@@ -51,6 +52,12 @@ class AntonPaarSAXS:
         if experiment_id is None:
             return df
 
+        df, schema_report = apply_dataframe_schema(
+            df,
+            instrument_type="saxs",
+            instrument_model=instrument_model or "anton_paar",
+        )
+
         if "experiment_id" not in df.columns:
             df["experiment_id"] = experiment_id
         if sample_id is not None and "sample_id" not in df.columns:
@@ -59,7 +66,7 @@ class AntonPaarSAXS:
             df["run_id"] = run_id
 
         meta: Dict[str, Any] = {
-            "schema_version": "1.0",
+            "schema_version": schema_report.get("schema_version", "1.0"),
             "experiment_id": experiment_id,
             "sample_id": sample_id,
             "run_id": run_id,
@@ -67,6 +74,7 @@ class AntonPaarSAXS:
             "instrument_model": instrument_model,
             "instrument_name": instrument_name,
             "experiment_name": experiment_name,
+            "schema_normalization": schema_report,
         }
         if metadata:
             meta.update(metadata)

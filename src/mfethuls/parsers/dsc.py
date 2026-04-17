@@ -6,6 +6,7 @@ import pandas as pd
 
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.registry import register_parser
+from mfethuls.schema_normalization import apply_dataframe_schema
 
 
 @register_parser('dsc', 'prior')
@@ -53,6 +54,12 @@ class DSCPriorParser:
             # Old behaviour: just return the DataFrame.
             return df
 
+        df, schema_report = apply_dataframe_schema(
+            df,
+            instrument_type="dsc",
+            instrument_model=instrument_model or "prior",
+        )
+
         # New behaviour: wrap into a Dataset with provided metadata and id columns.
         if "experiment_id" not in df.columns:
             df["experiment_id"] = experiment_id
@@ -61,7 +68,7 @@ class DSCPriorParser:
         if run_id is not None and "run_id" not in df.columns:
             df["run_id"] = run_id
         meta: Dict[str, Any] = {
-            "schema_version": "1.0",
+            "schema_version": schema_report.get("schema_version", "1.0"),
             "experiment_id": experiment_id,
             "sample_id": sample_id,
             "run_id": run_id,
@@ -69,6 +76,7 @@ class DSCPriorParser:
             "instrument_model": instrument_model,
             "instrument_name": instrument_name,
             "experiment_name": experiment_name,
+            "schema_normalization": schema_report,
         }
         if metadata:
             meta.update(metadata)
@@ -155,6 +163,12 @@ class DSCPerkinElmerParser:
         if experiment_id is None:
             return df
 
+        df, schema_report = apply_dataframe_schema(
+            df,
+            instrument_type="dsc",
+            instrument_model=instrument_model or "perkin_elmer",
+        )
+
         if "experiment_id" not in df.columns:
             df["experiment_id"] = experiment_id
         if sample_id is not None and "sample_id" not in df.columns:
@@ -163,7 +177,7 @@ class DSCPerkinElmerParser:
             df["run_id"] = run_id
 
         meta: Dict[str, Any] = {
-            "schema_version": "1.0",
+            "schema_version": schema_report.get("schema_version", "1.0"),
             "experiment_id": experiment_id,
             "sample_id": sample_id,
             "run_id": run_id,
@@ -171,6 +185,7 @@ class DSCPerkinElmerParser:
             "instrument_model": instrument_model,
             "instrument_name": instrument_name,
             "experiment_name": experiment_name,
+            "schema_normalization": schema_report,
         }
         if metadata:
             meta.update(metadata)
@@ -265,6 +280,12 @@ class DSCMettlerToledoParser:
         if experiment_id is None:
             return df
 
+        df, schema_report = apply_dataframe_schema(
+            df,
+            instrument_type="dsc",
+            instrument_model=instrument_model or "mettler_toledo",
+        )
+
         if "experiment_id" not in df.columns:
             df["experiment_id"] = experiment_id
         if sample_id is not None and "sample_id" not in df.columns:
@@ -273,7 +294,7 @@ class DSCMettlerToledoParser:
             df["run_id"] = run_id
 
         meta: Dict[str, Any] = {
-            "schema_version": "1.0",
+            "schema_version": schema_report.get("schema_version", "1.0"),
             "experiment_id": experiment_id,
             "sample_id": sample_id,
             "run_id": run_id,
@@ -281,6 +302,7 @@ class DSCMettlerToledoParser:
             "instrument_model": instrument_model,
             "instrument_name": instrument_name,
             "experiment_name": experiment_name,
+            "schema_normalization": schema_report,
         }
         if metadata:
             meta.update(metadata)

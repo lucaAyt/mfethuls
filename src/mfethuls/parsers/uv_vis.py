@@ -8,6 +8,7 @@ from dateutil.tz import gettz, UTC
 
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.registry import register_parser
+from mfethuls.schema_normalization import apply_dataframe_schema
 
 
 @register_parser('inSitu_UV', 'flame')
@@ -54,6 +55,12 @@ class FlameOceanOpticsParser:
         if experiment_id is None:
             return df
 
+        df, schema_report = apply_dataframe_schema(
+            df,
+            instrument_type="uv_vis",
+            instrument_model=instrument_model or "flame",
+        )
+
         if "experiment_id" not in df.columns:
             df["experiment_id"] = experiment_id
         if sample_id is not None and "sample_id" not in df.columns:
@@ -62,7 +69,7 @@ class FlameOceanOpticsParser:
             df["run_id"] = run_id
 
         meta: Dict[str, Any] = {
-            "schema_version": "1.0",
+            "schema_version": schema_report.get("schema_version", "1.0"),
             "experiment_id": experiment_id,
             "sample_id": sample_id,
             "run_id": run_id,
@@ -70,6 +77,7 @@ class FlameOceanOpticsParser:
             "instrument_model": instrument_model,
             "instrument_name": instrument_name,
             "experiment_name": experiment_name,
+            "schema_normalization": schema_report,
         }
         if metadata:
             meta.update(metadata)
@@ -145,6 +153,12 @@ class ShimadzuUVVisParser:
         if experiment_id is None:
             return df
 
+        df, schema_report = apply_dataframe_schema(
+            df,
+            instrument_type="uv_vis",
+            instrument_model=instrument_model or "Shimadzu",
+        )
+
         if "experiment_id" not in df.columns:
             df["experiment_id"] = experiment_id
         if sample_id is not None and "sample_id" not in df.columns:
@@ -153,7 +167,7 @@ class ShimadzuUVVisParser:
             df["run_id"] = run_id
 
         meta: Dict[str, Any] = {
-            "schema_version": "1.0",
+            "schema_version": schema_report.get("schema_version", "1.0"),
             "experiment_id": experiment_id,
             "sample_id": sample_id,
             "run_id": run_id,
@@ -161,6 +175,7 @@ class ShimadzuUVVisParser:
             "instrument_model": instrument_model,
             "instrument_name": instrument_name,
             "experiment_name": experiment_name,
+            "schema_normalization": schema_report,
         }
         if metadata:
             meta.update(metadata)

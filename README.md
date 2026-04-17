@@ -4,6 +4,10 @@
 
 A scalable, extensible Python framework for parsing, characterizing, and handling data from laboratory instruments.
 
+## 📌 Roadmap
+
+The pinned top-level objectives live in [ROADMAP.md](ROADMAP.md).
+
 ## 🔧 Install
 It is recommended to build from within a virtual environment:<br> 
 https://docs.python.org/3/library/venv.html

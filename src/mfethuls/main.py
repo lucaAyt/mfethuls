@@ -47,6 +47,7 @@ def main():
         print(f"  experiment_id: {ds.experiment_id}")
         print(f"  data shape: {ds.data.shape}")
         print(f"  metadata keys: {sorted(ds.metadata.keys())}")
+        print(f"  data head: {ds.data.head(5)}")
 
 
 if __name__ == "__main__":

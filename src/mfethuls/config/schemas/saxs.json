@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "required_columns": [
+    "q_inv_nm",
+    "intensity_a_u"
+  ],
+  "dtypes": {
+    "q_inv_nm": "float64",
+    "intensity_a_u": "float64",
+    "intensity_error_a_u": "float64"
+  },
+  "models": {
+    "anton_paar": {
+      "aliases": {
+        "q_inv_nm": [
+          "q",
+          "Q",
+          "q [1/nm]",
+          "q (1/nm)"
+        ],
+        "intensity_a_u": [
+          "I",
+          "Intensity",
+          "I(q)",
+          "intensity"
+        ],
+        "intensity_error_a_u": [
+          "dI",
+          "Error",
+          "sigma"
+        ]
+      }
+    }
+  }
+}

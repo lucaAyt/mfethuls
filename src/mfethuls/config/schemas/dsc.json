@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.1",
+  "required_columns": [
+    "temperature_C",
+    "heat_flow_mW"
+  ],
+  "dtypes": {
+    "temperature_C": "float64",
+    "temperature_sample_C": "float64",
+    "heat_flow_mW": "float64",
+    "time_s": "float64"
+  },
+  "models": {
+    "prior": {
+      "aliases": {
+        "temperature_C": [
+          "Tr [\u00b0C]",
+          "Temperature [\u00b0C]",
+          "Temperature [C]"
+        ],
+        "heat_flow_mW": [
+          "Value [mW]",
+          "Value [Wg^-1]",
+          "Heat Flow [mW]",
+          "HeatFlow [mW]"
+        ],
+        "time_s": [
+          "Time [s]",
+          "t [s]"
+        ]
+      }
+    },
+    "perkin_elmer": {
+      "aliases": {
+        "temperature_C": [
+          "Program Temperature",
+          "Sample Temperature [\u00b0C]",
+          "Temperature [\u00b0C]"
+        ],
+        "heat_flow_mW": [
+          "Value [mW]",
+          "Unsubtracted Heat Flow",
+          "Heat Flow [mW]",
+          "HeatFlow [mW]"
+        ],
+        "time_s": [
+          "Time [s]",
+          "Time"
+        ]
+      }
+    },
+    "mettler_toledo": {
+      "aliases": {
+        "temperature_C": [
+          "Tr [\u00b0C]",
+          "Temperature [\u00b0C]",
+          "Temperature [C]"
+        ],
+        "heat_flow_mW": [
+          "Value [mW]",
+          "Value [Wg^-1]",
+          "Heat Flow [mW]",
+          "HeatFlow [mW]"
+        ],
+        "time_s": [
+          "Time [s]",
+          "t [s]"
+        ]
+      }
+    }
+  }
+}

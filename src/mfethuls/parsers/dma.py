@@ -6,6 +6,24 @@ import pandas as pd
 
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.registry import register_parser
+from mfethuls.schema_normalization import apply_dataframe_schema
+
+
+def _infer_dma_profile_from_columns(df: pd.DataFrame) -> Optional[str]:
+    """Infer a DMA measurement profile from available raw column names."""
+
+    column_text = " ".join(str(column).lower() for column in df.columns)
+    if not column_text.strip():
+        return None
+
+    if any(token in column_text for token in ("freq", "frequency", "hz")):
+        return "oscillatory_frequency_sweep"
+    if any(token in column_text for token in ("strain", "amplitude")):
+        return "oscillatory_strain_sweep"
+    if any(token in column_text for token in ("temp", "temperature")):
+        return "oscillatory_temperature_sweep"
+
+    return None
 
 
 @register_parser('dma', 'ta_q800')
@@ -27,6 +45,7 @@ class DmaTaQ800:
         instrument_model: Optional[str] = None,
         instrument_name: Optional[str] = None,
         experiment_name: Optional[str] = None,
+        measurement_profile: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ):
         """Parse DMA TA Q800 data.
@@ -54,6 +73,19 @@ class DmaTaQ800:
         if experiment_id is None:
             return df
 
+        measurement_profile = (
+            measurement_profile
+            or (metadata or {}).get("measurement_profile")
+            or _infer_dma_profile_from_columns(df)
+        )
+
+        df, schema_report = apply_dataframe_schema(
+            df,
+            instrument_type="dma",
+            instrument_model=instrument_model or "ta_q800",
+            measurement_profile=measurement_profile,
+        )
+
         if "experiment_id" not in df.columns:
             df["experiment_id"] = experiment_id
         if sample_id is not None and "sample_id" not in df.columns:
@@ -62,7 +94,7 @@ class DmaTaQ800:
             df["run_id"] = run_id
 
         meta: Dict[str, Any] = {
-            "schema_version": "1.0",
+            "schema_version": schema_report.get("schema_version", "1.0"),
             "experiment_id": experiment_id,
             "sample_id": sample_id,
             "run_id": run_id,
@@ -70,6 +102,8 @@ class DmaTaQ800:
             "instrument_model": instrument_model,
             "instrument_name": instrument_name,
             "experiment_name": experiment_name,
+            "measurement_profile": measurement_profile,
+            "schema_normalization": schema_report,
         }
         if metadata:
             meta.update(metadata)

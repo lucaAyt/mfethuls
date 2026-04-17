@@ -1,0 +1,79 @@
+{
+  "schema_version": "1.0",
+  "required_columns": [],
+  "dtypes": {
+    "time_s": "float64",
+    "temperature_C": "float64",
+    "frequency_hz": "float64",
+    "strain_pct": "float64",
+    "storage_modulus_pa": "float64",
+    "loss_modulus_pa": "float64",
+    "tan_delta": "float64"
+  },
+  "models": {
+    "ta_q800": {
+      "aliases": {
+        "time_s": [
+          "Time [s]",
+          "Time",
+          "t [s]"
+        ],
+        "temperature_C": [
+          "Temperature [\u00b0C]",
+          "Temperature",
+          "Temp [\u00b0C]",
+          "Temp"
+        ],
+        "frequency_hz": [
+          "Frequency [Hz]",
+          "Frequency",
+          "f [Hz]",
+          "Hz"
+        ],
+        "strain_pct": [
+          "Strain [%]",
+          "gamma [%]",
+          "\u03b3 [%]"
+        ],
+        "storage_modulus_pa": [
+          "Storage Modulus [Pa]",
+          "G' [Pa]",
+          "Storage Modulus"
+        ],
+        "loss_modulus_pa": [
+          "Loss Modulus [Pa]",
+          "G'' [Pa]",
+          "Loss Modulus"
+        ],
+        "tan_delta": [
+          "tan \u03b4",
+          "tan delta",
+          "Tan Delta"
+        ]
+      }
+    }
+  },
+  "profiles": {
+    "oscillatory_temperature_sweep": {
+      "required_columns": [
+        "temperature_C",
+        "storage_modulus_pa",
+        "loss_modulus_pa"
+      ]
+    },
+    "oscillatory_frequency_sweep": {
+      "required_columns": [
+        "frequency_hz",
+        "storage_modulus_pa",
+        "loss_modulus_pa"
+      ]
+    },
+    "oscillatory_strain_sweep": {
+      "required_columns": [
+        "strain_pct",
+        "storage_modulus_pa",
+        "loss_modulus_pa"
+      ]
+    }
+  }
+}

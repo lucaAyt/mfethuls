@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "required_columns": [
+    "wavenumber_cm_inv",
+    "intensity_a_u"
+  ],
+  "dtypes": {
+    "wavenumber_cm_inv": "float64",
+    "intensity_a_u": "float64",
+    "absorbance_a_u": "float64",
+    "transmittance_pct": "float64"
+  },
+  "models": {
+    "bruker": {
+      "aliases": {
+        "wavenumber_cm_inv": [
+          "Wavenumber [cm-1]",
+          "Wavenumber [cm^-1]",
+          "cm^-1",
+          "Wavenumber"
+        ],
+        "intensity_a_u": [
+          "Intensity",
+          "Intensity [a.u.]",
+          "Signal [a.u.]"
+        ],
+        "absorbance_a_u": [
+          "Absorbance",
+          "Absorbance [a.u.]"
+        ],
+        "transmittance_pct": [
+          "Transmittance [%]",
+          "Transmission [%]"
+        ]
+      }
+    }
+  }
+}

@@ -21,7 +21,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 mfethuls = ["py.typed"]
-"mfethuls.config" = ["*.json"]
+"mfethuls.config" = ["*.json", "schemas/*.json"]
 
 [build-system]
 requires = ["setuptools>=61.0"]

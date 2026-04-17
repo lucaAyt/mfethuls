@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "required_columns": [
+    "temperature_C",
+    "mass_pct"
+  ],
+  "dtypes": {
+    "temperature_C": "float64",
+    "mass_pct": "float64",
+    "time_s": "float64",
+    "mass_mg": "float64",
+    "mass_loss_pct": "float64",
+    "d_mass_dt_pct_min": "float64",
+    "heat_flow_mW": "float64"
+  },
+  "models": {
+    "tgaX": {
+      "aliases": {
+        "temperature_C": [
+          "Temperature [\u00b0C]",
+          "Tr [\u00b0C]",
+          "Temperature"
+        ],
+        "mass_pct": [
+          "Mass [%]",
+          "Weight [%]",
+          "Weight Percent [%]"
+        ],
+        "time_s": [
+          "Time [s]",
+          "t [s]"
+        ],
+        "mass_mg": [
+          "Mass [mg]",
+          "Weight [mg]"
+        ],
+        "mass_loss_pct": [
+          "Mass Loss [%]",
+          "Weight Loss [%]"
+        ],
+        "d_mass_dt_pct_min": [
+          "DTG [%/min]",
+          "dW/dt",
+          "Derivative Weight [%/min]"
+        ],
+        "heat_flow_mW": [
+          "Heat Flow [mW]",
+          "HF [mW]"
+        ]
+      }
+    }
+  }
+}

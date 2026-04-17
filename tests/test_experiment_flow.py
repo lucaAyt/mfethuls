@@ -4,7 +4,7 @@ import tempfile
 import pandas as pd
 
 from mfethuls.dataset import Dataset
-from mfethuls.experiments import load_experiment_registry
+from mfethuls.experiments import get_experiment, load_experiment_registry
 from mfethuls.config_loader import load_experiment_dataset
 from mfethuls.storage import (
     dataset_in_storage,
@@ -55,6 +55,7 @@ def _write_registry(tmpdir: str) -> str:
                 "instrument_name": "rheometer",
                 "sample_id": "S001",
                 "run_id": "R001",
+                "description": "Oscillatory frequency sweep rheology run",
                 "status": "to_analyse",
             },
             {
@@ -103,6 +104,7 @@ def _write_registry(tmpdir: str) -> str:
                 "instrument_name": "dma",
                 "sample_id": "S001",
                 "run_id": "R001",
+                "description": "DMA temperature sweep run",
                 "status": "to_analyse",
             },
             {
@@ -142,6 +144,26 @@ def test_load_experiment_registry_roundtrip():
             "EXP011",
         }
         assert set(df_registry["experiment_id"]) == expected_ids
+
+
+def test_load_experiment_registry_infers_measurement_profile_from_description():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry_path = _write_registry(tmpdir)
+        load_experiment_registry(registry_path)
+
+        exp = get_experiment("rheometer_test_1")
+        assert exp.metadata.get("description") == "Oscillatory frequency sweep rheology run"
+        assert exp.metadata.get("measurement_profile") == "oscillatory_frequency_sweep"
+
+
+def test_load_experiment_registry_infers_dma_measurement_profile_from_description():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry_path = _write_registry(tmpdir)
+        load_experiment_registry(registry_path)
+
+        exp = get_experiment("dma_test_1")
+        assert exp.metadata.get("description") == "DMA temperature sweep run"
+        assert exp.metadata.get("measurement_profile") == "oscillatory_temperature_sweep"
 
 
 def test_load_experiment_dataset_returns_dataset_even_when_missing_files():

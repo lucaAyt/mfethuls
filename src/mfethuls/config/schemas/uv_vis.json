@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "required_columns": [
+    "wavelength_nm",
+    "intensity_a_u"
+  ],
+  "dtypes": {
+    "wavelength_nm": "float64",
+    "intensity_a_u": "float64",
+    "absorbance_a_u": "float64",
+    "transmittance_pct": "float64"
+  },
+  "models": {
+    "flame": {
+      "aliases": {
+        "wavelength_nm": [
+          "wavelength (nm)",
+          "Wavelength (nm)",
+          "Wavelength [nm]"
+        ],
+        "intensity_a_u": [
+          "transmission",
+          "Transmission",
+          "intensity",
+          "Intensity"
+        ],
+        "transmittance_pct": [
+          "transmission",
+          "Transmission"
+        ]
+      }
+    },
+    "Shimadzu": {
+      "aliases": {
+        "wavelength_nm": [
+          "Wavelength (nm)",
+          "Wavelength [nm]",
+          "nm"
+        ],
+        "intensity_a_u": [
+          "Absorbance",
+          "absorbance",
+          "Intensity",
+          "intensity"
+        ],
+        "absorbance_a_u": [
+          "Absorbance",
+          "absorbance"
+        ]
+      }
+    }
+  }
+}

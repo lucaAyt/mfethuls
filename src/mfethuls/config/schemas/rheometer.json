@@ -1,0 +1,115 @@
+{
+  "schema_version": "1.0",
+  "required_columns": [
+    "time_s",
+    "temperature_C"
+  ],
+  "dtypes": {
+    "time_s": "float64",
+    "temperature_C": "float64",
+    "strain_pct": "float64",
+    "angular_frequency_rad_s": "float64",
+    "storage_modulus_pa": "float64",
+    "loss_modulus_pa": "float64",
+    "shear_rate_s_inv": "float64",
+    "shear_stress_pa": "float64",
+    "viscosity_pa_s": "float64"
+  },
+  "models": {
+    "anton_paar": {
+      "aliases": {
+        "time_s": [
+          "t [s]",
+          "Time [s]",
+          "Time"
+        ],
+        "temperature_C": [
+          "T [\u00b0C]",
+          "Temperature [\u00b0C]",
+          "Temperature"
+        ],
+        "strain_pct": [
+          "\u03b3 [%]",
+          "gamma [%]",
+          "Strain [%]"
+        ],
+        "angular_frequency_rad_s": [
+          "\u03c9 [rad/s]",
+          "w [rad/s]",
+          "Angular Frequency [rad/s]"
+        ],
+        "storage_modulus_pa": [
+          "G' [Pa]",
+          "Storage Modulus [Pa]"
+        ],
+        "loss_modulus_pa": [
+          "G'' [Pa]",
+          "Loss Modulus [Pa]"
+        ],
+        "shear_rate_s_inv": [
+          "\u03b3\u0307 [1/s]",
+          "Shear Rate [1/s]"
+        ],
+        "shear_stress_pa": [
+          "\u03c4 [Pa]",
+          "Shear Stress [Pa]"
+        ],
+        "viscosity_pa_s": [
+          "\u03b7 [Pa s]",
+          "Viscosity [Pa s]"
+        ]
+      }
+    }
+  },
+  "profiles": {
+    "oscillatory_frequency_sweep": {
+      "required_columns": [
+        "angular_frequency_rad_s",
+        "storage_modulus_pa",
+        "loss_modulus_pa"
+      ]
+    },
+    "oscillatory_strain_sweep": {
+      "required_columns": [
+        "strain_pct",
+        "storage_modulus_pa",
+        "loss_modulus_pa"
+      ]
+    },
+    "oscillatory_time_sweep": {
+      "required_columns": [
+        "time_s",
+        "storage_modulus_pa",
+        "loss_modulus_pa"
+      ]
+    },
+    "flow_curve": {
+      "required_columns": [
+        "shear_rate_s_inv",
+        "shear_stress_pa",
+        "viscosity_pa_s"
+      ]
+    }
+  },
+  "clients": {
+    "example_client": {
+      "aliases": {
+        "temperature_C": [
+          "Temp_C"
+        ]
+      },
+      "profiles": {
+        "oscillatory_frequency_sweep": {
+          "aliases": {
+            "storage_modulus_pa": [
+              "Gp [Pa]"
+            ],
+            "loss_modulus_pa": [
+              "Gpp [Pa]"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

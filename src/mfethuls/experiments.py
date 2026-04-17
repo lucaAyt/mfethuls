@@ -14,6 +14,32 @@ from .ids import validate_experiment_id, validate_run_id, validate_sample_id
 logger = logging.getLogger(__name__)
 
 
+def _infer_measurement_profile_from_text(text: Optional[str]) -> Optional[str]:
+    """Infer a measurement profile from free-text description.
+
+    The same profile names are used for rheometer and DMA where the intent is
+    comparable (frequency, strain, or temperature sweep).
+    """
+
+    if text is None:
+        return None
+
+    value = str(text).strip().lower()
+    if not value:
+        return None
+
+    if any(token in value for token in ("freq", "frequency", "oscill")):
+        return "oscillatory_frequency_sweep"
+    if any(token in value for token in ("temp", "temperature")):
+        return "oscillatory_temperature_sweep"
+    if any(token in value for token in ("strain", "amplitude")):
+        return "oscillatory_strain_sweep"
+    if any(token in value for token in ("flow", "viscos", "shear")):
+        return "flow_curve"
+
+    return None
+
+
 @dataclass
 class Experiment:
     """Represents a single experiment definition.
@@ -86,10 +112,16 @@ def load_experiment_registry(path: str) -> pd.DataFrame:
     - ``instrument_name``: must match an instrument ``name`` from the
       instrument configuration JSON.
 
-    Optional columns (if present) are interpreted as follows:
+        Optional columns (if present) are interpreted as follows:
 
+        - ``description``: free-text description used to infer a measurement
+            profile when available
+        - ``measurement_profile``: canonical rheology profile name, e.g.
+            ``oscillatory_frequency_sweep``
     - ``sample_id``: strict sample id (e.g. S001)
     - ``run_id``: strict run id (e.g. R001), defaults to R001 when missing
+        - ``test_type``: deprecated filename-derived test type; used only as a
+            fallback for profile inference if no description/profile is provided
     - any other columns are stored in ``Experiment.metadata``.
 
     The function returns the loaded DataFrame so callers can further filter or
@@ -117,6 +149,9 @@ def load_experiment_registry(path: str) -> pd.DataFrame:
     for rec in records:
         name = rec.get("name")
         experiment_id = rec.get("experiment_id")
+        description = _normalize_optional_str(rec.get("description"))
+        explicit_measurement_profile = _normalize_optional_str(rec.get("measurement_profile"))
+        legacy_test_type = _normalize_optional_str(rec.get("test_type"))
 
         # Normalise optional identifiers so that empty cells / NaN from
         # Excel/CSV are treated as missing.
@@ -129,6 +164,18 @@ def load_experiment_registry(path: str) -> pd.DataFrame:
         # column to exist but individual rows may be empty/NaN to represent an
         # experiment that has not (yet) been analysed on an instrument.
         instrument_name = _normalize_optional_str(rec.get("instrument_name"))
+
+        measurement_profile = explicit_measurement_profile or _infer_measurement_profile_from_text(description)
+        if measurement_profile is None and legacy_test_type:
+            measurement_profile = _infer_measurement_profile_from_text(legacy_test_type)
+            if measurement_profile:
+                logger.warning(
+                    "Experiment %r is using deprecated test_type %r from the registry to infer measurement_profile %r; "
+                    "please add an explicit measurement_profile or description column instead.",
+                    name,
+                    legacy_test_type,
+                    measurement_profile,
+                )
 
         if instrument_name is None:
             # Do not register this experiment for analysis; it cannot be
@@ -145,9 +192,24 @@ def load_experiment_registry(path: str) -> pd.DataFrame:
         # Everything else becomes metadata.
         metadata: Dict[str, Any] = {}
         for key, value in rec.items():
-            if key in {"name", "experiment_id", "instrument_name", "sample_id", "run_id"}:
+            if key in {
+                "name",
+                "experiment_id",
+                "instrument_name",
+                "sample_id",
+                "run_id",
+                "description",
+                "measurement_profile",
+            }:
                 continue
             metadata[key] = value
+
+        if description is not None:
+            metadata["description"] = description
+        if measurement_profile is not None:
+            metadata["measurement_profile"] = measurement_profile
+        if legacy_test_type is not None:
+            metadata["test_type"] = legacy_test_type
 
         exp = Experiment(
             name=name,

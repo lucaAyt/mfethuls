@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any, Dict, Optional
 
@@ -5,6 +6,45 @@ import pandas as pd
 
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.registry import register_parser
+from mfethuls.schema_normalization import apply_dataframe_schema
+
+
+logger = logging.getLogger(__name__)
+
+
+def _infer_rheometer_profile_from_test_type(df: pd.DataFrame) -> Optional[str]:
+    """Infer a rheometer measurement profile from deprecated test_type data."""
+
+    if "test_type" not in df.columns or df.empty:
+        return None
+
+    value = str(df["test_type"].dropna().astype(str).head(1).squeeze()).lower()
+    if not value or value == "nan":
+        return None
+
+    if "freq" in value or "frequency" in value or "oscill" in value:
+        logger.warning(
+            "Inferring rheometer measurement_profile from deprecated test_type=%r; "
+            "please move this information into the experiment registry description or measurement_profile column.",
+            value,
+        )
+        return "oscillatory_frequency_sweep"
+    if "strain" in value or "amplitude" in value:
+        logger.warning(
+            "Inferring rheometer measurement_profile from deprecated test_type=%r; "
+            "please move this information into the experiment registry description or measurement_profile column.",
+            value,
+        )
+        return "oscillatory_strain_sweep"
+    if "flow" in value or "viscos" in value or "shear" in value:
+        logger.warning(
+            "Inferring rheometer measurement_profile from deprecated test_type=%r; "
+            "please move this information into the experiment registry description or measurement_profile column.",
+            value,
+        )
+        return "flow_curve"
+
+    return None
 
 
 @register_parser('rheometer', 'anton_paar')
@@ -24,6 +64,7 @@ class RheometerAntPaarParser:
         instrument_model: Optional[str] = None,
         instrument_name: Optional[str] = None,
         experiment_name: Optional[str] = None,
+        measurement_profile: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ):
         """Parse rheometer data.
@@ -51,6 +92,14 @@ class RheometerAntPaarParser:
         if experiment_id is None:
             return df
 
+        measurement_profile = measurement_profile or _infer_rheometer_profile_from_test_type(df)
+        df, schema_report = apply_dataframe_schema(
+            df,
+            instrument_type="rheometer",
+            instrument_model=instrument_model or "anton_paar",
+            measurement_profile=measurement_profile,
+        )
+
         if "experiment_id" not in df.columns:
             df["experiment_id"] = experiment_id
         if sample_id is not None and "sample_id" not in df.columns:
@@ -59,7 +108,7 @@ class RheometerAntPaarParser:
             df["run_id"] = run_id
 
         meta: Dict[str, Any] = {
-            "schema_version": "1.0",
+            "schema_version": schema_report.get("schema_version", "1.0"),
             "experiment_id": experiment_id,
             "sample_id": sample_id,
             "run_id": run_id,
@@ -67,6 +116,8 @@ class RheometerAntPaarParser:
             "instrument_model": instrument_model,
             "instrument_name": instrument_name,
             "experiment_name": experiment_name,
+            "measurement_profile": measurement_profile,
+            "schema_normalization": schema_report,
         }
         if metadata:
             meta.update(metadata)
