@@ -1,12 +1,10 @@
 {
   "schema_version": "1.0",
   "required_columns": [
-    "wavelength_nm",
-    "intensity_a_u"
+    "wavelength_nm"
   ],
   "dtypes": {
     "wavelength_nm": "float64",
-    "intensity_a_u": "float64",
     "absorbance_a_u": "float64",
     "transmittance_pct": "float64"
   },
@@ -18,15 +16,10 @@
           "Wavelength (nm)",
           "Wavelength [nm]"
         ],
-        "intensity_a_u": [
-          "transmission",
-          "Transmission",
-          "intensity",
-          "Intensity"
-        ],
         "transmittance_pct": [
           "transmission",
-          "Transmission"
+          "Transmission",
+          "Transmittance [%]"
         ]
       }
     },
@@ -37,15 +30,10 @@
           "Wavelength [nm]",
           "nm"
         ],
-        "intensity_a_u": [
-          "Absorbance",
-          "absorbance",
-          "Intensity",
-          "intensity"
-        ],
         "absorbance_a_u": [
           "Absorbance",
-          "absorbance"
+          "absorbance",
+          "Absorbance [a.u.]"
         ]
       }
     }

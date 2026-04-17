@@ -1,9 +1,6 @@
 {
   "schema_version": "1.0",
-  "required_columns": [
-    "time_s",
-    "temperature_C"
-  ],
+  "required_columns": [],
   "dtypes": {
     "time_s": "float64",
     "temperature_C": "float64",

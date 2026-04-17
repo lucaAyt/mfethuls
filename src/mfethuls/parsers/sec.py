@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -85,6 +86,30 @@ class AgilentSec:
         df = pd.read_csv(path, sep=self.delimiter, names=['time (min)', 'value'], header=None) \
                .apply(pd.to_numeric, errors='coerce')
         name = f'{os.path.basename(os.path.normpath(path)).casefold().rstrip(self.file_extension)}'.replace('.dx_', '_')
+        detector_name = self._infer_detector_name(path)
         df.loc[:, 'name'] = [name] * df.shape[0]
+        df.loc[:, 'detector_name'] = [detector_name] * df.shape[0]
+        df.loc[:, 'source_file'] = [os.path.basename(path)] * df.shape[0]
 
         return df
+
+    @staticmethod
+    def _infer_detector_name(path: str) -> str:
+        """Infer a canonical detector name from a SEC filename."""
+
+        stem = os.path.basename(path).casefold()
+        normalized = re.sub(r"[^a-z0-9]+", "_", stem)
+
+        # Wow
+        detector_patterns = {
+            "ri": [r"(?:^|_)ri(?:_|$)", r"(?:^|_)refractive(?:_|$)", r"(?:^|_)refractiveindex(?:_|$)", r"(?:^|_)dri(?:_|$)", r"(?:^|_)rid(?:_|$)"],
+            "uv": [r"(?:^|_)uv(?:\d+)?(?:_|$)", r"(?:^|_)uvvis(?:_|$)", r"(?:^|_)dad(?:_|$)", r"(?:^|_)vwd(?:_|$)", r"(?:^|_)pda(?:_|$)"],
+            "ls": [r"(?:^|_)ls(?:_|$)", r"(?:^|_)lightscattering(?:_|$)", r"(?:^|_)mals(?:_|$)", r"(?:^|_)rals(?:_|$)", r"(?:^|_)lals(?:_|$)"],
+            "viscometer": [r"(?:^|_)visc(?:_|$)", r"(?:^|_)viscometer(?:_|$)", r"(?:^|_)dp(?:_|$)"],
+        }
+
+        for detector, patterns in detector_patterns.items():
+            if any(re.search(pattern, normalized) for pattern in patterns):
+                return detector
+
+        return "unknown"

@@ -57,7 +57,7 @@ def test_apply_dataframe_schema_renames_and_casts_ftir_columns():
     df = pd.DataFrame(
         {
             "Wavenumber [cm-1]": [4000.0, 3999.0],
-            "Intensity": [0.10, 0.11],
+            "Transmittance [%]": [95.0, 94.5],
         }
     )
 
@@ -71,9 +71,32 @@ def test_apply_dataframe_schema_renames_and_casts_ftir_columns():
     assert report["schema_version"] == "1.0"
     assert report["missing_required_columns"] == []
     assert "wavenumber_cm_inv" in normalized.columns
-    assert "intensity_a_u" in normalized.columns
+    assert "transmittance_pct" in normalized.columns
     assert "Wavenumber [cm-1]" not in normalized.columns
-    assert "Intensity" not in normalized.columns
+    assert "Transmittance [%]" not in normalized.columns
+
+
+def test_apply_dataframe_schema_renames_and_casts_ftir_absorbance_columns():
+    df = pd.DataFrame(
+        {
+            "Wavenumber [cm-1]": [4000.0, 3999.0],
+            "Absorbance": [0.10, 0.11],
+        }
+    )
+
+    normalized, report = apply_dataframe_schema(
+        df,
+        instrument_type="ftir",
+        instrument_model="bruker",
+    )
+
+    assert report["schema_applied"] is True
+    assert report["schema_version"] == "1.0"
+    assert report["missing_required_columns"] == []
+    assert "wavenumber_cm_inv" in normalized.columns
+    assert "absorbance_a_u" in normalized.columns
+    assert "Wavenumber [cm-1]" not in normalized.columns
+    assert "Absorbance" not in normalized.columns
 
 
 def test_apply_dataframe_schema_renames_and_casts_saxs_columns():
@@ -125,6 +148,7 @@ def test_apply_dataframe_schema_renames_and_casts_sec_columns():
         {
             "time (min)": [5.0, 5.1],
             "value": [0.2, 0.25],
+            "Detector": ["ri", "ri"],
         }
     )
 
@@ -139,6 +163,28 @@ def test_apply_dataframe_schema_renames_and_casts_sec_columns():
     assert report["missing_required_columns"] == []
     assert "retention_time_min" in normalized.columns
     assert "detector_response_a_u" in normalized.columns
+    assert "detector_name" in normalized.columns
+
+
+def test_apply_dataframe_schema_renames_and_casts_nmr_columns():
+    df = pd.DataFrame(
+        {
+            "ppm": [1.0, 0.9],
+            "intensity": [100.0, 120.0],
+        }
+    )
+
+    normalized, report = apply_dataframe_schema(
+        df,
+        instrument_type="nmr",
+        instrument_model="bruker_nmr",
+    )
+
+    assert report["schema_applied"] is True
+    assert report["schema_version"] == "1.0"
+    assert report["missing_required_columns"] == []
+    assert "chemical_shift_ppm" in normalized.columns
+    assert "intensity_a_u" in normalized.columns
 
 
 def test_apply_dataframe_schema_renames_and_casts_uv_vis_flame_columns():
@@ -159,7 +205,6 @@ def test_apply_dataframe_schema_renames_and_casts_uv_vis_flame_columns():
     assert report["schema_version"] == "1.0"
     assert report["missing_required_columns"] == []
     assert "wavelength_nm" in normalized.columns
-    assert "intensity_a_u" in normalized.columns
     assert "transmittance_pct" in normalized.columns
 
 
@@ -181,7 +226,6 @@ def test_apply_dataframe_schema_renames_and_casts_uv_vis_shimadzu_columns():
     assert report["schema_version"] == "1.0"
     assert report["missing_required_columns"] == []
     assert "wavelength_nm" in normalized.columns
-    assert "intensity_a_u" in normalized.columns
     assert "absorbance_a_u" in normalized.columns
 
 

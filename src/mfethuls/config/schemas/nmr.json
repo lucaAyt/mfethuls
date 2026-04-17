@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "required_columns": [
+    "chemical_shift_ppm",
+    "intensity_a_u"
+  ],
+  "dtypes": {
+    "chemical_shift_ppm": "float64",
+    "intensity_a_u": "float64"
+  },
+  "models": {
+    "bruker_nmr": {
+      "aliases": {
+        "chemical_shift_ppm": [
+          "ppm",
+          "chemical shift",
+          "chemical_shift"
+        ],
+        "intensity_a_u": [
+          "intensity",
+          "signal",
+          "real"
+        ]
+      }
+    }
+  }
+}

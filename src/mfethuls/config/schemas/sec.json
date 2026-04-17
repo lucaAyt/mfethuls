@@ -2,11 +2,13 @@
   "schema_version": "1.0",
   "required_columns": [
     "retention_time_min",
-    "detector_response_a_u"
+    "detector_response_a_u",
+    "detector_name"
   ],
   "dtypes": {
     "retention_time_min": "float64",
-    "detector_response_a_u": "float64"
+    "detector_response_a_u": "float64",
+    "detector_name": "string"
   },
   "models": {
     "agilent": {
@@ -21,6 +23,12 @@
           "Value",
           "Detector Response",
           "Signal"
+        ],
+        "detector_name": [
+          "detector",
+          "Detector",
+          "detector_name",
+          "Detector Name"
         ]
       }
     }

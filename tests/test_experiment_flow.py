@@ -188,7 +188,7 @@ def test_load_experiment_dataset_returns_dataset_even_when_missing_files():
             try:
                 print(f'Loading dataset for {name}')
                 ds = load_experiment_dataset(name)
-                print(f'Loaded dataset for {ds.experiment_id}: {ds.head(5)}')
+                print(f'Loaded dataset for {ds.experiment_id}: {ds.data.head(5)}')
             except Exception as exc:  # noqa: BLE001
                 assert isinstance(exc, (KeyError, FileNotFoundError, OSError))
             else:
