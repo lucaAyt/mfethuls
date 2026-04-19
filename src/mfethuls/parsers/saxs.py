@@ -1,4 +1,5 @@
 import os
+import logging
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -6,6 +7,9 @@ import pandas as pd
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.registry import register_parser
 from mfethuls.schema_normalization import apply_dataframe_schema
+
+
+logger = logging.getLogger(__name__)
 
 
 @register_parser('saxs', 'anton_paar')
@@ -37,15 +41,21 @@ class AntonPaarSAXS:
 
         for name, paths in dict_paths.items():
             for path in paths:
+                path_cf = str(path).casefold()
 
-                if path.casefold().endswith(self.file_extension):
-                    df = pd.concat([df, self.parse_raw_data(path)], axis=0)
+                try:
+                    if path_cf.endswith(self.file_extension.casefold()):
+                        parsed = self.parse_raw_data(path)
+                        if not parsed.empty:
+                            df = pd.concat([df, parsed], axis=0)
 
-                elif path.casefold().endswith('.parquet'):
-                    df = pd.concat([df, pd.read_parquet(path)], axis=0)
+                    elif path_cf.endswith('.parquet'):
+                        df = pd.concat([df, pd.read_parquet(path)], axis=0)
 
-                else:
-                    print(f'Not reading: {path}')
+                    else:
+                        logger.debug("Skipping unsupported SAXS path: %s", path)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed parsing SAXS path %s: %s", path, exc)
 
         df = df.reset_index(drop=True)
 

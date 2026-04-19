@@ -77,15 +77,21 @@ class RheometerAntPaarParser:
 
         for name, paths in dict_paths.items():
             for path in paths:
+                path_cf = str(path).casefold()
 
-                if path.endswith(self.file_extension):
-                    df = pd.concat([df, self.parse_raw_data(path)], axis=0).dropna(how='all', axis=1)
+                try:
+                    if path_cf.endswith(self.file_extension.casefold()):
+                        parsed = self.parse_raw_data(path)
+                        if not parsed.empty:
+                            df = pd.concat([df, parsed], axis=0).dropna(how='all', axis=1)
 
-                elif path.endswith('.parquet'):
-                    df = pd.concat([df, pd.read_parquet(path)], axis=0)
+                    elif path_cf.endswith('.parquet'):
+                        df = pd.concat([df, pd.read_parquet(path)], axis=0)
 
-                else:
-                    print(f'Not reading: {path}')
+                    else:
+                        logger.debug("Skipping unsupported rheometer path: %s", path)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed parsing rheometer path %s: %s", path, exc)
 
         df = df.reset_index(drop=True)
 
@@ -131,7 +137,10 @@ class RheometerAntPaarParser:
             .dropna(how='all') \
             .reset_index(drop=True) \
             .sort_index(axis=1) \
-            .drop(columns=['Interval data:', 'Point No.'])
+            .drop(columns=['Interval data:', 'Point No.'], errors='ignore')
+
+        if df.empty:
+            return pd.DataFrame()
 
         # Rename columns
         df.columns = df.columns.get_level_values(0) + [f' {col}' if 'Unnamed' not in col else '' for col in

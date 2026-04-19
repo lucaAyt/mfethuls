@@ -1,5 +1,6 @@
 import os
 import re
+import logging
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -7,6 +8,9 @@ import pandas as pd
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.registry import register_parser
 from mfethuls.schema_normalization import apply_dataframe_schema
+
+
+logger = logging.getLogger(__name__)
 
 
 @register_parser('tga', 'tgaX')
@@ -38,15 +42,21 @@ class TGAXParser:
 
         for name, paths in dict_paths.items():
             for path in paths:
+                path_cf = str(path).casefold()
 
-                if path.endswith(self.file_extension):
-                    df = pd.concat([df, self.parse_raw_data(path)], axis=0)
+                try:
+                    if path_cf.endswith(self.file_extension.casefold()):
+                        parsed = self.parse_raw_data(path)
+                        if not parsed.empty:
+                            df = pd.concat([df, parsed], axis=0)
 
-                elif path.endswith('.parquet'):
-                    df = pd.concat([df, pd.read_parquet(path)], axis=0)
+                    elif path_cf.endswith('.parquet'):
+                        df = pd.concat([df, pd.read_parquet(path)], axis=0)
 
-                else:
-                    print(f'Not reading: {path}')
+                    else:
+                        logger.debug("Skipping unsupported TGA path: %s", path)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed parsing TGA path %s: %s", path, exc)
 
         df = df.reset_index(drop=True)
 
@@ -84,6 +94,7 @@ class TGAXParser:
 
     def parse_raw_data(self, path):
         lines = []
+        cols = []
         with open(path) as f:
             take = 0
             for line in f.readlines():
@@ -99,9 +110,15 @@ class TGAXParser:
                 elif 'Results' in line:
                     take = 0
 
+        if not cols or not lines:
+            return pd.DataFrame()
+
         # Make up columns by combining 1st and 2nd lines
         cols_row_2 = [''] + lines[0]
         cols = [' '.join([col1.strip(), col2.strip()]).strip() for col1, col2 in zip(cols, cols_row_2)]
+
+        if len(lines) <= 1:
+            return pd.DataFrame(columns=cols)
 
         df = pd.DataFrame(lines[1:], columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
         df['name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]

@@ -1,5 +1,6 @@
 import os
 import re
+import logging
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -7,6 +8,9 @@ import pandas as pd
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.registry import register_parser
 from mfethuls.schema_normalization import apply_dataframe_schema
+
+
+logger = logging.getLogger(__name__)
 
 
 def _infer_dma_profile_from_columns(df: pd.DataFrame) -> Optional[str]:
@@ -58,15 +62,21 @@ class DmaTaQ800:
 
         for name, paths in dict_paths.items():
             for path in paths:
+                path_cf = str(path).casefold()
 
-                if path.endswith(self.file_extension):
-                    df = pd.concat([df, self.parse_raw_data(path)], axis=0)
+                try:
+                    if path_cf.endswith(self.file_extension.casefold()):
+                        parsed = self.parse_raw_data(path)
+                        if not parsed.empty:
+                            df = pd.concat([df, parsed], axis=0)
 
-                elif path.endswith('.parquet'):
-                    df = pd.concat([df, pd.read_parquet(path)], axis=0)
+                    elif path_cf.endswith('.parquet'):
+                        df = pd.concat([df, pd.read_parquet(path)], axis=0)
 
-                else:
-                    print(f'Not reading: {path}')
+                    else:
+                        logger.debug("Skipping unsupported DMA path: %s", path)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed parsing DMA path %s: %s", path, exc)
 
         df = df.reset_index(drop=True)
 
@@ -137,6 +147,9 @@ class DmaTaQ800:
 
                 elif pattern_end.match(line):
                     take = False
+
+        if not column_names or not lines:
+            return pd.DataFrame()
 
         # Make up columns by combining 1st and 2nd lines
         df = pd.DataFrame(lines, columns=column_names).apply(pd.to_numeric, errors='coerce').dropna(axis=0)

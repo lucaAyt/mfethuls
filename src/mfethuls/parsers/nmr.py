@@ -1,4 +1,5 @@
 import os
+import logging
 from typing import Any, Dict, Optional
 
 import numpy as np
@@ -7,6 +8,9 @@ import pandas as pd
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.registry import register_parser
 from mfethuls.schema_normalization import apply_dataframe_schema
+
+
+logger = logging.getLogger(__name__)
 
 
 @register_parser('nmr', 'bruker_nmr')
@@ -37,18 +41,21 @@ class BrukerNMRParser:
 
         for name, paths in dict_paths.items():
             for path in paths:
+                path_cf = str(path).casefold()
 
-                if os.path.isdir(path) or path.endswith(self.file_extension):
-                    parsed = self.parse_raw_data(path)
-                    if parsed.empty:
-                        continue
-                    df = pd.concat([df, parsed], axis=0).dropna(how='all', axis=1)
+                try:
+                    if os.path.isdir(path) or path_cf.endswith(self.file_extension.casefold()):
+                        parsed = self.parse_raw_data(path)
+                        if not parsed.empty:
+                            df = pd.concat([df, parsed], axis=0).dropna(how='all', axis=1)
 
-                elif path.endswith('.parquet'):
-                    df = pd.concat([df, pd.read_parquet(path)], axis=0)
+                    elif path_cf.endswith('.parquet'):
+                        df = pd.concat([df, pd.read_parquet(path)], axis=0)
 
-                else:
-                    print(f'Not reading: {path}')
+                    else:
+                        logger.debug("Skipping unsupported NMR path: %s", path)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed parsing NMR path %s: %s", path, exc)
 
         # Note: this parser currently produces a somewhat non-standard
         # structure. We now normalize into canonical 1D spectral columns.
