@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 import pandas as pd
 
 from mfethuls.dataset import Dataset
+from mfethuls.parsers.ingestion import collect_dataframe_from_paths
 from mfethuls.parsers.registry import register_parser
 from mfethuls.schema_normalization import apply_dataframe_schema
 
@@ -38,27 +39,13 @@ class DSCPriorParser:
         compatibility.
         """
 
-        df = pd.DataFrame()
-
-        for name, paths in dict_paths.items():
-            for path in paths:
-                path_cf = str(path).casefold()
-
-                try:
-                    if path_cf.endswith(self.file_extension.casefold()):
-                        parsed = self.parse_raw_data(path)
-                        if not parsed.empty:
-                            df = pd.concat([df, parsed], axis=0)
-
-                    elif path_cf.endswith('.parquet'):
-                        df = pd.concat([df, pd.read_parquet(path)], axis=0)
-
-                    else:
-                        logger.debug("Skipping unsupported DSC(prior) path: %s", path)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Failed parsing DSC(prior) path %s: %s", path, exc)
-
-        df = df.reset_index(drop=True)
+        df = collect_dataframe_from_paths(
+            dict_paths,
+            file_extension=self.file_extension,
+            parse_raw=self.parse_raw_data,
+            logger=logger,
+            parser_label="DSC(prior)",
+        )
 
         if experiment_id is None:
             # Old behaviour: just return the DataFrame.
@@ -158,27 +145,14 @@ class DSCPerkinElmerParser:
         plain DataFrame for backward compatibility.
         """
 
-        df = pd.DataFrame()
-
-        for name, paths in dict_paths.items():
-            for path in paths:
-                path_cf = str(path).casefold()
-
-                try:
-                    if path_cf.endswith(self.file_extension.casefold()) or path_cf.endswith('.csv'):
-                        parsed = self.parse_raw_data(path)
-                        if not parsed.empty:
-                            df = pd.concat([df, parsed], axis=0)
-
-                    elif path_cf.endswith('.parquet'):
-                        df = pd.concat([df, pd.read_parquet(path)], axis=0)
-
-                    else:
-                        logger.debug("Skipping unsupported DSC(perkin_elmer) path: %s", path)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Failed parsing DSC(perkin_elmer) path %s: %s", path, exc)
-
-        df = df.reset_index(drop=True)
+        df = collect_dataframe_from_paths(
+            dict_paths,
+            file_extension=self.file_extension,
+            parse_raw=self.parse_raw_data,
+            logger=logger,
+            parser_label="DSC(perkin_elmer)",
+            should_parse_raw=lambda path: str(path).casefold().endswith(self.file_extension.casefold()) or str(path).casefold().endswith('.csv'),
+        )
 
         if experiment_id is None:
             return df
@@ -288,27 +262,13 @@ class DSCMettlerToledoParser:
         plain DataFrame for backward compatibility.
         """
 
-        df = pd.DataFrame()
-
-        for name, paths in dict_paths.items():
-            for path in paths:
-                path_cf = str(path).casefold()
-
-                try:
-                    if path_cf.endswith(self.file_extension.casefold()):
-                        parsed = self.parse_raw_data(path)
-                        if not parsed.empty:
-                            df = pd.concat([df, parsed], axis=0)
-
-                    elif path_cf.endswith('.parquet'):
-                        df = pd.concat([df, pd.read_parquet(path)], axis=0)
-
-                    else:
-                        logger.debug("Skipping unsupported DSC(mettler_toledo) path: %s", path)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Failed parsing DSC(mettler_toledo) path %s: %s", path, exc)
-
-        df = df.reset_index(drop=True)
+        df = collect_dataframe_from_paths(
+            dict_paths,
+            file_extension=self.file_extension,
+            parse_raw=self.parse_raw_data,
+            logger=logger,
+            parser_label="DSC(mettler_toledo)",
+        )
 
         if experiment_id is None:
             return df

@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 import pandas as pd
 
 from mfethuls.dataset import Dataset
+from mfethuls.parsers.ingestion import collect_dataframe_from_paths
 from mfethuls.parsers.registry import register_parser
 from mfethuls.schema_normalization import apply_dataframe_schema
 
@@ -38,27 +39,13 @@ class AgilentSec:
         plain DataFrame for backward compatibility.
         """
 
-        df = pd.DataFrame()
-
-        for name, paths in dict_paths.items():
-            for path in paths:
-                path_cf = str(path).casefold()
-
-                try:
-                    if path_cf.endswith(self.file_extension.casefold()):
-                        parsed = self.parse_raw_data(path)
-                        if not parsed.empty:
-                            df = pd.concat([df, parsed], axis=0)
-
-                    elif path_cf.endswith('.parquet'):
-                        df = pd.concat([df, pd.read_parquet(path)], axis=0)
-
-                    else:
-                        logger.debug("Skipping unsupported SEC path: %s", path)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Failed parsing SEC path %s: %s", path, exc)
-
-        df = df.reset_index(drop=True)
+        df = collect_dataframe_from_paths(
+            dict_paths,
+            file_extension=self.file_extension,
+            parse_raw=self.parse_raw_data,
+            logger=logger,
+            parser_label="SEC",
+        )
 
         if experiment_id is None:
             return df
