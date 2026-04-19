@@ -7,6 +7,7 @@ A scalable, extensible Python framework for parsing, characterizing, and handlin
 ## 📌 Roadmap
 
 The pinned top-level objectives live in [ROADMAP.md](ROADMAP.md).
+The normalization and canonical schema rules live in [SCHEMA_CONTRACT.md](SCHEMA_CONTRACT.md).
 
 ## 🔧 Install
 It is recommended to build from within a virtual environment:<br> 
