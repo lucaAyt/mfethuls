@@ -7,7 +7,7 @@ from mfethuls.instruments.generic import GenericInstrument
 from mfethuls.characterizers.dsc import DSCProfiling
 from mfethuls.dataset import Dataset
 from mfethuls.experiments import Experiment
-from mfethuls.ids import validate_experiment_id, validate_sample_id, validate_run_id
+from mfethuls.registry_validator import RegistryValidator, RegistryValidationError
 
 # Load environment variables from .env
 load_dotenv()
@@ -74,11 +74,23 @@ def parse_experiment(
     abstractions and the existing instrument + parser machinery. It does not
     alter existing code paths but provides a single-place entry point for the
     new flow.
+
+    Runs registry validation first to fail fast if instrument/model/profile
+    expectations are not coherent.
     """
 
-    experiment_id = validate_experiment_id(experiment.experiment_id)
-    sample_id = validate_sample_id(experiment.sample_id)
-    run_id = validate_run_id(experiment.run_id)
+    # Validate registry before attempting parse
+    validator = RegistryValidator()
+    is_valid, errors = validator.validate_experiment(experiment)
+    if not is_valid:
+        error_msg = "\n".join(errors)
+        raise RegistryValidationError(
+            f"Registry validation failed for experiment '{experiment.name}':\n{error_msg}"
+        )
+
+    experiment_id = RegistryValidator.validate_experiment_id(experiment.experiment_id)
+    sample_id = RegistryValidator.validate_sample_id(experiment.sample_id)
+    run_id = RegistryValidator.validate_run_id(experiment.run_id)
 
     parser = instrument.parser if hasattr(instrument, "parser") else get_parser(instrument.type_, instrument.model)
 

@@ -18,7 +18,7 @@ ALL_PARSER_KEYS = [
     ("sec", "agilent"),
     ("rheometer", "anton_paar"),
     ("dma", "ta_q800"),
-    ("inSitu_UV", "flame"),
+    ("uv_vis", "flame"),
     ("reflection", "flame"),
     ("uv_vis", "Shimadzu"),
 ]
@@ -114,7 +114,7 @@ PARSER_BEHAVIOR_CASES = [
         "parse_kwargs": {"measurement_profile": "oscillatory_frequency_sweep"},
     },
     {
-        "key": ("inSitu_UV", "flame"),
+        "key": ("uv_vis", "flame"),
         "raw": {"wavelength (nm)": [400.0, 450.0], "transmission": [0.8, 0.75]},
         "expect": {"wavelength_nm", "transmittance_pct"},
     },

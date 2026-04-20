@@ -8,7 +8,7 @@ import os
 
 import pandas as pd
 
-from .ids import validate_experiment_id, validate_run_id, validate_sample_id
+from .registry_validator import RegistryValidator
 
 
 logger = logging.getLogger(__name__)
@@ -57,9 +57,9 @@ class Experiment:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.experiment_id = validate_experiment_id(self.experiment_id)
-        self.sample_id = validate_sample_id(self.sample_id)
-        self.run_id = validate_run_id(self.run_id)
+        self.experiment_id = RegistryValidator.validate_experiment_id(self.experiment_id)
+        self.sample_id = RegistryValidator.validate_sample_id(self.sample_id)
+        self.run_id = RegistryValidator.validate_run_id(self.run_id)
 
 
 # Minimal in-memory registry placeholder.

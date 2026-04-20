@@ -16,7 +16,7 @@ from mfethuls.schema_normalization import apply_dataframe_schema
 logger = logging.getLogger(__name__)
 
 
-@register_parser('inSitu_UV', 'flame')
+@register_parser('uv_vis', 'flame')
 @register_parser('reflection', 'flame')
 class FlameOceanOpticsParser:
     def __init__(self, file_extension='.txt'):

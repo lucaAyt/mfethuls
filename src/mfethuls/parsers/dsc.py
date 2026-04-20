@@ -111,10 +111,6 @@ class DSCPriorParser:
         df = pd.DataFrame(lines[1:], columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
         df.loc[:, 'name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
 
-    # TODO: map instrument-specific column names to a standard DSC schema
-    # (e.g. temperature_C, heat_flow_mW) once lab/company-specific
-    # conventions are agreed.
-
         return df
 
 
