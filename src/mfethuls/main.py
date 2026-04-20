@@ -21,7 +21,7 @@ def main():
     
     
     # Example: load the template registry shipped with the package.
-    registry_path = os.environ.get('PATH_TO_REGISTRY')
+    registry_path = os.environ.get('MFETHULS_TEST_REGISTRY')
 
     print(f"Loading experiment registry from: {registry_path}")
     df_registry = load_experiment_registry(registry_path)

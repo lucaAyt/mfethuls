@@ -20,7 +20,6 @@ RHEOMETER_FOLDER_NAME=Rheology
 SEC_FOLDER_NAME=SEC
 DMA_FOLDER_NAME=DMA
 SAXS_FOLDER_NAME=SAXS
-inSitu_UV_FOLDER_NAME=inSitu_UV
 
 # Testing configs
 MFETHULS_TEST_DATA_ROOT = /home/user/Documents/mfethuls_test_data
