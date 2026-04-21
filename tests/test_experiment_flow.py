@@ -1,5 +1,6 @@
 import os
 import tempfile
+from importlib.metadata import PackageNotFoundError, version
 
 import pandas as pd
 
@@ -218,8 +219,21 @@ def test_dataset_storage_roundtrip_uses_temp_folder(monkeypatch):
             run_id="R001",
         )
 
-        df = pd.DataFrame({"a": [1, 2, 3]})
-        ds = Dataset(data=df, metadata={"key": "value"})
+        df = pd.DataFrame({"a": [1, 2, 3], "source_file": ["run1.txt", "run1.txt", "run2.txt"]})
+        ds = Dataset(
+            data=df,
+            metadata={
+                "key": "value",
+                "instrument_type": "uv_vis",
+                "instrument_model": "flame",
+                "schema_version": "1.0",
+                "schema_normalization": {
+                    "schema_applied": True,
+                    "warnings": ["sample warning"],
+                    "missing_required_columns": [],
+                },
+            },
+        )
 
         parquet_path, meta_path = save_dataset_to_storage(exp, ds)
 
@@ -232,3 +246,21 @@ def test_dataset_storage_roundtrip_uses_temp_folder(monkeypatch):
         assert isinstance(loaded, Dataset)
         assert loaded.data.equals(df)
         assert loaded.metadata.get("key") == "value"
+        assert "provenance" in loaded.metadata
+
+        provenance = loaded.metadata["provenance"]
+        assert provenance["storage"]["backend"] == "local_filesystem"
+        assert provenance["storage"]["format"]["data"] == "parquet"
+        assert "mfethuls_version" in provenance
+        try:
+            expected_version = version("mfethuls")
+        except PackageNotFoundError:
+            expected_version = "unknown"
+        assert provenance["mfethuls_version"] == expected_version
+        assert provenance["dataset"]["row_count"] == 3
+        assert provenance["instrument"]["instrument_name"] == "dummy_instrument"
+        assert provenance["instrument"]["parser_key"] == "uv_vis:flame"
+        assert provenance["schema"]["schema_version"] == "1.0"
+        assert provenance["schema"]["warning_count"] == 1
+        assert provenance["source"]["source_file_count"] == 2
+        assert provenance["source"]["source_files"] == ["run1.txt", "run2.txt"]
