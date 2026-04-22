@@ -264,3 +264,23 @@ def test_dataset_storage_roundtrip_uses_temp_folder(monkeypatch):
         assert provenance["schema"]["warning_count"] == 1
         assert provenance["source"]["source_file_count"] == 2
         assert provenance["source"]["source_files"] == ["run1.txt", "run2.txt"]
+
+
+def test_load_experiment_registry_normalizes_instrument_name_case():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry_path = os.path.join(tmpdir, "experiments_case_test.csv")
+        pd.DataFrame(
+            [
+                {
+                    "name": "case_test_1",
+                    "experiment_id": "EXP012",
+                    "instrument_name": "DSC_METTLER_TOLEDO",
+                    "sample_id": "S001",
+                    "run_id": "R001",
+                }
+            ]
+        ).to_csv(registry_path, index=False)
+
+        load_experiment_registry(registry_path)
+        exp = get_experiment("case_test_1")
+        assert exp.instrument_name == "dsc_mettler_toledo"

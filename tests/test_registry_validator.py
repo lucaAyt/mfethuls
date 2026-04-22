@@ -25,6 +25,17 @@ class TestRegistryValidator:
         assert is_valid, f"Validation failed with errors: {errors}"
         assert len(errors) == 0
 
+    def test_validate_valid_experiment_is_case_insensitive(self):
+        """Validator should match instrument names regardless of case."""
+        validator = RegistryValidator()
+        exp = Experiment(
+            name="test_dsc_upper",
+            experiment_id="EXP001",
+            instrument_name="DSC",
+        )
+        is_valid, errors = validator.validate_experiment(exp)
+        assert is_valid, f"Validation failed with errors: {errors}"
+
     def test_validate_unknown_instrument(self):
         """Validator should reject experiment with unknown instrument."""
         validator = RegistryValidator()

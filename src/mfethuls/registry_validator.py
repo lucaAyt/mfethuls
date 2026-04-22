@@ -41,8 +41,10 @@ def _load_instrument_config() -> List[Dict[str, Any]]:
 def _get_instrument_entry(name: str) -> Optional[Dict[str, Any]]:
     """Retrieve an instrument config entry by name."""
     config = _load_instrument_config()
+    name_norm = str(name).casefold()
     for entry in config:
-        if entry.get("name") == name:
+        entry_name = entry.get("name")
+        if isinstance(entry_name, str) and entry_name.casefold() == name_norm:
             return entry
     return None
 

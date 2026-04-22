@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 instrument_config_path = os.path.join(os.path.dirname(__file__), 'config', 'instrument_params.json')
 with open(instrument_config_path, encoding='utf8') as f:
     config = json.load(f)
+    for entry in config:
+        if isinstance(entry.get("name"), str):
+            entry["name"] = entry["name"].strip().casefold()
 
 InstrumentBundle = namedtuple("InstrumentBundle", ["instruments", "data_paths"])
 
