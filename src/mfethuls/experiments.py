@@ -60,6 +60,7 @@ class Experiment:
         self.experiment_id = RegistryValidator.validate_experiment_id(self.experiment_id)
         self.sample_id = RegistryValidator.validate_sample_id(self.sample_id)
         self.run_id = RegistryValidator.validate_run_id(self.run_id)
+        self.instrument_name = str(self.instrument_name).strip().casefold()
 
 
 # Minimal in-memory registry placeholder.
