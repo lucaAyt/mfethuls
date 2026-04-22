@@ -49,6 +49,8 @@ class AntonPaarSAXS:
         if experiment_id is None:
             return df
 
+        # TODO: Refine schema normalization to handle SAXS-specific columns 
+        # add 'Intensity Relative [Absolute Intensity x SampleThickness]' to schema normalisation
         df, schema_report = apply_dataframe_schema(
             df,
             instrument_type="saxs",

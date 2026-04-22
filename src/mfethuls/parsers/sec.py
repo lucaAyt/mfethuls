@@ -90,6 +90,7 @@ class AgilentSec:
 
         return df
 
+    # TODO: Fix to pick up current detectors
     @staticmethod
     def _infer_detector_name(path: str) -> str:
         """Infer a canonical detector name from a SEC filename."""
