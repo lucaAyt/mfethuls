@@ -20,6 +20,7 @@
         ],
         "intensity_a_u": [
           "I",
+          "Intensity Relative [Absolute Intensity x SampleThickness]",
           "Intensity",
           "I(q)",
           "intensity"
@@ -27,7 +28,8 @@
         "intensity_error_a_u": [
           "dI",
           "Error",
-          "sigma"
+          "sigma", 
+          "Intensity Relative [Error]"
         ]
       }
     }

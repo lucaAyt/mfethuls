@@ -19,16 +19,19 @@
         "temperature_C": [
           "Temperature [\u00b0C]",
           "Tr [\u00b0C]",
-          "Temperature"
+          "Temperature",
+          "Tr [mg]"
         ],
         "mass_pct": [
           "Mass [%]",
           "Weight [%]",
-          "Weight Percent [%]"
+          "Weight Percent [%]",
+          "Weight [mW]"
         ],
         "time_s": [
           "Time [s]",
-          "t [s]"
+          "t [s]",
+          "t [°C]"
         ],
         "mass_mg": [
           "Mass [mg]",

@@ -14,7 +14,7 @@
         "wavenumber_cm_inv": [
           "Wavenumber [cm-1]",
           "Wavenumber [cm^-1]",
-          "cm^-1",
+          "cm-1",
           "Wavenumber"
         ],
         "absorbance_a_u": [
@@ -23,7 +23,8 @@
         ],
         "transmittance_pct": [
           "Transmittance [%]",
-          "Transmission [%]"
+          "Transmission [%]",
+          "%T"
         ]
       }
     }

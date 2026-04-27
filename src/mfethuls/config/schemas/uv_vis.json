@@ -20,12 +20,16 @@
           "transmission",
           "Transmission",
           "Transmittance [%]"
+        ],
+        "timestamp": [
+          "time"
         ]
       }
     },
     "Shimadzu": {
       "aliases": {
         "wavelength_nm": [
+          "Wavelength nm.",
           "Wavelength (nm)",
           "Wavelength [nm]",
           "nm"
@@ -33,7 +37,8 @@
         "absorbance_a_u": [
           "Absorbance",
           "absorbance",
-          "Absorbance [a.u.]"
+          "Absorbance [a.u.]",
+          "Abs."
         ]
       }
     }

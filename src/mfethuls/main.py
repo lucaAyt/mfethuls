@@ -6,6 +6,7 @@ import mfethuls.parsers
 import mfethuls.factory as factory
 from mfethuls.config_loader import load_experiment_dataset
 from mfethuls.experiments import load_experiment_registry
+from mfethuls.plotting.core import plot_dataset
 
 
 def _resolve_registry_path(cli_registry_path: str | None, registry_env: str) -> str:
@@ -54,7 +55,7 @@ def _apply_runtime_env_mode(registry_env: str) -> None:
     if test_registry:
         os.environ["PATH_TO_REGISTRY"] = test_registry
 
-def main(argv: list[str] | None = None):
+def mainX(argv: list[str] | None = None):
     """Small demo for manual testing of the experiment/Dataset flow.
 
     This function is intentionally simple and prints shapes / metadata rather
@@ -144,6 +145,13 @@ def main(argv: list[str] | None = None):
             print(f"  source_file_count: {(provenance.get('source') or {}).get('source_file_count')}")
         print(f"  data head: {ds.data.head(5)}")
 
+def main():
+    """Simple debugging entrypoint"""
+    _apply_runtime_env_mode("test")
+    registry_path = os.environ.get('MFETHULS_TEST_REGISTRY')
+    df_registry = load_experiment_registry(registry_path)
+    ds = load_experiment_dataset('EXP013')
+    fig, ax = plot_dataset(ds)
 
 if __name__ == "__main__":
     main()

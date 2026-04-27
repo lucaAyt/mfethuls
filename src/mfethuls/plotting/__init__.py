@@ -1,5 +1,7 @@
 from .core import plot_dataset
+from .dma import plot_dma
 from .dsc import plot_dsc
+from .ftir import plot_ftir
 from .ms import plot_ms
 from .nmr import plot_nmr
 from .rheology import plot_rheology
@@ -12,7 +14,9 @@ from .uv_vis import plot_uv_vis
 __all__ = [
     "apply_axes_style",
     "plot_dataset",
+    "plot_dma",
     "plot_dsc",
+    "plot_ftir",
     "plot_ms",
     "plot_nmr",
     "plot_rheology",

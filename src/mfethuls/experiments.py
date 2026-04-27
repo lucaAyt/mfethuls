@@ -201,6 +201,7 @@ def load_experiment_registry(path: str) -> pd.DataFrame:
                 "run_id",
                 "description",
                 "measurement_profile",
+                "test_type",
             }:
                 continue
             metadata[key] = value
@@ -209,9 +210,6 @@ def load_experiment_registry(path: str) -> pd.DataFrame:
             metadata["description"] = description
         if measurement_profile is not None:
             metadata["measurement_profile"] = measurement_profile
-        if legacy_test_type is not None:
-            metadata["test_type"] = legacy_test_type
-
         exp = Experiment(
             name=name,
             experiment_id=str(experiment_id),

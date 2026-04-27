@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import matplotlib.pyplot as plt
 
@@ -64,6 +64,72 @@ def _line_plot(
     return fig, axis
 
 
+def _resolve_plot_kind(dataset: Dataset, kind: Optional[str]) -> Optional[str]:
+    """Resolve the plotting family from an explicit kind, metadata, then columns."""
+
+    if kind is not None:
+        return kind
+
+    from .dma import is_supported_dma_profile
+    from .rheology import is_supported_rheology_profile
+
+    metadata = dataset.metadata if isinstance(dataset.metadata, dict) else {}
+    columns = set(dataset.data.columns)
+    instrument_type = str(metadata.get("instrument_type") or "").strip().casefold()
+    measurement_profile = str(metadata.get("measurement_profile") or "").strip()
+
+    if instrument_type == "dma":
+        return "dma"
+    if instrument_type == "rheometer":
+        return "rheology"
+    if instrument_type == "uv_vis":
+        return "uv_vis"
+    if instrument_type == "ftir":
+        return "ftir"
+    if instrument_type == "dsc":
+        return "dsc"
+    if instrument_type == "tga":
+        return "tga"
+    if instrument_type == "saxs":
+        return "saxs"
+    if instrument_type == "ms":
+        return "ms"
+    if instrument_type == "sec":
+        return "sec"
+    if instrument_type == "nmr":
+        return "nmr"
+
+    if is_supported_dma_profile(measurement_profile):
+        return "dma"
+    if is_supported_rheology_profile(measurement_profile):
+        return "rheology"
+
+    if {"wavelength_nm"}.issubset(columns):
+        return "uv_vis"
+    if {"wavenumber_cm_inv"}.issubset(columns):
+        return "ftir"
+    if {"frequency_hz", "storage_modulus_mpa", "loss_modulus_mpa"}.issubset(columns):
+        return "dma"
+    if {"temperature_C", "storage_modulus_mpa", "loss_modulus_mpa"}.issubset(columns):
+        return "dma"
+    if {"strain_pct", "storage_modulus_mpa", "loss_modulus_mpa"}.issubset(columns):
+        return "dma"
+    if {"temperature_C", "heat_flow_mW"}.issubset(columns):
+        return "dsc"
+    if {"temperature_C", "mass_pct"}.issubset(columns):
+        return "tga"
+    if {"q_inv_nm", "intensity_a_u"}.issubset(columns):
+        return "saxs"
+    if {"mz", "intensity_a_u"}.issubset(columns):
+        return "ms"
+    if {"retention_time_min", "detector_response_a_u"}.issubset(columns):
+        return "sec"
+    if {"chemical_shift_ppm", "intensity_a_u"}.issubset(columns):
+        return "nmr"
+
+    return None
+
+
 def plot_dataset(
     dataset: Dataset,
     kind: Optional[str] = None,
@@ -75,7 +141,9 @@ def plot_dataset(
 ) -> Tuple[Any, Any]:
     """Plot a normalized dataset using canonical columns only."""
 
+    from .dma import plot_dma
     from .dsc import plot_dsc
+    from .ftir import plot_ftir
     from .ms import plot_ms
     from .nmr import plot_nmr
     from .rheology import plot_rheology
@@ -84,29 +152,14 @@ def plot_dataset(
     from .tga import plot_tga
     from .uv_vis import plot_uv_vis
 
-    resolved_kind = kind
-    if resolved_kind is None:
-        columns = set(dataset.data.columns)
-        profile = str(dataset.metadata.get("measurement_profile") or "").strip()
-        if {"wavelength_nm"}.issubset(columns):
-            resolved_kind = "uv_vis"
-        elif {"temperature_C", "heat_flow_mW"}.issubset(columns):
-            resolved_kind = "dsc"
-        elif {"temperature_C", "mass_pct"}.issubset(columns):
-            resolved_kind = "tga"
-        elif {"q_inv_nm", "intensity_a_u"}.issubset(columns):
-            resolved_kind = "saxs"
-        elif {"mz", "intensity_a_u"}.issubset(columns):
-            resolved_kind = "ms"
-        elif {"retention_time_min", "detector_response_a_u"}.issubset(columns):
-            resolved_kind = "sec"
-        elif {"chemical_shift_ppm", "intensity_a_u"}.issubset(columns):
-            resolved_kind = "nmr"
-        elif profile:
-            resolved_kind = "rheology"
+    resolved_kind = _resolve_plot_kind(dataset, kind)
 
     if resolved_kind == "uv_vis":
         return plot_uv_vis(dataset, ax=ax, title=title, strict=strict, **kwargs)
+    if resolved_kind == "ftir":
+        return plot_ftir(dataset, ax=ax, title=title, strict=strict, **kwargs)
+    if resolved_kind == "dma":
+        return plot_dma(dataset, ax=ax, title=title, strict=strict, **kwargs)
     if resolved_kind == "dsc":
         return plot_dsc(dataset, ax=ax, title=title, strict=strict)
     if resolved_kind == "ms":

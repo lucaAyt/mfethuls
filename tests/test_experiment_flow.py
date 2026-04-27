@@ -167,6 +167,30 @@ def test_load_experiment_registry_infers_dma_measurement_profile_from_descriptio
         assert exp.metadata.get("measurement_profile") == "oscillatory_temperature_sweep"
 
 
+def test_load_experiment_registry_explicit_measurement_profile_trumps_inference():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry_path = os.path.join(tmpdir, "experiments_profile_priority.csv")
+        pd.DataFrame(
+            [
+                {
+                    "name": "dma_profile_priority",
+                    "experiment_id": "EXP099",
+                    "instrument_name": "dma",
+                    "sample_id": "S001",
+                    "run_id": "R001",
+                    "description": "temperature sweep run",
+                    "measurement_profile": "oscillatory_frequency_sweep",
+                    "test_type": "temperature",
+                }
+            ]
+        ).to_csv(registry_path, index=False)
+
+        load_experiment_registry(registry_path)
+        exp = get_experiment("dma_profile_priority")
+        assert exp.metadata.get("measurement_profile") == "oscillatory_frequency_sweep"
+        assert "test_type" not in exp.metadata
+
+
 def test_load_experiment_dataset_returns_dataset_even_when_missing_files():
     """High-level check that load_experiment_dataset returns a Dataset.
 

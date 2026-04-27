@@ -6,8 +6,8 @@
     "temperature_C": "float64",
     "frequency_hz": "float64",
     "strain_pct": "float64",
-    "storage_modulus_pa": "float64",
-    "loss_modulus_pa": "float64",
+    "storage_modulus_mpa": "float64",
+    "loss_modulus_mpa": "float64",
     "tan_delta": "float64"
   },
   "models": {
@@ -16,16 +16,19 @@
         "time_s": [
           "Time [s]",
           "Time",
-          "t [s]"
+          "t [s]",
+          "time (min)"
         ],
         "temperature_C": [
           "Temperature [\u00b0C]",
           "Temperature",
           "Temp [\u00b0C]",
-          "Temp"
+          "Temp",
+          "temperature (â°c)"
         ],
         "frequency_hz": [
           "Frequency [Hz]",
+          "frequency (hz)",
           "Frequency",
           "f [Hz]",
           "Hz"
@@ -35,15 +38,17 @@
           "gamma [%]",
           "\u03b3 [%]"
         ],
-        "storage_modulus_pa": [
-          "Storage Modulus [Pa]",
-          "G' [Pa]",
-          "Storage Modulus"
+        "storage_modulus_mpa": [
+          "Storage Modulus [MPa]",
+          "G' [MPa]",
+          "Storage Modulus",
+          "storage modulus (mpa)"
         ],
-        "loss_modulus_pa": [
-          "Loss Modulus [Pa]",
-          "G'' [Pa]",
-          "Loss Modulus"
+        "loss_modulus_mpa": [
+          "Loss Modulus [MPa]",
+          "G'' [MPa]",
+          "Loss Modulus",
+          "loss modulus (mpa)"
         ],
         "tan_delta": [
           "tan \u03b4",
@@ -57,22 +62,29 @@
     "oscillatory_temperature_sweep": {
       "required_columns": [
         "temperature_C",
-        "storage_modulus_pa",
-        "loss_modulus_pa"
+        "storage_modulus_mpa",
+        "loss_modulus_mpa"
       ]
     },
     "oscillatory_frequency_sweep": {
       "required_columns": [
         "frequency_hz",
-        "storage_modulus_pa",
-        "loss_modulus_pa"
+        "storage_modulus_mpa",
+        "loss_modulus_mpa"
       ]
     },
     "oscillatory_strain_sweep": {
       "required_columns": [
         "strain_pct",
-        "storage_modulus_pa",
-        "loss_modulus_pa"
+        "storage_modulus_mpa",
+        "loss_modulus_mpa"
+      ]
+    },
+    "oscillatory_time_sweep": {
+      "required_columns": [
+        "time_s",
+        "storage_modulus_mpa",
+        "loss_modulus_mpa"
       ]
     }
   }
