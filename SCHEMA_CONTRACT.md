@@ -39,12 +39,14 @@ This document defines the canonical data contract after parser normalization.
 19. frequency_hz: oscillation frequency in Hz.
 20. angular_frequency_rad_s: angular frequency in rad/s.
 21. strain_pct: strain amplitude in percent.
-22. storage_modulus_pa: storage modulus in Pa.
-23. loss_modulus_pa: loss modulus in Pa.
-24. tan_delta: tan(delta), unitless.
-25. shear_rate_s_inv: shear rate in 1/s.
-26. shear_stress_pa: shear stress in Pa.
-27. viscosity_pa_s: viscosity in Pa*s.
+22. storage_modulus_pa: storage modulus in Pa (rheometer contract).
+23. loss_modulus_pa: loss modulus in Pa (rheometer contract).
+24. storage_modulus_mpa: storage modulus in MPa (DMA contract).
+25. loss_modulus_mpa: loss modulus in MPa (DMA contract).
+26. tan_delta: tan(delta), unitless.
+27. shear_rate_s_inv: shear rate in 1/s.
+28. shear_stress_pa: shear stress in Pa.
+29. viscosity_pa_s: viscosity in Pa*s.
 
 ## Instrument Contracts
 
@@ -65,9 +67,9 @@ This document defines the canonical data contract after parser normalization.
 2. Rheometer oscillatory_strain_sweep: strain_pct, storage_modulus_pa, loss_modulus_pa.
 3. Rheometer oscillatory_time_sweep: time_s, storage_modulus_pa, loss_modulus_pa.
 4. Rheometer flow_curve: shear_rate_s_inv, shear_stress_pa, viscosity_pa_s.
-5. DMA oscillatory_temperature_sweep: temperature_C, storage_modulus_pa, loss_modulus_pa.
-6. DMA oscillatory_frequency_sweep: frequency_hz, storage_modulus_pa, loss_modulus_pa.
-7. DMA oscillatory_strain_sweep: strain_pct, storage_modulus_pa, loss_modulus_pa.
+5. DMA oscillatory_temperature_sweep: temperature_C, storage_modulus_mpa, loss_modulus_mpa.
+6. DMA oscillatory_frequency_sweep: frequency_hz, storage_modulus_mpa, loss_modulus_mpa.
+7. DMA oscillatory_strain_sweep: strain_pct, storage_modulus_mpa, loss_modulus_mpa.
 
 ## Database-Facing Guidance
 

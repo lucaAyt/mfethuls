@@ -79,7 +79,6 @@ def apply_dataframe_schema(
     instrument_type: str,
     instrument_model: str,
     measurement_profile: Optional[str] = None,
-    client_name: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Normalize parser output columns according to schema config.
 
@@ -90,7 +89,6 @@ def apply_dataframe_schema(
     - ``missing_required_columns``
     - ``warnings``
     - ``measurement_profile``
-    - ``client_name``
     - ``layers_applied``
     """
 
@@ -118,33 +116,11 @@ def apply_dataframe_schema(
     profile_schema = _safe_layer(global_profile_map, measurement_profile)
     model_profile_schema = _safe_layer(model_profile_map, measurement_profile)
 
-    global_client_map = schema.get("clients", {}) if isinstance(schema.get("clients", {}), dict) else {}
-    model_client_map = (
-        instrument_model_schema.get("clients", {})
-        if isinstance(instrument_model_schema.get("clients", {}), dict)
-        else {}
-    )
-    client_schema = _safe_layer(global_client_map, client_name)
-    model_client_schema = _safe_layer(model_client_map, client_name)
-
-    client_profile_map = client_schema.get("profiles", {}) if isinstance(client_schema.get("profiles", {}), dict) else {}
-    model_client_profile_map = (
-        model_client_schema.get("profiles", {})
-        if isinstance(model_client_schema.get("profiles", {}), dict)
-        else {}
-    )
-    client_profile_schema = _safe_layer(client_profile_map, measurement_profile)
-    model_client_profile_schema = _safe_layer(model_client_profile_map, measurement_profile)
-
     layers = [
         schema,
         instrument_model_schema,
         profile_schema,
         model_profile_schema,
-        client_schema,
-        model_client_schema,
-        client_profile_schema,
-        model_client_profile_schema,
     ]
 
     aliases = _merge_aliases(*layers)
@@ -157,10 +133,6 @@ def apply_dataframe_schema(
 
     if measurement_profile:
         known_profiles = set(global_profile_map) | set(model_profile_map)
-        if client_schema:
-            known_profiles |= set(client_profile_map)
-        if model_client_schema:
-            known_profiles |= set(model_client_profile_map)
         if known_profiles and measurement_profile not in known_profiles:
             warnings.append(
                 f"Unknown measurement_profile={measurement_profile!r} for instrument_type={instrument_type!r}, "
@@ -204,12 +176,9 @@ def apply_dataframe_schema(
         "missing_required_columns": missing_required_columns,
         "warnings": warnings,
         "measurement_profile": measurement_profile,
-        "client_name": client_name,
         "layers_applied": {
             "model": bool(instrument_model_schema),
             "profile": bool(profile_schema or model_profile_schema),
-            "client": bool(client_schema or model_client_schema),
-            "client_profile": bool(client_profile_schema or model_client_profile_schema),
         },
     }
     return normalized, report

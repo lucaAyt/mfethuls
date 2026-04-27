@@ -233,8 +233,8 @@ def test_apply_dataframe_schema_renames_and_casts_dma_temperature_sweep_columns(
     df = pd.DataFrame(
         {
             "Temperature [°C]": [25.0, 30.0],
-            "Storage Modulus [Pa]": [1000.0, 1100.0],
-            "Loss Modulus [Pa]": [200.0, 220.0],
+            "Storage Modulus [MPa]": [1.0, 1.1],
+            "Loss Modulus [MPa]": [0.2, 0.22],
             "tan delta": [0.20, 0.21],
         }
     )
@@ -252,8 +252,8 @@ def test_apply_dataframe_schema_renames_and_casts_dma_temperature_sweep_columns(
     assert report["layers_applied"]["profile"] is True
     assert report["missing_required_columns"] == []
     assert "temperature_C" in normalized.columns
-    assert "storage_modulus_pa" in normalized.columns
-    assert "loss_modulus_pa" in normalized.columns
+    assert "storage_modulus_mpa" in normalized.columns
+    assert "loss_modulus_mpa" in normalized.columns
     assert "tan_delta" in normalized.columns
 
 
@@ -261,8 +261,8 @@ def test_apply_dataframe_schema_renames_and_casts_dma_frequency_sweep_columns():
     df = pd.DataFrame(
         {
             "Frequency [Hz]": [1.0, 10.0],
-            "Storage Modulus [Pa]": [1000.0, 1100.0],
-            "Loss Modulus [Pa]": [200.0, 220.0],
+            "Storage Modulus [MPa]": [1.0, 1.1],
+            "Loss Modulus [MPa]": [0.2, 0.22],
         }
     )
 
@@ -279,16 +279,16 @@ def test_apply_dataframe_schema_renames_and_casts_dma_frequency_sweep_columns():
     assert report["layers_applied"]["profile"] is True
     assert report["missing_required_columns"] == []
     assert "frequency_hz" in normalized.columns
-    assert "storage_modulus_pa" in normalized.columns
-    assert "loss_modulus_pa" in normalized.columns
+    assert "storage_modulus_mpa" in normalized.columns
+    assert "loss_modulus_mpa" in normalized.columns
 
 
 def test_apply_dataframe_schema_renames_and_casts_dma_strain_sweep_columns():
     df = pd.DataFrame(
         {
             "Strain [%]": [0.1, 0.2],
-            "Storage Modulus [Pa]": [1000.0, 1100.0],
-            "Loss Modulus [Pa]": [200.0, 220.0],
+            "Storage Modulus [MPa]": [1.0, 1.1],
+            "Loss Modulus [MPa]": [0.2, 0.22],
         }
     )
 
@@ -305,8 +305,8 @@ def test_apply_dataframe_schema_renames_and_casts_dma_strain_sweep_columns():
     assert report["layers_applied"]["profile"] is True
     assert report["missing_required_columns"] == []
     assert "strain_pct" in normalized.columns
-    assert "storage_modulus_pa" in normalized.columns
-    assert "loss_modulus_pa" in normalized.columns
+    assert "storage_modulus_mpa" in normalized.columns
+    assert "loss_modulus_mpa" in normalized.columns
 
 
 def test_apply_dataframe_schema_returns_report_when_schema_missing():

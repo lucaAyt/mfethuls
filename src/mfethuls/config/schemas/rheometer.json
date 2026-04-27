@@ -87,26 +87,5 @@
         "viscosity_pa_s"
       ]
     }
-  },
-  "clients": {
-    "example_client": {
-      "aliases": {
-        "temperature_C": [
-          "Temp_C"
-        ]
-      },
-      "profiles": {
-        "oscillatory_frequency_sweep": {
-          "aliases": {
-            "storage_modulus_pa": [
-              "Gp [Pa]"
-            ],
-            "loss_modulus_pa": [
-              "Gpp [Pa]"
-            ]
-          }
-        }
-      }
-    }
   }
 }
