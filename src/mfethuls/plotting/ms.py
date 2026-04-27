@@ -3,13 +3,15 @@ from __future__ import annotations
 from typing import Optional, Tuple
 
 from ..dataset import Dataset
-from .core import _default_title, _figure_and_axis, _require_columns
+from .core import _default_title, _figure_and_axis, _plot_grouped_single_signal, _require_columns
 from .style import apply_axes_style
 
 
 def plot_ms(
     dataset: Dataset,
     *,
+    group_by: Optional[str] = None,
+    max_groups: int = 20,
     ax=None,
     title: Optional[str] = None,
     strict: bool = True,
@@ -20,7 +22,15 @@ def plot_ms(
         _require_columns(dataset, [x_column, y_column], "plot_ms")
 
     fig, axis = _figure_and_axis(ax)
-    axis.plot(dataset.data[x_column], dataset.data[y_column], color="#17becf")
+    _plot_grouped_single_signal(
+        dataset,
+        x_column=x_column,
+        y_column=y_column,
+        ax=axis,
+        group_by=group_by,
+        max_groups=max_groups,
+        color="#17becf",
+    )
     apply_axes_style(
         axis,
         title=title or _default_title(dataset, "MS"),

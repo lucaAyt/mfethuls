@@ -6,7 +6,6 @@
     "experiments": [],
     "characterizer": {
       "type": "dsc_profiling",
-      "name_program_temperature": "Tr [°C]",
       "sensitivity": 0.1
     }
   },
@@ -17,7 +16,6 @@
     "experiments": [],
     "characterizer": {
       "type": "dsc_profiling",
-      "name_program_temperature": "Program Temperature",
       "sensitivity": 0.01
     }
   },
@@ -28,7 +26,6 @@
     "experiments": [],
     "characterizer": {
       "type": "dsc_profiling",
-      "name_program_temperature": "Tr [°C]",
       "sensitivity": 0.1
     }
   },

@@ -35,6 +35,8 @@ def plot_dma(
     dataset: Dataset,
     *,
     profile: Optional[str] = None,
+    group_by: Optional[str] = None,
+    max_groups: int = 20,
     ax=None,
     title: Optional[str] = None,
     strict: bool = True,

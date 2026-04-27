@@ -60,7 +60,34 @@ def create_instrument(type_, name, model, characterizer=None, data_root_path=Non
 
 def create_characterizer(type_, config):
     if type_ == 'dsc' and config.get('type') == 'dsc_profiling':
-        return DSCProfiling(config.get('name_program_temperature', 'Tr [°C]'), config.get('sensitivity', 0.1))
+        return DSCProfiling(config.get('sensitivity', 0.1))
+
+
+def _apply_characterizer(dataset: Dataset, instrument) -> Dataset:
+    """Apply optional instrument characterizer to Dataset.data in-place."""
+
+    characterizer = getattr(instrument, "characterizer", None)
+    if characterizer is None:
+        return dataset
+
+    if not hasattr(characterizer, "characterize"):
+        return dataset
+
+    dataset.data = characterizer.characterize(dataset.data)
+
+    if not isinstance(dataset.metadata, dict):
+        dataset.metadata = {}
+    characterization = dataset.metadata.get("characterization")
+    if not isinstance(characterization, dict):
+        characterization = {}
+    characterization.update(
+        {
+            "applied": True,
+            "name": characterizer.__class__.__name__,
+        }
+    )
+    dataset.metadata["characterization"] = characterization
+    return dataset
 
 
 def parse_experiment(
@@ -113,7 +140,7 @@ def parse_experiment(
     parsed = parser.parse(dict_data_paths, **parse_kwargs)
 
     if isinstance(parsed, Dataset):
-        return parsed
+        return _apply_characterizer(parsed, instrument)
 
     # Backwards-compatible wrapper for parsers that still return DataFrames.
     metadata = {
@@ -128,4 +155,5 @@ def parse_experiment(
     }
     metadata.update(experiment.metadata)
 
-    return Dataset(data=parsed, metadata=metadata)
+    dataset = Dataset(data=parsed, metadata=metadata)
+    return _apply_characterizer(dataset, instrument)

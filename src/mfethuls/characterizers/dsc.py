@@ -3,16 +3,23 @@ import numpy as np
 
 
 class DSCProfiling:
-    def __init__(self, name_program_temperature: str, sensitivity=0.1):
-        self.name_program_temperature = name_program_temperature
+    def __init__(self, sensitivity=0.1):
         self.sensitivity = sensitivity
 
     # Characterize vectorized
     def characterize(self, df: pd.DataFrame) -> pd.DataFrame:
+        if df.empty:
+            return df
+
+        if "temperature_C" not in df.columns:
+            raise KeyError("DSCProfiling requires canonical column 'temperature_C'.")
+
+        temperature_column = "temperature_C"
+
         def process_group(group: pd.DataFrame) -> pd.DataFrame:
             group = group.copy(deep=False)
 
-            temperature = group[self.name_program_temperature]
+            temperature = group[temperature_column]
             diff = temperature.diff()
             diff2 = diff.diff()
 
@@ -42,7 +49,7 @@ class DSCProfiling:
             heating_ids = np.cumsum(heating_ends)
             cooling_ids = np.cumsum(cooling_ends)
 
-            # For isothermal: define start of a new block as when previous label wasn’t Isothermal
+            # For isothermal: start a new block when previous label was not Isothermal.
             prev_profile = np.insert(profile[:-1], 0, '')
             isothermal_starts = isothermal_mask & (prev_profile != 'Isothermal')
             isothermal_ids = np.cumsum(isothermal_starts) - 1
@@ -67,4 +74,11 @@ class DSCProfiling:
             group['profile'] = profile
             return group.drop(columns=['diff', 'diff2'])
 
-        return df.groupby('name', group_keys=False).apply(process_group).reset_index(drop=True)
+        if "name" in df.columns:
+            processed = [process_group(group) for _, group in df.groupby("name", sort=False)]
+            return pd.concat(processed, ignore_index=True) if processed else df.copy()
+        if "run_id" in df.columns:
+            processed = [process_group(group) for _, group in df.groupby("run_id", sort=False)]
+            return pd.concat(processed, ignore_index=True) if processed else df.copy()
+
+        return process_group(df).reset_index(drop=True)

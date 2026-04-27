@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional, Tuple
 
 import matplotlib.pyplot as plt
 
 from ..dataset import Dataset
 from .style import apply_axes_style
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class PlotError(ValueError):
@@ -62,6 +66,132 @@ def _line_plot(
     if len(y_columns) > 1:
         axis.legend()
     return fig, axis
+
+
+def _duplicate_row_count(df, key_columns: list[str]) -> int:
+    """Count rows participating in duplicates for the given key columns."""
+
+    if not key_columns:
+        return 0
+    return int(df.duplicated(subset=key_columns, keep=False).sum())
+
+
+def _resolve_grouping_column(
+    dataset: Dataset,
+    *,
+    key_columns: list[str],
+    exclude_columns: list[str],
+    group_by: Optional[str],
+    max_groups: int,
+) -> Optional[str]:
+    """Resolve grouping column from explicit choice or data-driven inference."""
+
+    if max_groups < 2:
+        raise PlotError("max_groups must be at least 2.")
+
+    df = dataset.data
+    if group_by is not None:
+        if group_by not in df.columns:
+            raise PlotError(f"group_by column {group_by!r} is not present in dataset.")
+        return group_by
+
+    baseline_duplicates = _duplicate_row_count(df, key_columns)
+    if baseline_duplicates == 0:
+        return None
+
+    excluded = set(exclude_columns) | set(key_columns)
+    candidates: list[str] = []
+    for column in df.columns:
+        if column in excluded:
+            continue
+        series = df[column]
+        non_null_ratio = float(series.notna().mean())
+        if non_null_ratio < 0.8:
+            continue
+        cardinality = int(series.nunique(dropna=True))
+        if cardinality < 2:
+            continue
+        candidates.append(column)
+
+    if not candidates:
+        return None
+
+    best_column: Optional[str] = None
+    best_score = -1.0
+    tied_best_columns: list[str] = []
+    for column in candidates:
+        grouped_duplicates = 0
+        for _, subset in df.groupby(column, dropna=False, sort=False):
+            grouped_duplicates += _duplicate_row_count(subset, key_columns)
+
+        score = 1.0 - (grouped_duplicates / max(baseline_duplicates, 1))
+        if score > best_score:
+            best_score = score
+            best_column = column
+            tied_best_columns = [column]
+        elif score == best_score and best_column is not None:
+            tied_best_columns.append(column)
+
+    if best_column is None or best_score <= 0:
+        return None
+
+    if len(tied_best_columns) > 1:
+        LOGGER.warning(
+            "Grouping inference tie detected for columns %s at score %.4f; selecting %r by column order. "
+            "Pass group_by explicitly to control tie-break behavior.",
+            tied_best_columns,
+            best_score,
+            best_column,
+        )
+
+    return best_column
+
+
+def _plot_grouped_single_signal(
+    dataset: Dataset,
+    *,
+    x_column: str,
+    y_column: str,
+    ax,
+    group_by: Optional[str],
+    max_groups: int,
+    color: Optional[str] = None,
+) -> Optional[str]:
+    """Plot a single-signal line with optional grouping.
+
+    Returns the grouping column used, if any.
+    """
+
+    resolved_group = _resolve_grouping_column(
+        dataset,
+        key_columns=[x_column],
+        exclude_columns=[y_column],
+        group_by=group_by,
+        max_groups=max_groups,
+    )
+
+    df = dataset.data
+    if not resolved_group:
+        ax.plot(df[x_column], df[y_column], color=color)
+        return None
+
+    group_count = int(df[resolved_group].nunique(dropna=False))
+    if group_count > max_groups:
+        LOGGER.warning(
+            "Skipping grouped plot for %r: inferred/selected grouper %r has %d groups, exceeding max_groups=%d. "
+            "Pass a lower-cardinality group_by or increase max_groups.",
+            y_column,
+            resolved_group,
+            group_count,
+            max_groups,
+        )
+        return None
+
+    for group_value, subset in df.groupby(resolved_group, dropna=False, sort=False):
+        label_value = "<missing>" if group_value is None else str(group_value)
+        ax.plot(subset[x_column], subset[y_column], label=label_value)
+    ax.legend(title=resolved_group)
+    return resolved_group
 
 
 def _resolve_plot_kind(dataset: Dataset, kind: Optional[str]) -> Optional[str]:
@@ -134,6 +264,8 @@ def plot_dataset(
     dataset: Dataset,
     kind: Optional[str] = None,
     *,
+    group_by: Optional[str] = None,
+    max_groups: int = 50,
     ax=None,
     title: Optional[str] = None,
     strict: bool = True,
@@ -155,25 +287,101 @@ def plot_dataset(
     resolved_kind = _resolve_plot_kind(dataset, kind)
 
     if resolved_kind == "uv_vis":
-        return plot_uv_vis(dataset, ax=ax, title=title, strict=strict, **kwargs)
+        return plot_uv_vis(
+            dataset,
+            group_by=group_by,
+            max_groups=max_groups,
+            ax=ax,
+            title=title,
+            strict=strict,
+            **kwargs,
+        )
     if resolved_kind == "ftir":
-        return plot_ftir(dataset, ax=ax, title=title, strict=strict, **kwargs)
+        return plot_ftir(
+            dataset,
+            group_by=group_by,
+            max_groups=max_groups,
+            ax=ax,
+            title=title,
+            strict=strict,
+            **kwargs,
+        )
     if resolved_kind == "dma":
-        return plot_dma(dataset, ax=ax, title=title, strict=strict, **kwargs)
+        return plot_dma(
+            dataset,
+            group_by=group_by,
+            max_groups=max_groups,
+            ax=ax,
+            title=title,
+            strict=strict,
+            **kwargs,
+        )
     if resolved_kind == "dsc":
-        return plot_dsc(dataset, ax=ax, title=title, strict=strict)
+        return plot_dsc(
+            dataset,
+            group_by=group_by,
+            max_groups=max_groups,
+            ax=ax,
+            title=title,
+            strict=strict,
+        )
     if resolved_kind == "ms":
-        return plot_ms(dataset, ax=ax, title=title, strict=strict)
+        return plot_ms(
+            dataset,
+            group_by=group_by,
+            max_groups=max_groups,
+            ax=ax,
+            title=title,
+            strict=strict,
+        )
     if resolved_kind == "tga":
-        return plot_tga(dataset, ax=ax, title=title, strict=strict, **kwargs)
+        return plot_tga(
+            dataset,
+            group_by=group_by,
+            max_groups=max_groups,
+            ax=ax,
+            title=title,
+            strict=strict,
+            **kwargs,
+        )
     if resolved_kind == "rheology":
-        return plot_rheology(dataset, ax=ax, title=title, strict=strict, **kwargs)
+        return plot_rheology(
+            dataset,
+            group_by=group_by,
+            max_groups=max_groups,
+            ax=ax,
+            title=title,
+            strict=strict,
+            **kwargs,
+        )
     if resolved_kind == "sec":
-        return plot_sec(dataset, ax=ax, title=title, strict=strict, **kwargs)
+        return plot_sec(
+            dataset,
+            group_by=group_by,
+            max_groups=max_groups,
+            ax=ax,
+            title=title,
+            strict=strict,
+            **kwargs,
+        )
     if resolved_kind == "saxs":
-        return plot_saxs(dataset, ax=ax, title=title, strict=strict)
+        return plot_saxs(
+            dataset,
+            group_by=group_by,
+            max_groups=max_groups,
+            ax=ax,
+            title=title,
+            strict=strict,
+        )
     if resolved_kind == "nmr":
-        return plot_nmr(dataset, ax=ax, title=title, strict=strict)
+        return plot_nmr(
+            dataset,
+            group_by=group_by,
+            max_groups=max_groups,
+            ax=ax,
+            title=title,
+            strict=strict,
+        )
 
     raise PlotError(
         "Could not infer a plot kind from the normalized dataset. "

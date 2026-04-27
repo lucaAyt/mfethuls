@@ -147,7 +147,7 @@ def mainX(argv: list[str] | None = None):
 
 def main():
     """Simple debugging entrypoint"""
-    _apply_runtime_env_mode("test")
+    # _apply_runtime_env_mode("test")
     registry_path = os.environ.get('MFETHULS_TEST_REGISTRY')
     df_registry = load_experiment_registry(registry_path)
     ds = load_experiment_dataset('EXP013')

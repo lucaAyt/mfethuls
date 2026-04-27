@@ -5,7 +5,9 @@ from importlib.metadata import PackageNotFoundError, version
 import pandas as pd
 
 from mfethuls.dataset import Dataset
+from mfethuls.experiments import Experiment
 from mfethuls.experiments import get_experiment, load_experiment_registry
+from mfethuls.factory import parse_experiment
 from mfethuls.config_loader import load_experiment_dataset
 from mfethuls.storage import (
     dataset_in_storage,
@@ -308,3 +310,43 @@ def test_load_experiment_registry_normalizes_instrument_name_case():
         load_experiment_registry(registry_path)
         exp = get_experiment("case_test_1")
         assert exp.instrument_name == "dsc_mettler_toledo"
+
+
+def test_parse_experiment_applies_characterizer_for_dataset_parser_output():
+    class _FakeParser:
+        def parse(self, dict_paths, **kwargs):
+            _ = dict_paths, kwargs
+            return Dataset(
+                data=pd.DataFrame(
+                    {
+                        "temperature_C": [25.0, 50.0, 75.0],
+                        "heat_flow_mW": [0.1, 0.4, 0.2],
+                    }
+                ),
+                metadata={"schema_version": "1.0"},
+            )
+
+    class _FakeCharacterizer:
+        def characterize(self, df):
+            return df.assign(profile="Heating")
+
+    class _FakeInstrument:
+        type_ = "dsc"
+        model = "mettler_toledo"
+        name = "dsc_mettler_toledo"
+        parser = _FakeParser()
+        characterizer = _FakeCharacterizer()
+
+    exp = Experiment(
+        name="dsc_char_test",
+        experiment_id="EXP123",
+        instrument_name="dsc_mettler_toledo",
+        sample_id="S001",
+        run_id="R001",
+    )
+
+    ds = parse_experiment(exp, dict_data_paths={}, instrument=_FakeInstrument())
+    assert isinstance(ds, Dataset)
+    assert "profile" in ds.data.columns
+    assert ds.metadata.get("characterization", {}).get("applied") is True
+    assert ds.metadata.get("characterization", {}).get("name") == "_FakeCharacterizer"

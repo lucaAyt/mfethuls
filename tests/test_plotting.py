@@ -49,6 +49,25 @@ def test_plot_dsc_uses_canonical_columns():
     assert len(ax.lines) == 1
 
 
+def test_plot_dsc_defaults_to_profile_grouping_when_available():
+    dataset = Dataset(
+        data=pd.DataFrame(
+            {
+                "temperature_C": [25, 50, 75, 25, 50, 75],
+                "heat_flow_mW": [0.0, 1.2, 0.8, 0.1, 1.1, 0.9],
+                "profile": ["Heating", "Heating", "Heating", "Cooling", "Cooling", "Cooling"],
+            }
+        ),
+        metadata={"experiment_id": "EXP002"},
+    )
+
+    fig, ax = _close(plot_dsc(dataset))
+    assert len(ax.lines) == 2
+    legend = ax.get_legend()
+    assert legend is not None
+    assert legend.get_title().get_text() == "profile"
+
+
 def test_plot_ftir_chooses_absorbance_and_reverses_axis():
     dataset = Dataset(
         data=pd.DataFrame(
@@ -186,3 +205,99 @@ def test_plotting_fails_on_missing_columns():
 
     with pytest.raises(PlotError):
         plot_dsc(dataset)
+
+
+def test_plot_uv_vis_infers_grouping_from_duplicate_x_segments():
+    dataset = Dataset(
+        data=pd.DataFrame(
+            {
+                "wavelength_nm": [200, 250, 300, 200, 250, 300],
+                "absorbance_a_u": [0.1, 0.2, 0.3, 0.15, 0.25, 0.35],
+                "timestamp": ["t1", "t1", "t1", "t2", "t2", "t2"],
+            }
+        ),
+        metadata={"experiment_id": "EXP_GRP_001"},
+    )
+
+    fig, ax = _close(plot_uv_vis(dataset))
+    assert len(ax.lines) == 2
+    legend = ax.get_legend()
+    assert legend is not None
+    assert legend.get_title().get_text() == "timestamp"
+
+
+def test_plot_uv_vis_respects_explicit_group_by():
+    dataset = Dataset(
+        data=pd.DataFrame(
+            {
+                "wavelength_nm": [200, 250, 300, 200, 250, 300],
+                "absorbance_a_u": [0.1, 0.2, 0.3, 0.15, 0.25, 0.35],
+                "source_file": ["a", "a", "a", "b", "b", "b"],
+            }
+        ),
+        metadata={"experiment_id": "EXP_GRP_002"},
+    )
+
+    fig, ax = _close(plot_dataset(dataset, kind="uv_vis", group_by="source_file"))
+    assert len(ax.lines) == 2
+    legend = ax.get_legend()
+    assert legend is not None
+    assert legend.get_title().get_text() == "source_file"
+
+
+def test_plot_dataset_group_by_respects_max_groups(caplog):
+    dataset = Dataset(
+        data=pd.DataFrame(
+            {
+                "wavelength_nm": [200, 250, 300, 200, 250, 300],
+                "absorbance_a_u": [0.1, 0.2, 0.3, 0.15, 0.25, 0.35],
+                "source_file": ["a", "b", "c", "d", "e", "f"],
+            }
+        ),
+        metadata={"instrument_type": "uv_vis"},
+    )
+
+    caplog.set_level("WARNING", logger="mfethuls.plotting.core")
+    fig, ax = _close(plot_dataset(dataset, group_by="source_file", max_groups=3))
+    assert len(ax.lines) == 0
+    assert "Skipping grouped plot" in caplog.text
+
+
+def test_plot_sec_group_by_respects_max_groups(caplog):
+    dataset = Dataset(
+        data=pd.DataFrame(
+            {
+                "retention_time_min": [1, 2, 1, 2, 1, 2],
+                "detector_response_a_u": [10, 20, 30, 40, 50, 60],
+                "source_file": ["a", "b", "c", "d", "e", "f"],
+            }
+        ),
+        metadata={"instrument_type": "sec"},
+    )
+
+    caplog.set_level("WARNING", logger="mfethuls.plotting.sec")
+    fig, ax = _close(plot_sec(dataset, group_by="source_file", max_groups=3))
+    assert len(ax.lines) == 0
+    assert "Skipping grouped SEC plot" in caplog.text
+
+
+def test_plot_uv_vis_logs_when_inferred_grouping_ties(caplog):
+    dataset = Dataset(
+        data=pd.DataFrame(
+            {
+                "wavelength_nm": [200, 250, 300, 200, 250, 300],
+                "absorbance_a_u": [0.1, 0.2, 0.3, 0.15, 0.25, 0.35],
+                "group_alpha": ["a", "a", "a", "b", "b", "b"],
+                "group_beta": ["x", "x", "x", "y", "y", "y"],
+            }
+        ),
+        metadata={"instrument_type": "uv_vis"},
+    )
+
+    caplog.set_level("WARNING", logger="mfethuls.plotting.core")
+    fig, ax = _close(plot_dataset(dataset))
+    assert len(ax.lines) == 2
+    legend = ax.get_legend()
+    assert legend is not None
+    assert legend.get_title().get_text() == "group_alpha"
+    assert "Grouping inference tie detected" in caplog.text
