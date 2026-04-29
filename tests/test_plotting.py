@@ -7,15 +7,20 @@ import pandas as pd
 import pytest
 
 from mfethuls.dataset import Dataset
+from mfethuls import plot_experiments as plot_experiments_root
 from mfethuls.plotting import (
+    load_comparison_set,
     plot_dma,
+    plot_comparison,
     plot_dataset,
     plot_dsc,
     plot_ftir,
+    plot_experiments,
     plot_rheology,
     plot_sec,
     plot_uv_vis,
 )
+from mfethuls.plotting.comparison import ComparisonSet
 from mfethuls.plotting.core import PlotError
 
 
@@ -301,3 +306,148 @@ def test_plot_uv_vis_logs_when_inferred_grouping_ties(caplog):
     assert legend is not None
     assert legend.get_title().get_text() == "group_alpha"
     assert "Grouping inference tie detected" in caplog.text
+
+
+def test_load_comparison_set_preserves_order_and_options(monkeypatch):
+    calls = []
+
+    def _fake_loader(name, use_storage=True, refresh=False):
+        calls.append((name, use_storage, refresh))
+        return Dataset(
+            data=pd.DataFrame({"wavelength_nm": [200.0], "absorbance_a_u": [0.1]}),
+            metadata={"experiment_name": f"name_{name}", "experiment_id": name},
+        )
+
+    monkeypatch.setattr("mfethuls.comparison.load_experiment_dataset", _fake_loader)
+
+    result = load_comparison_set(["EXP003", "EXP001"], use_storage=False, refresh=True)
+
+    assert isinstance(result, ComparisonSet)
+    assert [ds.experiment_id for ds in result.datasets] == ["EXP003", "EXP001"]
+    assert result.labels == ["name_EXP003", "name_EXP001"]
+    assert calls == [
+        ("EXP003", False, True),
+        ("EXP001", False, True),
+    ]
+
+
+def test_load_comparison_set_label_fallbacks(monkeypatch):
+    queue = [
+        Dataset(
+            data=pd.DataFrame({"temperature_C": [25.0], "heat_flow_mW": [0.2]}),
+            metadata={"experiment_id": "EXP777"},
+        ),
+        Dataset(
+            data=pd.DataFrame({"temperature_C": [30.0], "heat_flow_mW": [0.3]}),
+            metadata={},
+        ),
+    ]
+
+    def _fake_loader(name, use_storage=True, refresh=False):
+        _ = name, use_storage, refresh
+        return queue.pop(0)
+
+    monkeypatch.setattr("mfethuls.comparison.load_experiment_dataset", _fake_loader)
+
+    result = load_comparison_set(["exp_a", "exp_b"])
+    assert result.labels == ["EXP777", "dataset_2"]
+
+
+def test_plot_comparison_auto_overlay_when_shared_x():
+    ds1 = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
+        metadata={"experiment_id": "EXP001"},
+    )
+    ds2 = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.15, 0.25, 0.35]}),
+        metadata={"experiment_id": "EXP002"},
+    )
+
+    fig, ax = _close(plot_experiments([ds1, ds2], mode="auto", kind="uv_vis"))
+    assert len(ax.lines) == 2
+    assert ax.get_title() == "Comparison Overlay"
+
+
+def test_plot_comparison_auto_facet_when_x_not_compatible():
+    ds1 = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
+        metadata={"experiment_id": "EXP001"},
+    )
+    ds2 = Dataset(
+        data=pd.DataFrame({"temperature_C": [25, 50, 75], "heat_flow_mW": [0.2, 0.4, 0.1]}),
+        metadata={"experiment_id": "EXP002"},
+    )
+
+    fig, axes = plot_experiments([ds1, ds2], mode="auto")
+    plt.close(fig)
+    assert axes.shape[0] == 2
+
+
+def test_plot_comparison_explicit_overlay_rejects_incompatible_x():
+    ds1 = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
+        metadata={"experiment_id": "EXP001"},
+    )
+    ds2 = Dataset(
+        data=pd.DataFrame({"temperature_C": [25, 50, 75], "heat_flow_mW": [0.2, 0.4, 0.1]}),
+        metadata={"experiment_id": "EXP002"},
+    )
+
+    with pytest.raises(PlotError):
+        plot_experiments([ds1, ds2], mode="overlay")
+
+
+def test_plot_comparison_explicit_stacked_rejects_incompatible_x():
+    ds1 = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
+        metadata={"experiment_id": "EXP001"},
+    )
+    ds2 = Dataset(
+        data=pd.DataFrame({"temperature_C": [25, 50, 75], "heat_flow_mW": [0.2, 0.4, 0.1]}),
+        metadata={"experiment_id": "EXP002"},
+    )
+
+    with pytest.raises(PlotError):
+        plot_experiments([ds1, ds2], mode="stacked", stacked_offset=0.5)
+
+
+def test_plot_comparison_stacked_requires_positive_offset():
+    ds1 = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
+        metadata={"experiment_id": "EXP001"},
+    )
+    ds2 = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.2, 0.3, 0.4]}),
+        metadata={"experiment_id": "EXP002"},
+    )
+
+    with pytest.raises(PlotError):
+        plot_experiments([ds1, ds2], mode="stacked", stacked_offset=0.0)
+
+
+def test_plot_comparison_remains_compatible_alias():
+    ds1 = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
+        metadata={"experiment_id": "EXP001"},
+    )
+    ds2 = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.15, 0.25, 0.35]}),
+        metadata={"experiment_id": "EXP002"},
+    )
+
+    fig, ax = _close(plot_comparison([ds1, ds2], mode="auto", kind="uv_vis"))
+    assert len(ax.lines) == 2
+
+
+def test_plot_experiments_is_available_from_package_root():
+    ds1 = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
+        metadata={"experiment_id": "EXP001"},
+    )
+    ds2 = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.15, 0.25, 0.35]}),
+        metadata={"experiment_id": "EXP002"},
+    )
+
+    fig, ax = _close(plot_experiments_root([ds1, ds2], mode="auto", kind="uv_vis"))
+    assert len(ax.lines) == 2

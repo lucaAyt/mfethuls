@@ -2,11 +2,12 @@ import os
 import logging
 import argparse
 
+import matplotlib.pyplot as plt
+
 import mfethuls.parsers
 import mfethuls.factory as factory
-from mfethuls.config_loader import load_experiment_dataset
+from mfethuls import load_experiments, plot_experiments
 from mfethuls.experiments import load_experiment_registry
-from mfethuls.plotting.core import plot_dataset
 
 
 def _resolve_registry_path(cli_registry_path: str | None, registry_env: str) -> str:
@@ -88,7 +89,9 @@ def mainX(argv: list[str] | None = None):
         help="Filter registry by status value (set empty string to disable status filtering).",
     )
     parser.add_argument(
+        "--experiment",
         "--name",
+        dest="experiments",
         action="append",
         help="Explicit experiment name(s) to run. Repeatable.",
     )
@@ -102,6 +105,21 @@ def mainX(argv: list[str] | None = None):
         action="store_true",
         help="Disable local storage cache for this run.",
     )
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Render a comparison plot for the selected experiments.",
+    )
+    parser.add_argument(
+        "--plot-mode",
+        choices=["auto", "overlay", "stacked", "facet"],
+        default="auto",
+        help="Plot mode to use when --plot is enabled.",
+    )
+    parser.add_argument(
+        "--plot-output",
+        help="Optional path to save the plot instead of only creating it in memory.",
+    )
     args = parser.parse_args(argv)
 
     _apply_runtime_env_mode(args.registry_env)
@@ -112,8 +130,8 @@ def mainX(argv: list[str] | None = None):
     df_registry = load_experiment_registry(registry_path)
     print("Registered experiments:\n", df_registry[["name", "experiment_id", "instrument_name"]])
 
-    if args.name:
-        selected = args.name
+    if args.experiments:
+        selected = args.experiments
     elif args.status and "status" in df_registry.columns:
         selected = df_registry[df_registry["status"] == args.status]["name"].tolist()
     else:
@@ -121,37 +139,46 @@ def mainX(argv: list[str] | None = None):
 
     print("Selected experiments:", selected)
 
-    for name in selected:
-        print(f"\nLoading dataset for experiment: {name}")
-        try:
-            ds = load_experiment_dataset(
-                name,
-                use_storage=not args.no_storage,
-                refresh=args.refresh,
-            )
-        except Exception as exc:  # noqa: BLE001
-            print(f"  Failed to load dataset: {exc!r}")
-            continue
+    try:
+        comparison = load_experiments(
+            selected,
+            use_storage=not args.no_storage,
+            refresh=args.refresh,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"  Failed to load experiments: {exc!r}")
+        return
 
-        print(f"  Dataset type: {type(ds).__name__}")
-        print(f"  experiment_id: {ds.experiment_id}")
-        print(f"  data shape: {ds.data.shape}")
-        print(f"  metadata keys: {sorted(ds.metadata.keys())}")
-        provenance = ds.metadata.get("provenance", {}) if isinstance(ds.metadata, dict) else {}
-        if provenance:
-            print(f"  mfethuls_version: {provenance.get('mfethuls_version')}")
-            print(f"  saved_at_utc: {provenance.get('saved_at_utc')}")
-            print(f"  parser_key: {(provenance.get('instrument') or {}).get('parser_key')}")
-            print(f"  source_file_count: {(provenance.get('source') or {}).get('source_file_count')}")
-        print(f"  data head: {ds.data.head(5)}")
+    print(f"Loaded comparison set with {len(comparison.datasets)} experiments")
+    print("Comparison labels:", comparison.labels)
 
-def main():
-    """Simple debugging entrypoint"""
-    # _apply_runtime_env_mode("test")
-    registry_path = os.environ.get('MFETHULS_TEST_REGISTRY')
-    df_registry = load_experiment_registry(registry_path)
-    ds = load_experiment_dataset('EXP013')
-    fig, ax = plot_dataset(ds)
+    families = []
+    for dataset in comparison.datasets:
+        metadata = dataset.metadata if isinstance(dataset.metadata, dict) else {}
+        families.append((metadata.get("instrument_type") or "unknown", metadata.get("measurement_profile") or "-"))
+
+    print("Experiment families / profiles:")
+    for label, (family, profile) in zip(comparison.labels, families):
+        print(f"  - {label}: {family} / {profile}")
+
+    combined = comparison.to_dataframe()
+    print(f"Combined dataframe shape: {combined.shape}")
+    print(f"Combined dataframe columns: {list(combined.columns)}")
+    print(f"Combined dataframe head:\n{combined.head(5)}")
+
+    if args.plot:
+        fig, ax = plot_experiments(comparison, mode=args.plot_mode)
+        if args.plot_output:
+            fig.savefig(args.plot_output, bbox_inches="tight")
+            print(f"Saved comparison plot to: {args.plot_output}")
+        else:
+            print("Created comparison plot in memory. Use --plot-output to save it.")
+        plt.close(fig)
+
+def main(argv: list[str] | None = None):
+    """Simple debugging entrypoint."""
+
+    mainX(argv)
 
 if __name__ == "__main__":
     main()

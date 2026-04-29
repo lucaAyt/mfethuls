@@ -1,3 +1,5 @@
+from ..comparison import ComparisonSet, load_comparison_set, load_experiments
+from .comparison import ComparisonMode, plot_comparison, plot_experiments
 from .core import plot_dataset
 from .dma import plot_dma
 from .dsc import plot_dsc
@@ -13,6 +15,12 @@ from .uv_vis import plot_uv_vis
 
 __all__ = [
     "apply_axes_style",
+    "ComparisonMode",
+    "ComparisonSet",
+    "load_comparison_set",
+    "load_experiments",
+    "plot_experiments",
+    "plot_comparison",
     "plot_dataset",
     "plot_dma",
     "plot_dsc",
