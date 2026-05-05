@@ -183,6 +183,7 @@ class RegistryValidator:
             return errors
 
         # Check if profile is known in schema
+        # TODO: Allow for some possible inference ?
         profiles = schema.get("profiles", {})
         if measurement_profile not in profiles:
             available = list(profiles.keys())

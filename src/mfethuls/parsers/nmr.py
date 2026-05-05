@@ -14,9 +14,11 @@ from mfethuls.schema_normalization import apply_dataframe_schema
 logger = logging.getLogger(__name__)
 
 
+# TODO: Parser should not use file extension as nmrglue requires folder. .xml is a workaround for now. 
+# Consider an option where if no file extension is given the parser attempt to read the dirname.
 @register_parser('nmr', 'bruker_nmr')
 class BrukerNMRParser:
-    def __init__(self, file_extension='.txt'):
+    def __init__(self, file_extension='.xml'):
         self.file_extension = file_extension
 
     def parse(
@@ -99,6 +101,7 @@ class BrukerNMRParser:
 
         # Candidate locations for Bruker processed data.
         candidates = [
+            os.path.dirname(path),
             path,
             os.path.join(path, "1", "pdata", "1"),
             os.path.join(path, "pdata", "1"),
