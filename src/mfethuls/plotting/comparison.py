@@ -174,9 +174,13 @@ def plot_experiments(
                 max_groups=max_groups,
                 signal=signal,
                 ax=flat_axes[idx],
-                title=label,
+                title=None,
                 strict=strict,
             )
+            flat_axes[idx].set_title("")
+
+        if len(flat_axes) > 1:
+            fig.subplots_adjust(hspace=0.45)
         if title:
             fig.suptitle(title)
         return fig, axes
@@ -199,6 +203,7 @@ def plot_experiments(
             strict=strict,
         )
 
+        # TODO: x-axis being reverted back after stacking
         if resolved_mode == "stacked":
             for line in axis.lines[start:]:
                 line.set_ydata(line.get_ydata() + (idx * stacked_offset))

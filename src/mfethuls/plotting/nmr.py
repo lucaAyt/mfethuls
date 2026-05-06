@@ -31,7 +31,7 @@ def plot_nmr(
         max_groups=max_groups,
         color="#8c564b",
     )
-    axis.set_xlim(axis.get_xlim()[::-1])
+    axis.set_xlim(axis.get_xlim()[::-1])  # Reverse x-axis for NMR spectra
     apply_axes_style(
         axis,
         title=title or _default_title(dataset, "NMR"),

@@ -381,6 +381,10 @@ def test_plot_comparison_auto_facet_when_x_not_compatible():
     fig, axes = plot_experiments([ds1, ds2], mode="auto")
     plt.close(fig)
     assert axes.shape[0] == 2
+    assert axes[0, 0].get_xlabel() == "wavelength_nm"
+    assert axes[1, 0].get_xlabel() == "temperature_C"
+    assert axes[0, 0].get_title() == ""
+    assert axes[1, 0].get_title() == ""
 
 
 def test_plot_comparison_explicit_overlay_rejects_incompatible_x():
