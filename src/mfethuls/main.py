@@ -10,28 +10,6 @@ from mfethuls import load_experiments, plot_experiments
 from mfethuls.experiments import load_experiment_registry
 
 
-def _resolve_registry_path(cli_registry_path: str | None, registry_env: str) -> str:
-    """Resolve registry path from CLI and environment fallbacks."""
-
-    if cli_registry_path:
-        return cli_registry_path
-
-    if registry_env == "test":
-        keys = ("MFETHULS_TEST_REGISTRY", "PATH_TO_REGISTRY")
-    else:
-        keys = ("PATH_TO_REGISTRY", "MFETHULS_TEST_REGISTRY")
-
-    for key in keys:
-        value = os.environ.get(key)
-        if value:
-            return value
-
-    raise ValueError(
-        "No registry path provided. Use --registry or set PATH_TO_REGISTRY "
-        "(or MFETHULS_TEST_REGISTRY for test/dev)."
-    )
-
-
 def _apply_runtime_env_mode(registry_env: str) -> None:
     """Apply runtime environment overrides for selected mode.
 
@@ -124,10 +102,8 @@ def mainX(argv: list[str] | None = None):
 
     _apply_runtime_env_mode(args.registry_env)
 
-    registry_path = _resolve_registry_path(args.registry, args.registry_env)
-
-    print(f"Loading experiment registry from: {registry_path}")
-    df_registry = load_experiment_registry(registry_path)
+    df_registry = load_experiment_registry(args.registry)
+    print("Loading experiment registry from configured environment/path defaults")
     print("Registered experiments:\n", df_registry[["name", "experiment_id", "instrument_name"]])
 
     if args.experiments:

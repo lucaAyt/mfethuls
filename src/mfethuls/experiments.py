@@ -14,6 +14,21 @@ from .registry_validator import RegistryValidator
 logger = logging.getLogger(__name__)
 
 
+def _resolve_registry_path(path: Optional[str] = None) -> str:
+    """Resolve the registry path from an explicit argument or environment defaults."""
+
+    if path:
+        return os.path.abspath(path)
+
+    registry_path = os.environ.get("PATH_TO_REGISTRY")
+    if registry_path:
+        return os.path.abspath(registry_path)
+
+    raise ValueError(
+        "No registry path provided. Pass a path explicitly or set PATH_TO_REGISTRY."
+    )
+
+
 def _infer_measurement_profile_from_text(text: Optional[str]) -> Optional[str]:
     """Infer a measurement profile from free-text description.
 
@@ -103,7 +118,7 @@ def get_experiment(name: str) -> Experiment:
         raise KeyError(f"Unknown experiment name: {name!r}") from exc
 
 
-def load_experiment_registry(path: str) -> pd.DataFrame:
+def load_experiment_registry(path: Optional[str] = None) -> pd.DataFrame:
     """Load experiments from a CSV/Excel file into the in-memory registry.
 
     The file is expected to contain at least the following columns:
@@ -130,7 +145,7 @@ def load_experiment_registry(path: str) -> pd.DataFrame:
     """
 
     # Resolve to an absolute path for clearer error messages.
-    path = os.path.abspath(path)
+    path = _resolve_registry_path(path)
 
     _, ext = os.path.splitext(path.lower())
     if ext in {".xlsx", ".xls"}:

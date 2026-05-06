@@ -149,6 +149,21 @@ def test_load_experiment_registry_roundtrip():
         assert set(df_registry["experiment_id"]) == expected_ids
 
 
+def test_load_experiment_registry_defaults_from_path_to_registry(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry_path = _write_registry(tmpdir)
+        default_registry_path = os.path.join(tmpdir, "experiment_registry.csv")
+        os.replace(registry_path, default_registry_path)
+
+        monkeypatch.setenv("PATH_TO_REGISTRY", default_registry_path)
+        monkeypatch.setenv("PATH_TO_DATA", "ignored-for-registry-default")
+
+        df_registry = load_experiment_registry()
+
+        assert "name" in df_registry.columns
+        assert set(df_registry["experiment_id"]) >= {"EXP001", "EXP011"}
+
+
 def test_load_experiment_registry_infers_measurement_profile_from_description():
     with tempfile.TemporaryDirectory() as tmpdir:
         registry_path = _write_registry(tmpdir)

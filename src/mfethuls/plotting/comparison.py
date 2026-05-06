@@ -203,7 +203,7 @@ def plot_experiments(
             strict=strict,
         )
 
-        # TODO: x-axis being reverted back after stacking
+        # TODO: x-axis being reverted back after stacking NMR plots
         if resolved_mode == "stacked":
             for line in axis.lines[start:]:
                 line.set_ydata(line.get_ydata() + (idx * stacked_offset))
