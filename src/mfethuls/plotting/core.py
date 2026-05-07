@@ -187,9 +187,24 @@ def _plot_grouped_single_signal(
         )
         return None
 
+    use_gradient_palette = group_count > 10
+    gradient_colors = None
+    if use_gradient_palette:
+        cmap = plt.get_cmap("viridis")
+        denominator = max(group_count - 1, 1)
+        gradient_colors = iter(cmap(idx / denominator) for idx in range(group_count))
+
     for group_value, subset in df.groupby(resolved_group, dropna=False, sort=False):
         label_value = "<missing>" if group_value is None else str(group_value)
-        ax.plot(subset[x_column], subset[y_column], label=label_value)
+        if gradient_colors is None:
+            ax.plot(subset[x_column], subset[y_column], label=label_value)
+        else:
+            ax.plot(
+                subset[x_column],
+                subset[y_column],
+                label=label_value,
+                color=next(gradient_colors),
+            )
     ax.legend(title=resolved_group)
     return resolved_group
 

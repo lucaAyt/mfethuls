@@ -22,6 +22,7 @@ def plot_saxs(
         _require_columns(dataset, [x_column, y_column], "plot_saxs")
 
     fig, axis = _figure_and_axis(ax)
+    axis.set_yscale("log"); axis.set_xscale("log")
     _plot_grouped_single_signal(
         dataset,
         x_column=x_column,

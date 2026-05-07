@@ -250,6 +250,27 @@ def test_plot_uv_vis_respects_explicit_group_by():
     assert legend.get_title().get_text() == "source_file"
 
 
+def test_plot_uv_vis_uses_gradient_palette_for_dense_groups():
+    x_values = [200, 250, 300]
+    rows = []
+    for group_index in range(11):
+        group_label = f"g{group_index:02d}"
+        for offset, x_value in enumerate(x_values):
+            rows.append(
+                {
+                    "wavelength_nm": x_value,
+                    "absorbance_a_u": 0.1 + (group_index * 0.01) + (offset * 0.005),
+                    "source_file": group_label,
+                }
+            )
+
+    dataset = Dataset(data=pd.DataFrame(rows), metadata={"experiment_id": "EXP_GRP_003"})
+
+    fig, ax = _close(plot_dataset(dataset, kind="uv_vis", group_by="source_file"))
+    assert len(ax.lines) == 11
+    assert len({line.get_color() for line in ax.lines}) == 11
+
+
 def test_plot_dataset_group_by_respects_max_groups(caplog):
     dataset = Dataset(
         data=pd.DataFrame(

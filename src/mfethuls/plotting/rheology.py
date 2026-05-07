@@ -53,6 +53,11 @@ def plot_rheology(
         _require_columns(dataset, [x_column] + y_columns, "plot_rheology")
 
     fig, axis = _figure_and_axis(ax)
+    # For rheology, we default to log-log scaling unless the x-axis is time or temperature.
+    if x_column not in ("time_s", "temperature_C"):
+        axis.set_xscale("log")
+    axis.set_yscale("log")
+    
     for y_column in y_columns:
         if y_column in dataset.data.columns:
             axis.plot(dataset.data[x_column], dataset.data[y_column], label=y_column)
