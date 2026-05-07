@@ -98,11 +98,12 @@ class AgilentSec:
         stem = os.path.basename(path).casefold()
         normalized = re.sub(r"[^a-z0-9]+", "_", stem)
 
+        # Allow trailing alphanumeric suffixes (e.g. RID1A, VWD1A) when matching
         detector_patterns = {
-            "ri": [r"(?:^|_)ri(?:_|$)", r"(?:^|_)refractive(?:_|$)", r"(?:^|_)refractiveindex(?:_|$)", r"(?:^|_)dri(?:_|$)", r"(?:^|_)rid(?:_|$)"],
-            "uv": [r"(?:^|_)uv(?:\d+)?(?:_|$)", r"(?:^|_)uvvis(?:_|$)", r"(?:^|_)dad(?:_|$)", r"(?:^|_)vwd(?:_|$)", r"(?:^|_)pda(?:_|$)"],
-            "ls": [r"(?:^|_)ls(?:_|$)", r"(?:^|_)lightscattering(?:_|$)", r"(?:^|_)mals(?:_|$)", r"(?:^|_)rals(?:_|$)", r"(?:^|_)lals(?:_|$)"],
-            "viscometer": [r"(?:^|_)visc(?:_|$)", r"(?:^|_)viscometer(?:_|$)", r"(?:^|_)dp(?:_|$)"],
+            "ri": [r"(?:^|_)ri(?:[0-9a-z]+)?(?:_|$)", r"(?:^|_)refractive(?:[0-9a-z]+)?(?:_|$)", r"(?:^|_)refractiveindex(?:[0-9a-z]+)?(?:_|$)", r"(?:^|_)dri(?:[0-9a-z]+)?(?:_|$)", r"(?:^|_)rid(?:[0-9a-z]+)?(?:_|$)"],
+            "uv": [r"(?:^|_)uv(?:[0-9a-z]+)?(?:_|$)", r"(?:^|_)uvvis(?:[0-9a-z]+)?(?:_|$)", r"(?:^|_)dad(?:[0-9a-z]+)?(?:_|$)", r"(?:^|_)vwd(?:[0-9a-z]+)?(?:_|$)", r"(?:^|_)pda(?:[0-9a-z]+)?(?:_|$)"],
+            "ls": [r"(?:^|_)ls(?:[0-9a-z]+)?(?:_|$)", r"(?:^|_)lightscattering(?:[0-9a-z]+)?(?:_|$)", r"(?:^|_)mals(?:[0-9a-z]+)?(?:_|$)", r"(?:^|_)rals(?:[0-9a-z]+)?(?:_|$)", r"(?:^|_)lals(?:[0-9a-z]+)?(?:_|$)"],
+            "viscometer": [r"(?:^|_)visc(?:[0-9a-z]+)?(?:_|$)", r"(?:^|_)viscometer(?:[0-9a-z]+)?(?:_|$)", r"(?:^|_)dp(?:[0-9a-z]+)?(?:_|$)"],
         }
 
         for detector, patterns in detector_patterns.items():

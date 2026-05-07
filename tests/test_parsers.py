@@ -162,6 +162,8 @@ def test_each_parser_normalizes_expected_columns(case, monkeypatch):
 def test_sec_infer_detector_name_from_filename_tokens():
     parser = AgilentSec()
 
+    assert parser._infer_detector_name("EXP005.dx_RID1A.CSV") == "ri"
+    assert parser._infer_detector_name("EXP005.dx_VWD1A.CSV") == "uv"
     assert parser._infer_detector_name("sample_ri_trace.csv") == "ri"
     assert parser._infer_detector_name("sample_uv254_signal.csv") == "uv"
     assert parser._infer_detector_name("sample_mals_channel.csv") == "ls"
