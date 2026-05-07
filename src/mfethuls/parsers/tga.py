@@ -102,13 +102,17 @@ class TGAXParser:
             return pd.DataFrame()
 
         # Make up columns by combining 1st and 2nd lines
-        cols_row_2 = [''] + lines[0]
+        cols_row_2 = lines[0]
         cols = [' '.join([col1.strip(), col2.strip()]).strip() for col1, col2 in zip(cols, cols_row_2)]
 
         if len(lines) <= 1:
             return pd.DataFrame(columns=cols)
 
         df = pd.DataFrame(lines[1:], columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
-        df['name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
+        df["name"] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
+        
+        # Calculate mass percentage as not in original data
+        df["mass_pct"] = (df["Weight [mg]"] - df["Weight [mg]"].min()) \
+                        / (df["Weight [mg]"].max() - df["Weight [mg]"].min()) * 100
 
         return df
