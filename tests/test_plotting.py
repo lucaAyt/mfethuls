@@ -73,6 +73,97 @@ def test_plot_dsc_defaults_to_profile_grouping_when_available():
     assert legend.get_title().get_text() == "profile"
 
 
+def test_plot_dsc_omits_cycle_boundary_labels_from_legend():
+    dataset = Dataset(
+        data=pd.DataFrame(
+            {
+                "temperature_C": [25, 50, 75, 25, 50, 75, 25, 50, 75],
+                "heat_flow_mW": [0.0, 1.2, 0.8, 0.1, 1.1, 0.9, 0.2, 1.0, 0.7],
+                "profile": [
+                    "Heating start",
+                    "Heating start",
+                    "Heating start",
+                    "Heating",
+                    "Heating",
+                    "Heating",
+                    "Cooling end",
+                    "Cooling end",
+                    "Cooling end",
+                ],
+            }
+        ),
+        metadata={"experiment_id": "EXP_DSC_003"},
+    )
+
+    fig, ax = _close(plot_dsc(dataset))
+    assert len(ax.lines) == 3
+    legend = ax.get_legend()
+    assert legend is not None
+    legend_labels = [text.get_text() for text in legend.get_texts()]
+    assert legend.get_title().get_text() == "profile"
+    assert legend_labels == ["Heating"]
+
+
+def test_plot_dsc_omits_boundary_profiles_in_comparison_overlay():
+    """Verify DSC boundary profiles (_nolegend_ markers) remain suppressed in comparison overlays."""
+    ds1 = Dataset(
+        data=pd.DataFrame(
+            {
+                "temperature_C": [25, 50, 75, 25, 50, 75, 25, 50, 75],
+                "heat_flow_mW": [0.0, 1.2, 0.8, 0.1, 1.1, 0.9, 0.2, 1.0, 0.7],
+                "profile": [
+                    "Heating start",
+                    "Heating start",
+                    "Heating start",
+                    "Heating",
+                    "Heating",
+                    "Heating",
+                    "Cooling end",
+                    "Cooling end",
+                    "Cooling end",
+                ],
+            }
+        ),
+        metadata={"experiment_id": "EXP_DSC_A"},
+    )
+    ds2 = Dataset(
+        data=pd.DataFrame(
+            {
+                "temperature_C": [25, 50, 75, 25, 50, 75, 25, 50, 75],
+                "heat_flow_mW": [0.1, 1.3, 0.9, 0.2, 1.2, 1.0, 0.3, 1.1, 0.8],
+                "profile": [
+                    "Heating start",
+                    "Heating start",
+                    "Heating start",
+                    "Heating",
+                    "Heating",
+                    "Heating",
+                    "Cooling end",
+                    "Cooling end",
+                    "Cooling end",
+                ],
+            }
+        ),
+        metadata={"experiment_id": "EXP_DSC_B"},
+    )
+
+    fig, ax = _close(plot_experiments([ds1, ds2], mode="overlay", kind="dsc"))
+    # Should have 6 lines (3 from each dataset: "Heating start", "Heating", "Cooling end")
+    # But only "Heating" should appear in legend (start and end are _nolegend_)
+    assert len(ax.lines) == 6
+    legend = ax.get_legend()
+    assert legend is not None
+    legend_labels = [text.get_text() for text in legend.get_texts()]
+    # Should only contain the two "Heating" profiles (one per dataset), not boundary profiles
+    assert "dataset_1 | Heating" in legend_labels
+    assert "dataset_2 | Heating" in legend_labels
+    # Should NOT contain blank labels or boundary profiles
+    assert "" not in legend_labels
+    assert not any("start" in label for label in legend_labels)
+    assert not any("end" in label for label in legend_labels)
+    assert len(legend_labels) == 2  # Only the two "Heating" profiles
+
+
 def test_plot_ftir_chooses_absorbance_and_reverses_axis():
     dataset = Dataset(
         data=pd.DataFrame(
@@ -371,7 +462,7 @@ def test_load_comparison_set_label_fallbacks(monkeypatch):
     monkeypatch.setattr("mfethuls.comparison.load_experiment_dataset", _fake_loader)
 
     result = load_comparison_set(["exp_a", "exp_b"])
-    assert result.labels == ["EXP777", "dataset_2"]
+    assert result.labels == ["dataset_1", "dataset_2"]
 
 
 def test_plot_comparison_auto_overlay_when_shared_x():

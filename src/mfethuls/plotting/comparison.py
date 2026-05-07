@@ -22,10 +22,6 @@ def _label_for_dataset(dataset: Dataset, index: int) -> str:
     if experiment_name:
         return str(experiment_name)
 
-    experiment_id = dataset.experiment_id
-    if experiment_id:
-        return str(experiment_id)
-
     return f"dataset_{index + 1}"
 
 
@@ -105,7 +101,10 @@ def _label_new_lines(axis, *, start_idx: int, dataset_label: str) -> None:
 
     for line in new_lines:
         current = str(line.get_label() or "")
-        if current and not current.startswith("_"):
+        if current == "_nolegend_":
+            # Preserve lines marked for no legend (e.g., DSC boundary profiles)
+            continue
+        elif current and not current.startswith("_"):
             line.set_label(f"{dataset_label} | {current}")
         else:
             line.set_label(dataset_label)
