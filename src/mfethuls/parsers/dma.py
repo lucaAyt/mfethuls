@@ -8,30 +8,11 @@ import pandas as pd
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.ingestion import collect_dataframe_from_paths
 from mfethuls.parsers.registry import register_parser
+from mfethuls.registry_validator import infer_canonical_profile_from_registry_profile
 from mfethuls.schema_normalization import apply_dataframe_schema
 
 
 logger = logging.getLogger(__name__)
-
-
-# TODO: Add inference from measurment_profile in registry (mapping)
-def _infer_dma_profile_from_columns(df: pd.DataFrame) -> Optional[str]:
-    """Infer a DMA measurement profile from available raw column names."""
-
-    column_text = " ".join(str(column).lower() for column in df.columns)
-    if not column_text.strip():
-        return None
-
-    if any(token in column_text for token in ("freq", "frequency", "hz")):
-        return "oscillatory_frequency_sweep"
-    if any(token in column_text for token in ("strain", "amplitude")):
-        return "oscillatory_strain_sweep"
-    if any(token in column_text for token in ("temp", "temperature")):
-        return "oscillatory_temperature_sweep"
-    if any(token in column_text for token in ("time", "t [s]")):
-        return "oscillatory_time_sweep"
-
-    return None
 
 
 @register_parser('dma', 'ta_q800')
@@ -73,8 +54,11 @@ class DmaTaQ800:
         if experiment_id is None:
             return df
 
-        metadata_profile = (metadata or {}).get("measurement_profile")
-        measurement_profile = measurement_profile or metadata_profile or _infer_dma_profile_from_columns(df)
+        registry_profile = measurement_profile or (metadata or {}).get("measurement_profile")
+        if registry_profile:
+            measurement_profile = infer_canonical_profile_from_registry_profile(
+                "dma", registry_profile, instrument_model
+            )
 
         df, schema_report = apply_dataframe_schema(
             df,

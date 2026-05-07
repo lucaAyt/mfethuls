@@ -7,45 +7,14 @@ import pandas as pd
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.ingestion import collect_dataframe_from_paths
 from mfethuls.parsers.registry import register_parser
+from mfethuls.registry_validator import infer_canonical_profile_from_registry_profile
 from mfethuls.schema_normalization import apply_dataframe_schema
 
 
 logger = logging.getLogger(__name__)
 
 
-def _infer_rheometer_profile_from_test_type(df: pd.DataFrame) -> Optional[str]:
-    """Infer a rheometer measurement profile from deprecated test_type data."""
 
-    if "test_type" not in df.columns or df.empty:
-        return None
-
-    value = str(df["test_type"].dropna().astype(str).head(1).squeeze()).lower()
-    if not value or value == "nan":
-        return None
-
-    if "freq" in value or "frequency" in value or "oscill" in value:
-        logger.warning(
-            "Inferring rheometer measurement_profile from deprecated test_type=%r; "
-            "please move this information into the experiment registry description or measurement_profile column.",
-            value,
-        )
-        return "oscillatory_frequency_sweep"
-    if "strain" in value or "amplitude" in value:
-        logger.warning(
-            "Inferring rheometer measurement_profile from deprecated test_type=%r; "
-            "please move this information into the experiment registry description or measurement_profile column.",
-            value,
-        )
-        return "oscillatory_strain_sweep"
-    if "flow" in value or "viscos" in value or "shear" in value:
-        logger.warning(
-            "Inferring rheometer measurement_profile from deprecated test_type=%r; "
-            "please move this information into the experiment registry description or measurement_profile column.",
-            value,
-        )
-        return "flow_curve"
-
-    return None
 
 
 @register_parser('rheometer', 'anton_paar')
@@ -85,7 +54,15 @@ class RheometerAntPaarParser:
         if experiment_id is None:
             return df
 
-        measurement_profile = measurement_profile or _infer_rheometer_profile_from_test_type(df)
+        # Map the explicit measurement_profile provided by the registry to a
+        # canonical profile key defined in the rheometer schema. We only
+        # accept the mapped canonical value; unknown registry values are not
+        # silently converted.
+        if measurement_profile:
+            mapped = infer_canonical_profile_from_registry_profile(
+                "rheometer", measurement_profile, instrument_model
+            )
+            measurement_profile = mapped or None
         df, schema_report = apply_dataframe_schema(
             df,
             instrument_type="rheometer",

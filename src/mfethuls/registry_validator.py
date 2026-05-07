@@ -49,6 +49,91 @@ def _get_instrument_entry(name: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _load_canonical_profiles_from_schema(
+    schema: Dict[str, Any], instrument_model: Optional[str] = None
+) -> set[str]:
+    """Collect canonical profile keys from global and model-specific schema layers."""
+
+    global_profiles = schema.get("profiles", {}) if isinstance(schema.get("profiles", {}), dict) else {}
+    model_profiles: Dict[str, Any] = {}
+
+    if instrument_model and isinstance(schema.get("models", {}), dict):
+        model_layer = schema.get("models", {}).get(instrument_model, {})
+        model_profiles = model_layer.get("profiles", {}) if isinstance(model_layer.get("profiles", {}), dict) else {}
+
+    return set(global_profiles) | set(model_profiles)
+
+
+def _profile_tokens(profile: str) -> set[str]:
+    """Split a profile string into comparable tokens."""
+
+    return {token for token in re.findall(r"[a-z0-9]+", str(profile).casefold()) if token}
+
+
+def _profile_similarity_matches(registry_profile: str, canonical_profile: str) -> bool:
+    """Return True when the registry profile is a token subset of the canonical profile."""
+
+    registry_tokens = _profile_tokens(registry_profile)
+    canonical_tokens = _profile_tokens(canonical_profile)
+    if not registry_tokens or not canonical_tokens:
+        return False
+    return registry_tokens.issubset(canonical_tokens)
+
+
+def _match_canonical_profile(
+    registry_profile: Optional[str], canonical_profiles: Iterable[str]
+) -> Optional[str]:
+    """Match a registry profile to a canonical schema profile conservatively."""
+
+    if not registry_profile:
+        return None
+
+    known_profiles = [str(profile) for profile in canonical_profiles]
+    if not known_profiles:
+        return None
+
+    if registry_profile in known_profiles:
+        return registry_profile
+
+    profile_cf = registry_profile.casefold()
+    for canonical in known_profiles:
+        if canonical.casefold() == profile_cf:
+            return canonical
+
+    normalized = profile_cf.replace(" ", "_").replace("-", "_")
+    for canonical in known_profiles:
+        if canonical.casefold() == normalized:
+            return canonical
+
+    subset_matches = [canonical for canonical in known_profiles if _profile_similarity_matches(profile_cf, canonical)]
+    if subset_matches:
+        subset_matches.sort(key=lambda canonical: (len(_profile_tokens(canonical)), canonical.casefold()))
+        return subset_matches[0]
+
+    return None
+
+
+def infer_canonical_profile_from_registry_profile(
+    instrument_type: str, registry_profile: Optional[str], instrument_model: Optional[str] = None
+) -> Optional[str]:
+    """Map a registry-provided measurement_profile to a canonical schema profile key.
+
+    The schema loading lives here so the caller can stay focused on matching.
+    Matching is conservative: exact, case-insensitive, and underscore-normalized
+    comparisons only.
+    """
+
+    if not registry_profile:
+        return None
+
+    schema = _load_instrument_schema(instrument_type)
+    if not schema:
+        return None
+
+    canonical_profiles = _load_canonical_profiles_from_schema(schema, instrument_model)
+    return _match_canonical_profile(registry_profile, canonical_profiles)
+
+
 class RegistryValidationError(ValueError):
     """Raised when registry validation fails."""
 
@@ -108,7 +193,7 @@ class RegistryValidator:
         # 5. For profile-driven instruments, validate profile and requirements
         if instr_type in {"rheometer", "dma"}:
             profile_errors = self._validate_measurement_profile(
-                experiment, instr_type, schema
+                experiment, instr_type, instr_model, schema
             )
             errors.extend(profile_errors)
 
@@ -167,11 +252,16 @@ class RegistryValidator:
         return f"{prefix}{n:0{width}d}"
 
     def _validate_measurement_profile(
-        self, experiment: Experiment, instr_type: str, schema: Dict[str, Any]
+        self,
+        experiment: Experiment,
+        instr_type: str,
+        instr_model: Optional[str],
+        schema: Dict[str, Any],
     ) -> List[str]:
         """Validate measurement profile for profile-driven instruments."""
         errors: List[str] = []
         measurement_profile = experiment.metadata.get("measurement_profile")
+        canonical_profiles = _load_canonical_profiles_from_schema(schema)
 
         if not measurement_profile:
             logger.warning(
@@ -183,10 +273,9 @@ class RegistryValidator:
             return errors
 
         # Check if profile is known in schema
-        # TODO: Allow for some possible inference ?
-        profiles = schema.get("profiles", {})
-        if measurement_profile not in profiles:
-            available = list(profiles.keys())
+        matched_profile = _match_canonical_profile(measurement_profile, canonical_profiles)
+        if matched_profile is None:
+            available = sorted(canonical_profiles)
             errors.append(
                 f"Unknown measurement_profile '{measurement_profile}' for {instr_type}. "
                 f"Available profiles: {available}"
@@ -194,12 +283,18 @@ class RegistryValidator:
             return errors
 
         # Check that profile has required columns defined
-        profile_def = profiles.get(measurement_profile, {})
+        profile_def = schema.get("profiles", {}).get(matched_profile, {}) if isinstance(schema.get("profiles", {}), dict) else {}
+        if not profile_def and isinstance(schema.get("models", {}), dict) and instr_model:
+            model_layer = schema.get("models", {}).get(instr_model, {})
+            if isinstance(model_layer, dict):
+                model_profiles = model_layer.get("profiles", {})
+                if isinstance(model_profiles, dict):
+                    profile_def = model_profiles.get(matched_profile, {})
         required_cols = profile_def.get("required_columns", [])
         if not required_cols:
             logger.warning(
                 "Profile '%s' for %s has no required_columns defined.",
-                measurement_profile,
+                matched_profile,
                 instr_type,
             )
 

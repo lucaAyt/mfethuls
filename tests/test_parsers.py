@@ -194,3 +194,30 @@ def test_dma_parser_explicit_measurement_profile_trumps_metadata(monkeypatch):
     )
 
     assert dataset.metadata.get("measurement_profile") == "oscillatory_frequency_sweep"
+
+
+def test_dma_parser_subset_measurement_profile_maps_to_canonical(monkeypatch):
+    parser = get_parser("dma", "ta_q800")
+    raw_df = pd.DataFrame(
+        {
+            "Frequency [Hz]": [1.0, 10.0],
+            "Storage Modulus [MPa]": [1.2, 1.3],
+            "Loss Modulus [MPa]": [0.2, 0.25],
+        }
+    )
+    monkeypatch.setattr(parser, "parse_raw_data", lambda _path, _df=raw_df: _df.copy())
+
+    dataset = parser.parse(
+        {"dummy": ["dummy.txt"]},
+        experiment_id="EXP124",
+        sample_id="S001",
+        run_id="R001",
+        instrument_type="dma",
+        instrument_model="ta_q800",
+        instrument_name="dma",
+        experiment_name="dma_profile_subset",
+        measurement_profile="frequency sweep",
+        metadata={"measurement_profile": "oscillatory_temperature_sweep"},
+    )
+
+    assert dataset.metadata.get("measurement_profile") == "oscillatory_frequency_sweep"

@@ -60,6 +60,30 @@ class TestRegistryValidator:
         is_valid, errors = validator.validate_experiment(exp)
         assert is_valid, f"Validation failed with errors: {errors}"
 
+    def test_validate_rheometer_with_profile_similarity_match(self):
+        """Validator should accept registry profiles that normalize to a canonical schema key."""
+        validator = RegistryValidator()
+        exp = Experiment(
+            name="test_rheometer_similarity",
+            experiment_id="EXP012",
+            instrument_name="rheometer",
+            metadata={"measurement_profile": "Oscillatory Frequency Sweep"},
+        )
+        is_valid, errors = validator.validate_experiment(exp)
+        assert is_valid, f"Validation failed with errors: {errors}"
+
+    def test_validate_rheometer_with_profile_subset_similarity_match(self):
+        """Validator should accept registry profiles that are a token subset of a canonical key."""
+        validator = RegistryValidator()
+        exp = Experiment(
+            name="test_rheometer_subset_similarity",
+            experiment_id="EXP013",
+            instrument_name="rheometer",
+            metadata={"measurement_profile": "frequency sweep"},
+        )
+        is_valid, errors = validator.validate_experiment(exp)
+        assert is_valid, f"Validation failed with errors: {errors}"
+
     def test_validate_rheometer_with_invalid_profile(self):
         """Validator should reject rheometer with unknown measurement profile."""
         validator = RegistryValidator()
@@ -68,6 +92,19 @@ class TestRegistryValidator:
             experiment_id="EXP002",
             instrument_name="rheometer",
             metadata={"measurement_profile": "nonexistent_profile"},
+        )
+        is_valid, errors = validator.validate_experiment(exp)
+        assert not is_valid
+        assert any("Unknown measurement_profile" in err for err in errors)
+
+    def test_validate_rheometer_rejects_non_subset_profile(self):
+        """Validator should reject registry profiles that add unsupported tokens."""
+        validator = RegistryValidator()
+        exp = Experiment(
+            name="test_rheometer_non_subset",
+            experiment_id="EXP014",
+            instrument_name="rheometer",
+            metadata={"measurement_profile": "frequency sweep extra"},
         )
         is_valid, errors = validator.validate_experiment(exp)
         assert not is_valid
