@@ -1,6 +1,6 @@
 import pandas as pd
 
-from mfethuls import ComparisonSet, load_experiments
+from mfethuls import ComparisonSet, load_experiments, load_samples
 from mfethuls.comparison import ComparisonSet as ComparisonSetDirect, load_comparison_set
 from mfethuls.dataset import Dataset
 
@@ -48,3 +48,35 @@ def test_load_experiments_is_preferred_alias(monkeypatch):
     comparison = load_experiments(["exp_a"])
     assert isinstance(comparison, ComparisonSet)
     assert comparison.labels == ["name_exp_a"]
+
+
+def test_load_samples_filters_registry_and_loads_matching_experiments(monkeypatch):
+    registry = pd.DataFrame(
+        [
+            {"name": "exp_a", "experiment_id": "EXP001", "sample_id": "S001"},
+            {"name": "exp_b", "experiment_id": "EXP002", "sample_id": "S002"},
+            {"name": "exp_c", "experiment_id": "EXP003", "sample_id": "S001"},
+        ]
+    )
+
+    loaded_names: list[str] = []
+
+    from mfethuls import comparison as comparison_module
+
+    monkeypatch.setattr(comparison_module, "load_experiment_registry", lambda registry_path=None: registry)
+
+    def _fake_loader(name, use_storage=True, refresh=False):
+        _ = use_storage, refresh
+        loaded_names.append(name)
+        return Dataset(
+            data=pd.DataFrame({"temperature_C": [25.0], "heat_flow_mW": [0.1]}),
+            metadata={"experiment_id": name, "experiment_name": f"name_{name}", "sample_id": "S001"},
+        )
+
+    monkeypatch.setattr(comparison_module, "load_experiment_dataset", _fake_loader)
+
+    comparison = load_samples("S001")
+
+    assert isinstance(comparison, ComparisonSet)
+    assert loaded_names == ["exp_a", "exp_c"]
+    assert comparison.labels == ["name_exp_a", "name_exp_c"]

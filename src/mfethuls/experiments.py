@@ -66,7 +66,7 @@ class Experiment:
 
     name: str
     experiment_id: str
-    instrument_name: str
+    instrument_name: Optional[str]
     sample_id: Optional[str] = None
     run_id: Optional[str] = "R001"
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -75,6 +75,8 @@ class Experiment:
         self.experiment_id = RegistryValidator.validate_experiment_id(self.experiment_id)
         self.sample_id = RegistryValidator.validate_sample_id(self.sample_id)
         self.run_id = RegistryValidator.validate_run_id(self.run_id)
+        if self.instrument_name is None:
+            return
         self.instrument_name = str(self.instrument_name).strip().casefold()
 
 
@@ -165,6 +167,19 @@ def load_experiment_registry(path: Optional[str] = None) -> pd.DataFrame:
     for rec in records:
         name = rec.get("name")
         experiment_id = rec.get("experiment_id")
+
+        #TODO: We should be more strict about experiments with valid 
+        # experiment_id but no sample_id and instrument data
+        try:
+            validated_experiment_id = RegistryValidator.validate_experiment_id(experiment_id)
+        except ValueError:
+            logger.warning(
+                "Skipping registry row %r because experiment_id %r is invalid.",
+                name,
+                experiment_id,
+            )
+            continue
+
         description = _normalize_optional_str(rec.get("description"))
         explicit_measurement_profile = _normalize_optional_str(rec.get("measurement_profile"))
         legacy_test_type = _normalize_optional_str(rec.get("test_type"))
@@ -194,16 +209,15 @@ def load_experiment_registry(path: Optional[str] = None) -> pd.DataFrame:
                 )
 
         if instrument_name is None:
-            # Do not register this experiment for analysis; it cannot be
-            # resolved by load_experiment_dataset. Emit a warning so users
-            # understand why it is skipped.
+            # Keep a placeholder entry so callers can distinguish between
+            # an experiment that exists but has no associated instrument data
+            # and an experiment name that is not present in the registry.
             logger.warning(
-                "Skipping experiment %r (id %r): no instrument_name provided in registry; "
-                "experiment cannot be analysed.",
+                "Registering experiment %r (id %r) without instrument_name; "
+                "it will be visible in the registry but cannot be analysed yet.",
                 name,
                 experiment_id,
             )
-            continue
 
         # Everything else becomes metadata.
         metadata: Dict[str, Any] = {}
@@ -227,8 +241,8 @@ def load_experiment_registry(path: Optional[str] = None) -> pd.DataFrame:
             metadata["measurement_profile"] = measurement_profile
         exp = Experiment(
             name=name,
-            experiment_id=str(experiment_id),
-            instrument_name=str(instrument_name),
+            experiment_id=validated_experiment_id,
+            instrument_name=instrument_name,
             sample_id=sample_id,
             run_id=run_id,
             metadata=metadata,

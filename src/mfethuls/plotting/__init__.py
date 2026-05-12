@@ -1,4 +1,5 @@
 from ..comparison import ComparisonSet, load_comparison_set, load_experiments
+from ..comparison import ComparisonSet, load_comparison_set, load_experiments, load_samples
 from .comparison import ComparisonMode, plot_comparison, plot_experiments
 from .core import plot_dataset
 from .dma import plot_dma
@@ -20,6 +21,7 @@ __all__ = [
     "load_comparison_set",
     "load_experiments",
     "plot_experiments",
+    "load_samples",
     "plot_comparison",
     "plot_dataset",
     "plot_dma",

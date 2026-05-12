@@ -1,8 +1,10 @@
 import os
 import tempfile
+import logging
 from importlib.metadata import PackageNotFoundError, version
 
 import pandas as pd
+import pytest
 
 from mfethuls.dataset import Dataset
 from mfethuls.experiments import Experiment
@@ -325,6 +327,71 @@ def test_load_experiment_registry_normalizes_instrument_name_case():
         load_experiment_registry(registry_path)
         exp = get_experiment("case_test_1")
         assert exp.instrument_name == "dsc_mettler_toledo"
+
+
+def test_load_experiment_registry_keeps_placeholder_experiments_without_instrument_data(caplog):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry_path = os.path.join(tmpdir, "experiments_placeholder_test.csv")
+        pd.DataFrame(
+            [
+                {
+                    "name": "placeholder_exp",
+                    "experiment_id": "EXP013",
+                    "instrument_name": None,
+                    "sample_id": "S001",
+                    "run_id": "R001",
+                    "status": "registered_only",
+                }
+            ]
+        ).to_csv(registry_path, index=False)
+
+        load_experiment_registry(registry_path)
+
+        exp = get_experiment("placeholder_exp")
+        assert exp.instrument_name is None
+        assert exp.metadata.get("status") == "registered_only"
+
+        with caplog.at_level(logging.WARNING):
+            result = load_experiment_dataset("placeholder_exp")
+
+        assert result is None
+        assert any("has no associated instrument data yet" in message for message in caplog.messages)
+
+
+def test_load_experiment_registry_skips_invalid_experiment_ids(caplog):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry_path = os.path.join(tmpdir, "experiments_invalid_id_test.csv")
+        pd.DataFrame(
+            [
+                {
+                    "name": "bad_exp",
+                    "experiment_id": "EXP1",
+                    "instrument_name": "sec",
+                    "sample_id": "S001",
+                    "run_id": "R001",
+                },
+                {
+                    "name": "good_placeholder_exp",
+                    "experiment_id": "EXP014",
+                    "instrument_name": None,
+                    "sample_id": "S002",
+                    "run_id": "R001",
+                    "status": "registered_only",
+                },
+            ]
+        ).to_csv(registry_path, index=False)
+
+        with caplog.at_level(logging.WARNING):
+            load_experiment_registry(registry_path)
+
+        assert any("Skipping registry row 'bad_exp'" in message for message in caplog.messages)
+
+        with pytest.raises(KeyError):
+            get_experiment("bad_exp")
+
+        placeholder = get_experiment("good_placeholder_exp")
+        assert placeholder.experiment_id == "EXP014"
+        assert placeholder.instrument_name is None
 
 
 def test_parse_experiment_applies_characterizer_for_dataset_parser_output():

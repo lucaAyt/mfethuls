@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Sequence
 
 import pandas as pd
 
 from .config_loader import load_experiment_dataset
+from .experiments import load_experiment_registry
 from .dataset import Dataset
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -69,14 +74,12 @@ def load_comparison_set(
     return load_experiments(experiment_names, use_storage=use_storage, refresh=refresh)
 
 
-def load_experiments(
+def _load_comparison_from_names(
     experiment_names: Sequence[str],
     *,
     use_storage: bool = True,
     refresh: bool = False,
 ) -> ComparisonSet:
-    """Load multiple experiments into a comparison set for inspection or plotting."""
-
     names = [str(name) for name in experiment_names]
     if not names:
         raise ValueError("load_experiments requires at least one experiment name.")
@@ -86,7 +89,51 @@ def load_experiments(
 
     for idx, name in enumerate(names):
         dataset = load_experiment_dataset(name, use_storage=use_storage, refresh=refresh)
+        if dataset is None:
+            logger.warning("Not loading experiment %r because no dataset is associated with it.", name)
+            continue
         datasets.append(dataset)
         labels.append(_label_for_dataset(dataset, idx))
 
     return ComparisonSet(datasets=datasets, labels=labels)
+
+
+def load_experiments(
+    experiment_names: Sequence[str],
+    *,
+    use_storage: bool = True,
+    refresh: bool = False,
+) -> ComparisonSet:
+    """Load multiple experiments into a comparison set for inspection or plotting."""
+    return _load_comparison_from_names(experiment_names, use_storage=use_storage, refresh=refresh)
+
+
+def load_samples(
+    sample_ids: Sequence[str] | str,
+    *,
+    registry_path: str | None = None,
+    use_storage: bool = True,
+    refresh: bool = False,
+) -> ComparisonSet:
+    """Load all experiments associated with one or more sample ids into a comparison set."""
+
+    if isinstance(sample_ids, str):
+        requested_sample_ids = [sample_ids]
+    else:
+        requested_sample_ids = [str(sample_id) for sample_id in sample_ids]
+
+    requested_sample_ids = [sample_id.strip() for sample_id in requested_sample_ids if str(sample_id).strip()]
+    if not requested_sample_ids:
+        raise ValueError("load_samples requires at least one sample id.")
+
+    registry = load_experiment_registry(registry_path)
+    if "sample_id" not in registry.columns:
+        raise ValueError("Experiment registry does not include a sample_id column.")
+
+    selected = registry[registry["sample_id"].astype(str).isin(requested_sample_ids)]
+    experiment_names = [str(name) for name in selected["name"].tolist() if str(name).strip()]
+
+    if not experiment_names:
+        raise ValueError(f"No experiments found for sample id(s): {requested_sample_ids}")
+
+    return _load_comparison_from_names(experiment_names, use_storage=use_storage, refresh=refresh)

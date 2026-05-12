@@ -3,7 +3,9 @@ import json
 import logging
 
 from collections import namedtuple
+from typing import Optional
 
+from mfethuls.dataset import Dataset
 from mfethuls.factory import (
     get_data_root_path,
     instrument_data_path_constructor,
@@ -64,7 +66,7 @@ def filter_entries(filters):
     ]
 
 
-def load_experiment_dataset(experiment_name, use_storage: bool = True, refresh: bool = False):
+def load_experiment_dataset(experiment_name, use_storage: bool = True, refresh: bool = False) -> Optional[Dataset]:
     """Load and parse data for a given experiment name into a Dataset.
 
     This is a high-level helper that ties together the Experiment registry,
@@ -74,6 +76,13 @@ def load_experiment_dataset(experiment_name, use_storage: bool = True, refresh: 
     """
 
     exp = get_experiment(experiment_name)
+
+    if exp.instrument_name is None:
+        logger.warning(
+            "Skipping experiment %r: it is registered but has no associated instrument data yet.",
+            experiment_name,
+        )
+        return None
 
     # Allow a global switch to disable storage via environment for debugging.
     disable_storage_env = os.environ.get("MFETHULS_DISABLE_STORAGE", "").lower()

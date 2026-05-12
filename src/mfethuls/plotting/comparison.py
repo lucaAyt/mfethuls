@@ -22,6 +22,10 @@ def _label_for_dataset(dataset: Dataset, index: int) -> str:
     if experiment_name:
         return str(experiment_name)
 
+    experiment_id = dataset.experiment_id
+    if experiment_id:
+        return str(experiment_id)
+
     return f"dataset_{index + 1}"
 
 
