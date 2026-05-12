@@ -199,7 +199,6 @@ def test_load_experiment_registry_explicit_measurement_profile_trumps_inference(
                     "run_id": "R001",
                     "description": "temperature sweep run",
                     "measurement_profile": "oscillatory_frequency_sweep",
-                    "test_type": "temperature",
                 }
             ]
         ).to_csv(registry_path, index=False)
@@ -207,7 +206,6 @@ def test_load_experiment_registry_explicit_measurement_profile_trumps_inference(
         load_experiment_registry(registry_path)
         exp = get_experiment("dma_profile_priority")
         assert exp.metadata.get("measurement_profile") == "oscillatory_frequency_sweep"
-        assert "test_type" not in exp.metadata
 
 
 def test_load_experiment_dataset_returns_dataset_even_when_missing_files():

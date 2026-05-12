@@ -138,8 +138,6 @@ def load_experiment_registry(path: Optional[str] = None) -> pd.DataFrame:
             ``oscillatory_frequency_sweep``
     - ``sample_id``: strict sample id (e.g. S001)
     - ``run_id``: strict run id (e.g. R001), defaults to R001 when missing
-        - ``test_type``: deprecated filename-derived test type; used only as a
-            fallback for profile inference if no description/profile is provided
     - any other columns are stored in ``Experiment.metadata``.
 
     The function returns the loaded DataFrame so callers can further filter or
@@ -182,7 +180,6 @@ def load_experiment_registry(path: Optional[str] = None) -> pd.DataFrame:
 
         description = _normalize_optional_str(rec.get("description"))
         explicit_measurement_profile = _normalize_optional_str(rec.get("measurement_profile"))
-        legacy_test_type = _normalize_optional_str(rec.get("test_type"))
 
         # Normalise optional identifiers so that empty cells / NaN from
         # Excel/CSV are treated as missing.
@@ -197,16 +194,6 @@ def load_experiment_registry(path: Optional[str] = None) -> pd.DataFrame:
         instrument_name = _normalize_optional_str(rec.get("instrument_name"))
 
         measurement_profile = explicit_measurement_profile or _infer_measurement_profile_from_text(description)
-        if measurement_profile is None and legacy_test_type:
-            measurement_profile = _infer_measurement_profile_from_text(legacy_test_type)
-            if measurement_profile:
-                logger.warning(
-                    "Experiment %r is using deprecated test_type %r from the registry to infer measurement_profile %r; "
-                    "please add an explicit measurement_profile or description column instead.",
-                    name,
-                    legacy_test_type,
-                    measurement_profile,
-                )
 
         if instrument_name is None:
             # Keep a placeholder entry so callers can distinguish between
@@ -230,7 +217,6 @@ def load_experiment_registry(path: Optional[str] = None) -> pd.DataFrame:
                 "run_id",
                 "description",
                 "measurement_profile",
-                "test_type",
             }:
                 continue
             metadata[key] = value
