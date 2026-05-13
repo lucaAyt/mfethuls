@@ -134,6 +134,16 @@ def plot_experiments(
     if not datasets:
         raise PlotError("plot_comparison requires at least one dataset.")
 
+    dataset_kwargs = {
+        "kind": kind,
+        "group_by": group_by,
+        "max_groups": max_groups,
+        "title": None,
+        "strict": strict,
+    }
+    if signal is not None:
+        dataset_kwargs["signal"] = signal
+
     resolved_kinds: list[str] = []
     for dataset in datasets:
         resolved_kind = _resolve_plot_kind(dataset, kind)
@@ -172,13 +182,8 @@ def plot_experiments(
         for idx, (dataset, label) in enumerate(zip(datasets, labels)):
             plot_dataset(
                 dataset,
-                kind=kind,
-                group_by=group_by,
-                max_groups=max_groups,
-                signal=signal,
                 ax=flat_axes[idx],
-                title=None,
-                strict=strict,
+                **dataset_kwargs,
             )
             flat_axes[idx].set_title("")
 
@@ -197,13 +202,8 @@ def plot_experiments(
         start = len(axis.lines)
         plot_dataset(
             dataset,
-            kind=kind,
-            group_by=group_by,
-            max_groups=max_groups,
-            signal=signal,
             ax=axis,
-            title=None,
-            strict=strict,
+            **dataset_kwargs,
         )
 
         # TODO: x-axis being reverted back after stacking NMR plots

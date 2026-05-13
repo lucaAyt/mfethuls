@@ -77,20 +77,21 @@ class RheometerAntPaarParser:
         if run_id is not None and "run_id" not in df.columns:
             df["run_id"] = run_id
 
-        meta: Dict[str, Any] = {
-            "schema_version": schema_report.get("schema_version", "1.0"),
-            "experiment_id": experiment_id,
-            "sample_id": sample_id,
-            "run_id": run_id,
-            "instrument_type": instrument_type,
-            "instrument_model": instrument_model,
-            "instrument_name": instrument_name,
-            "experiment_name": experiment_name,
-            "measurement_profile": measurement_profile,
-            "schema_normalization": schema_report,
-        }
-        if metadata:
-            meta.update(metadata)
+        meta: Dict[str, Any] = dict(metadata or {})
+        meta.update(
+            {
+                "schema_version": schema_report.get("schema_version", "1.0"),
+                "experiment_id": experiment_id,
+                "sample_id": sample_id,
+                "run_id": run_id,
+                "instrument_type": instrument_type,
+                "instrument_model": instrument_model,
+                "instrument_name": instrument_name,
+                "experiment_name": experiment_name,
+                "measurement_profile": measurement_profile,
+                "schema_normalization": schema_report,
+            }
+        )
 
         return Dataset(data=df, metadata=meta)
 
