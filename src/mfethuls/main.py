@@ -131,11 +131,16 @@ def mainX(argv: list[str] | None = None):
     families = []
     for dataset in comparison.datasets:
         metadata = dataset.metadata if isinstance(dataset.metadata, dict) else {}
-        families.append((metadata.get("instrument_type") or "unknown", metadata.get("measurement_profile") or "-"))
+        instrument_type = metadata.get("instrument_type") or "unknown"
+        registry_profile = metadata.get("registry_measurement_profile") or "-"
+        canonical_profile = metadata.get("measurement_profile") or "-"
+        families.append((instrument_type, registry_profile, canonical_profile))
 
     print("Experiment families / profiles:")
-    for label, (family, profile) in zip(comparison.labels, families):
-        print(f"  - {label}: {family} / {profile}")
+    print("  (instrument_type / registry_measurement_profile -> canonical_measurement_profile)")
+    for label, (family, raw_profile, canonical_profile) in zip(comparison.labels, families):
+        profile_str = f"{raw_profile} -> {canonical_profile}" if raw_profile != canonical_profile else canonical_profile
+        print(f"  - {label}: {family} / {profile_str}")
 
     combined = comparison.to_dataframe()
     print(f"Combined dataframe shape: {combined.shape}")
