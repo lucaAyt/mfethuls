@@ -79,6 +79,7 @@ def _load_comparison_from_names(
     *,
     use_storage: bool = True,
     refresh: bool = False,
+    db_url: str | None = None,
 ) -> ComparisonSet:
     names = [str(name) for name in experiment_names]
     if not names:
@@ -88,7 +89,7 @@ def _load_comparison_from_names(
     labels: list[str] = []
 
     for idx, name in enumerate(names):
-        dataset = load_experiment_dataset(name, use_storage=use_storage, refresh=refresh)
+        dataset = load_experiment_dataset(name, use_storage=use_storage, refresh=refresh, db_url=db_url)
         if dataset is None:
             logger.warning("Not loading experiment %r because no dataset is associated with it.", name)
             continue
@@ -103,9 +104,16 @@ def load_experiments(
     *,
     use_storage: bool = True,
     refresh: bool = False,
+    db_url: str | None = None,
 ) -> ComparisonSet:
-    """Load multiple experiments into a comparison set for inspection or plotting."""
-    return _load_comparison_from_names(experiment_names, use_storage=use_storage, refresh=refresh)
+    """Load multiple experiments into a comparison set for inspection or plotting.
+
+    If db_url is provided, dataset metadata will be registered in the specified
+    Postgres database after local storage save.
+    """
+    return _load_comparison_from_names(
+        experiment_names, use_storage=use_storage, refresh=refresh, db_url=db_url
+    )
 
 
 def load_samples(

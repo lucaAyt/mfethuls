@@ -8,6 +8,7 @@ import mfethuls.parsers
 import mfethuls.factory as factory
 from mfethuls import load_experiments, plot_experiments
 from mfethuls.experiments import load_experiment_registry
+from mfethuls.storage import get_postgres_db_url
 
 
 def _apply_runtime_env_mode(registry_env: str) -> None:
@@ -98,6 +99,16 @@ def mainX(argv: list[str] | None = None):
         "--plot-output",
         help="Optional path to save the plot instead of only creating it in memory.",
     )
+    parser.add_argument(
+        "--commit-to-db",
+        action="store_true",
+        help="Register dataset metadata in Postgres. Uses MFETHULS_POSTGRES_URL from .env, or --db-url if provided.",
+    )
+    parser.add_argument(
+        "--db-url",
+        help="Postgres database URL (overrides .env). Format: 'postgresql://user:pass@host/dbname'.",
+    )
+
     args = parser.parse_args(argv)
 
     _apply_runtime_env_mode(args.registry_env)
@@ -115,11 +126,32 @@ def mainX(argv: list[str] | None = None):
 
     print("Selected experiments:", selected)
 
+    # Determine database URL: CLI flags override .env config
+    db_url = None
+
+    # First, try loading from .env (MFETHULS_POSTGRES_ENABLED + MFETHULS_POSTGRES_URL)
+    env_db_url = get_postgres_db_url()
+
+    # CLI flags can override or disable .env config
+    if args.commit_to_db:
+        # User explicitly requested DB registration via CLI
+        if args.db_url:
+            db_url = args.db_url
+        elif env_db_url:
+            db_url = env_db_url
+        else:
+            print("ERROR: --commit-to-db requires either --db-url CLI flag or MFETHULS_POSTGRES_URL in .env")
+            return
+    elif env_db_url:
+        # Use .env config if not explicitly disabled
+        db_url = env_db_url
+
     try:
         comparison = load_experiments(
             selected,
             use_storage=not args.no_storage,
             refresh=args.refresh,
+            db_url=db_url,
         )
     except Exception as exc:  # noqa: BLE001
         print(f"  Failed to load experiments: {exc!r}")

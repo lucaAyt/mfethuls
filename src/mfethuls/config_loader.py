@@ -18,6 +18,8 @@ from mfethuls.storage import (
     dataset_in_storage,
     load_dataset_from_storage,
     save_dataset_to_storage,
+    prepare_registration_metadata_for_postgres,
+    PostgresMetadataBackend,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,13 +68,18 @@ def filter_entries(filters):
     ]
 
 
-def load_experiment_dataset(experiment_name, use_storage: bool = True, refresh: bool = False) -> Optional[Dataset]:
+def load_experiment_dataset(
+    experiment_name, use_storage: bool = True, refresh: bool = False, db_url: Optional[str] = None
+) -> Optional[Dataset]:
     """Load and parse data for a given experiment name into a Dataset.
 
     This is a high-level helper that ties together the Experiment registry,
     instrument configuration, and the existing parser machinery. It keeps the
     current prepare_instruments behaviour intact while offering a simpler
     interface for users who only know the experiment name.
+
+    If db_url is provided, the dataset metadata will also be registered in the
+    specified Postgres database after successful local storage save.
     """
 
     exp = get_experiment(experiment_name)
@@ -118,13 +125,34 @@ def load_experiment_dataset(experiment_name, use_storage: bool = True, refresh: 
 
     # Persist to local storage for future fast loading, but never fail the
     # call if persistence itself has issues.
+    parquet_path = None
+    meta_path = None
     if effective_use_storage:
         try:
-            save_dataset_to_storage(exp, dataset)
+            parquet_path, meta_path = save_dataset_to_storage(exp, dataset)
             if os.environ.get("MFETHULS_STORAGE_DEBUG"):
                 logger.info("Saved Dataset for experiment %s to local storage", experiment_name)
         except Exception:  # noqa: BLE001
             if os.environ.get("MFETHULS_STORAGE_DEBUG"):
                 logger.exception("Failed to save Dataset for experiment %s to local storage", experiment_name)
+
+    # Optionally register metadata in Postgres, but never fail the call if DB
+    # registration has issues.
+    if db_url and parquet_path and meta_path:
+        try:
+            registration_metadata = prepare_registration_metadata_for_postgres(
+                exp, dataset, parquet_path, meta_path
+            )
+            backend = PostgresMetadataBackend(db_url)
+            dataset_id = backend.register_dataset(registration_metadata)
+            if os.environ.get("MFETHULS_STORAGE_DEBUG"):
+                logger.info(
+                    "Registered Dataset for experiment %s in Postgres (dataset_id=%s)",
+                    experiment_name,
+                    dataset_id,
+                )
+        except Exception:  # noqa: BLE001
+            if os.environ.get("MFETHULS_STORAGE_DEBUG"):
+                logger.exception("Failed to register Dataset for experiment %s in Postgres", experiment_name)
 
     return dataset

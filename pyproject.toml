@@ -16,6 +16,15 @@ dependencies = [
     "python-dotenv>=1.0.0",
 ]
 
+[project.optional-dependencies]
+postgres = [
+    "sqlalchemy>=2.0.0",
+    "psycopg2-binary>=2.9.0",
+]
+dev = [
+    "pytest>=9.0.3",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
@@ -26,11 +35,6 @@ mfethuls = ["py.typed"]
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
-
-[dependency-groups]
-dev = [
-    "pytest>=9.0.3",
-]
 
 [project.scripts]
 mfethuls = "mfethuls.main:main"
