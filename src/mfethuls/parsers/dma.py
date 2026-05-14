@@ -54,7 +54,7 @@ class DmaTaQ800:
         if experiment_id is None:
             return df
 
-        registry_profile = measurement_profile or (metadata or {}).get("measurement_profile")
+        registry_profile = measurement_profile or (metadata or {}).get("registry_measurement_profile")
         if registry_profile:
             measurement_profile = infer_canonical_profile_from_registry_profile(
                 "dma", registry_profile, instrument_model
@@ -85,6 +85,7 @@ class DmaTaQ800:
                 "instrument_model": instrument_model,
                 "instrument_name": instrument_name,
                 "experiment_name": experiment_name,
+                "registry_measurement_profile": registry_profile,
                 "measurement_profile": measurement_profile,
                 "schema_normalization": schema_report,
             }

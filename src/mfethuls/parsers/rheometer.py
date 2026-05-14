@@ -58,9 +58,10 @@ class RheometerAntPaarParser:
         # canonical profile key defined in the rheometer schema. We only
         # accept the mapped canonical value; unknown registry values are not
         # silently converted.
-        if measurement_profile:
+        registry_profile = measurement_profile or (metadata or {}).get("registry_measurement_profile")
+        if registry_profile:
             mapped = infer_canonical_profile_from_registry_profile(
-                "rheometer", measurement_profile, instrument_model
+                "rheometer", registry_profile, instrument_model
             )
             measurement_profile = mapped or None
         df, schema_report = apply_dataframe_schema(
@@ -88,6 +89,7 @@ class RheometerAntPaarParser:
                 "instrument_model": instrument_model,
                 "instrument_name": instrument_name,
                 "experiment_name": experiment_name,
+                "registry_measurement_profile": registry_profile,
                 "measurement_profile": measurement_profile,
                 "schema_normalization": schema_report,
             }

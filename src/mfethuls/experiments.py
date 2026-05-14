@@ -32,8 +32,10 @@ def _resolve_registry_path(path: Optional[str] = None) -> str:
 def _infer_measurement_profile_from_text(text: Optional[str]) -> Optional[str]:
     """Infer a measurement profile from free-text description.
 
+    This produces a raw registry profile value (not canonical).
     The same profile names are used for rheometer and DMA where the intent is
     comparable (frequency, strain, or temperature sweep).
+    Canonicalization happens later in the parser layer.
     """
 
     if text is None:
@@ -130,12 +132,14 @@ def load_experiment_registry(path: Optional[str] = None) -> pd.DataFrame:
     - ``instrument_name``: must match an instrument ``name`` from the
       instrument configuration JSON.
 
-        Optional columns (if present) are interpreted as follows:
+    Optional columns (if present) are interpreted as follows:
 
-        - ``description``: free-text description used to infer a measurement
-            profile when available
-        - ``measurement_profile``: canonical rheology profile name, e.g.
-            ``oscillatory_frequency_sweep``
+    - ``description``: free-text description used to infer a measurement
+        profile (raw registry value) when explicit measurement_profile absent
+    - ``measurement_profile``: raw registry measurement profile name (e.g.
+        "frequency Sweep" or "oscillatory_frequency_sweep").
+        This is stored as ``registry_measurement_profile`` in Experiment.metadata.
+        Canonicalization happens later in the parser layer.
     - ``sample_id``: strict sample id (e.g. S001)
     - ``run_id``: strict run id (e.g. R001), defaults to R001 when missing
     - any other columns are stored in ``Experiment.metadata``.
@@ -224,7 +228,7 @@ def load_experiment_registry(path: Optional[str] = None) -> pd.DataFrame:
         if description is not None:
             metadata["description"] = description
         if measurement_profile is not None:
-            metadata["measurement_profile"] = measurement_profile
+            metadata["registry_measurement_profile"] = measurement_profile
         exp = Experiment(
             name=name,
             experiment_id=validated_experiment_id,

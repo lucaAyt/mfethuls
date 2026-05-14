@@ -192,9 +192,11 @@ def test_dma_parser_explicit_measurement_profile_trumps_metadata(monkeypatch):
         instrument_name="dma",
         experiment_name="dma_profile_priority",
         measurement_profile="oscillatory_frequency_sweep",
-        metadata={"measurement_profile": "oscillatory_temperature_sweep"},
+        metadata={"registry_measurement_profile": "oscillatory_temperature_sweep"},
     )
 
+    # Explicit measurement_profile kwarg should be treated as registry value and canonicalized
+    assert dataset.metadata.get("registry_measurement_profile") == "oscillatory_frequency_sweep"
     assert dataset.metadata.get("measurement_profile") == "oscillatory_frequency_sweep"
 
 
@@ -219,7 +221,9 @@ def test_dma_parser_subset_measurement_profile_maps_to_canonical(monkeypatch):
         instrument_name="dma",
         experiment_name="dma_profile_subset",
         measurement_profile="frequency sweep",
-        metadata={"measurement_profile": "oscillatory_temperature_sweep"},
+        metadata={"registry_measurement_profile": "oscillatory_temperature_sweep"},
     )
 
+    # Registry value "frequency sweep" should be canonicalized to "oscillatory_frequency_sweep"
+    assert dataset.metadata.get("registry_measurement_profile") == "frequency sweep"
     assert dataset.metadata.get("measurement_profile") == "oscillatory_frequency_sweep"

@@ -135,7 +135,7 @@ def parse_experiment(
         metadata=experiment.metadata,
     )
     if instrument.type_ in {"rheometer", "dma"}:
-        parse_kwargs["measurement_profile"] = experiment.metadata.get("measurement_profile")
+        parse_kwargs["measurement_profile"] = experiment.metadata.get("registry_measurement_profile")
 
     parsed = parser.parse(dict_data_paths, **parse_kwargs)
 

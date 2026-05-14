@@ -173,7 +173,11 @@ def test_load_experiment_registry_infers_measurement_profile_from_description():
 
         exp = get_experiment("rheometer_test_1")
         assert exp.metadata.get("description") == "Oscillatory frequency sweep rheology run"
-        assert exp.metadata.get("measurement_profile") == "oscillatory_frequency_sweep"
+        # Registry layer creates raw registry_measurement_profile only
+        assert exp.metadata.get("registry_measurement_profile") == "oscillatory_frequency_sweep"
+        # measurement_profile should not exist until parser runs
+        assert "measurement_profile" not in exp.metadata
+        assert exp.metadata.get("measurement_profile") is None
 
 
 def test_load_experiment_registry_infers_dma_measurement_profile_from_description():
@@ -183,7 +187,11 @@ def test_load_experiment_registry_infers_dma_measurement_profile_from_descriptio
 
         exp = get_experiment("dma_test_1")
         assert exp.metadata.get("description") == "DMA temperature sweep run"
-        assert exp.metadata.get("measurement_profile") == "oscillatory_temperature_sweep"
+        # Registry layer creates raw registry_measurement_profile only
+        assert exp.metadata.get("registry_measurement_profile") == "oscillatory_temperature_sweep"
+        # measurement_profile should not exist until parser runs
+        assert "measurement_profile" not in exp.metadata
+        assert exp.metadata.get("measurement_profile") is None
 
 
 def test_load_experiment_registry_explicit_measurement_profile_trumps_inference():
@@ -205,7 +213,11 @@ def test_load_experiment_registry_explicit_measurement_profile_trumps_inference(
 
         load_experiment_registry(registry_path)
         exp = get_experiment("dma_profile_priority")
-        assert exp.metadata.get("measurement_profile") == "oscillatory_frequency_sweep"
+        # Registry layer creates raw registry_measurement_profile only
+        assert exp.metadata.get("registry_measurement_profile") == "oscillatory_frequency_sweep"
+        # measurement_profile should not exist until parser runs
+        assert "measurement_profile" not in exp.metadata
+        assert exp.metadata.get("measurement_profile") is None
 
 
 def test_load_experiment_dataset_returns_dataset_even_when_missing_files():

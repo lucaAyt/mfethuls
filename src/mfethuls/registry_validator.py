@@ -118,9 +118,21 @@ def infer_canonical_profile_from_registry_profile(
 ) -> Optional[str]:
     """Map a registry-provided measurement_profile to a canonical schema profile key.
 
-    The schema loading lives here so the caller can stay focused on matching.
-    Matching is conservative: exact, case-insensitive, and underscore-normalized
-    comparisons only.
+    Canonicalization happens in parsers/datasets, not at registry load time.
+    The registry only stores the raw registry_measurement_profile value.
+
+    Matching strategy (conservative):
+    1. Exact match (registry_profile in canonical_profiles)
+    2. Case-insensitive match
+    3. Underscore-normalized match (spaces/hyphens → underscores)
+    4. Token subset match (all registry tokens are in canonical)
+
+    Returns canonical profile name, or None if no match found.
+    TODO: Stress test this algorithm for edge cases and consider:
+      - Typo tolerance (edit distance)
+      - Fuzzy/approximate matching
+      - Domain-specific alias dictionaries
+      - Partial word matching
     """
 
     if not registry_profile:
@@ -258,27 +270,37 @@ class RegistryValidator:
         instr_model: Optional[str],
         schema: Dict[str, Any],
     ) -> List[str]:
-        """Validate measurement profile for profile-driven instruments."""
+        """Validate measurement profile for profile-driven instruments.
+
+        Checks that registry_measurement_profile (raw registry value) can be
+        canonicalized to a known schema profile.
+        """
         errors: List[str] = []
-        measurement_profile = experiment.metadata.get("measurement_profile")
+        registry_profile = experiment.metadata.get("registry_measurement_profile")
         canonical_profiles = _load_canonical_profiles_from_schema(schema)
 
-        if not measurement_profile:
+        if not registry_profile:
             logger.warning(
-                "No measurement_profile provided for %s experiment %s. "
+                "No registry_measurement_profile provided for %s experiment %s. "
                 "Schema normalization will use profile inference.",
                 instr_type,
                 experiment.name,
             )
             return errors
 
-        # Check if profile is known in schema
-        matched_profile = _match_canonical_profile(measurement_profile, canonical_profiles)
+        # Check if registry profile can be canonicalized
+        matched_profile = _match_canonical_profile(registry_profile, canonical_profiles)
         if matched_profile is None:
+            # TODO: Stress test infer_canonical_profile_from_registry_profile() matching algorithm
+            # Consider: typo tolerance, fuzzy matching, domain-specific aliases, etc.
             available = sorted(canonical_profiles)
-            errors.append(
-                f"Unknown measurement_profile '{measurement_profile}' for {instr_type}. "
-                f"Available profiles: {available}"
+            logger.warning(
+                "Could not canonicalize registry_measurement_profile '%s' for %s experiment %s. "
+                "Available profiles: %s. Parsing will attempt inference from data.",
+                registry_profile,
+                instr_type,
+                experiment.name,
+                available,
             )
             return errors
 
