@@ -764,6 +764,7 @@ class DuckDBQueryBackend:
         self.read_only = read_only
         self._conn = duckdb.connect(self.db_path, read_only=read_only)
         self._ensure_registry()
+        self._rehydrate_views()
 
     def _ensure_registry(self) -> None:
         self._conn.execute(
@@ -775,6 +776,21 @@ class DuckDBQueryBackend:
             );
             """
         )
+
+    def _rehydrate_views(self) -> None:
+        rows = self._conn.execute(
+            "SELECT table_name, storage_path FROM dataset_registry;"
+        ).fetchall()
+        for table_name, storage_path in rows:
+            try:
+                relation = self._conn.from_parquet(storage_path)
+                try:
+                    self._conn.unregister(table_name)
+                except Exception:
+                    pass
+                self._conn.register(table_name, relation)
+            except Exception:
+                continue
 
     @staticmethod
     def _sanitize_table_name(name: str) -> str:
