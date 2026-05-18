@@ -100,9 +100,9 @@ def mainX(argv: list[str] | None = None):
         help="Optional path to save the plot instead of only creating it in memory.",
     )
     parser.add_argument(
-        "--commit-to-db",
+        "--persist-metadata",
         action="store_true",
-        help="Register dataset metadata in Postgres. Uses MFETHULS_POSTGRES_URL from .env, or --db-url if provided.",
+        help="Persist dataset metadata in Postgres. Uses MFETHULS_POSTGRES_URL from .env, or --db-url if provided.",
     )
     parser.add_argument(
         "--db-url",
@@ -133,14 +133,14 @@ def mainX(argv: list[str] | None = None):
     env_db_url = get_postgres_db_url()
 
     # CLI flags can override or disable .env config
-    if args.commit_to_db:
+    if args.persist_metadata:
         # User explicitly requested DB registration via CLI
         if args.db_url:
             db_url = args.db_url
         elif env_db_url:
             db_url = env_db_url
         else:
-            print("ERROR: --commit-to-db requires either --db-url CLI flag or MFETHULS_POSTGRES_URL in .env")
+            print("ERROR: --persist-metadata requires either --db-url CLI flag or MFETHULS_POSTGRES_URL in .env")
             return
     elif env_db_url:
         # Use .env config if not explicitly disabled

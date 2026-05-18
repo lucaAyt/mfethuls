@@ -1,3 +1,20 @@
+"""Data storage and metadata management for datasets.
+
+This module provides a clean separation between:
+- DataStorageBackend: Manages bulk dataset files (Parquet, S3, etc.)
+- MetadataBackend: Manages searchable metadata (Postgres, etc.)
+- StorageManager: Composes both backends into a unified workflow
+
+Organization:
+1. Abstract Base Classes & Type Definitions
+2. Configuration & Environment Utilities
+3. Local Parquet Storage Implementation
+4. Provenance & Metadata Helpers
+5. Postgres Metadata Backend
+6. Storage Manager (Composition Layer)
+7. Public Module Wrappers (for notebooks)
+"""
+
 from __future__ import annotations
 
 import json
@@ -19,10 +36,17 @@ from .dataset import Dataset
 from .experiments import Experiment
 
 
-class StorageBackend:
-    """Abstract base class for storage backends.
+# ==============================================================================
+# SECTION 1: Abstract Base Classes & Type Definitions
+# ==============================================================================
 
-    Defines the interface that all storage implementations must follow.
+
+class DataStorageBackend:
+    """Abstract base class for data storage backends.
+
+    This interface covers backends that manage bulk dataset files (Parquet,
+    S3 objects, DuckDB tables, etc.). It intentionally excludes metadata-only
+    operations which belong on :class:`MetadataBackend`.
     """
 
     def dataset_paths(self, experiment: Experiment) -> Tuple[str, str]:
@@ -39,6 +63,19 @@ class StorageBackend:
 
     def load_dataset(self, experiment: Experiment) -> Dataset:
         """Load a dataset from storage."""
+        raise NotImplementedError()
+
+
+class MetadataBackend:
+    """Abstract base class for metadata-only backends.
+
+    Implementations store searchable metadata (for example Postgres). This
+    interface intentionally focuses on metadata operations and does not touch
+    raw dataset files.
+    """
+
+    def persist_metadata(self, metadata: DatasetMetadata) -> Optional[int]:
+        """Persist dataset metadata and return the inserted dataset id if any."""
         raise NotImplementedError()
 
 
@@ -75,9 +112,17 @@ class DatasetMetadata(TypedDict, total=False):
     schema_version: Optional[str]
     measurement_profile: Optional[str]
     schema_normalization: Optional[Dict[str, Any]]  # JSONB in Postgres
+    
+    # Package version (explicit for easy querying)
+    mfethuls_version: Optional[str]
 
     # Full audit trail (provenance is the rich metadata blob)
     provenance: Dict[str, Any]  # JSONB in Postgres
+
+
+# ==============================================================================
+# SECTION 2: Configuration & Environment Utilities
+# ==============================================================================
 
 
 def _get_package_version() -> str:
@@ -161,16 +206,11 @@ def get_postgres_db_url() -> Optional[str]:
     if enabled not in {"1", "true", "yes"}:
         return None
 
-    # First priority: explicit full URL
-    db_url = os.environ.get("MFETHULS_POSTGRES_URL")
-    if db_url:
-        return db_url
-
-    # Second priority: construct from components
+    # Construct URL from .env components
     user = os.environ.get("MFETHULS_POSTGRES_USER")
     password = os.environ.get("MFETHULS_POSTGRES_PASSWORD")
     host = os.environ.get("MFETHULS_POSTGRES_HOST", "localhost")
-    port = os.environ.get("MFETHULS_POSTGRES_PORT", "5432")
+    port = os.environ.get("MFETHULS_POSTGRES_PORT")
     database = os.environ.get("MFETHULS_POSTGRES_DB")
 
     if not (user and password and database):
@@ -204,7 +244,12 @@ def _dataset_basename(experiment: Experiment) -> str:
     return "_".join(parts)
 
 
-class LocalParquetStorage(StorageBackend):
+# ==============================================================================
+# SECTION 3: Local Parquet Storage Implementation
+# ==============================================================================
+
+
+class LocalParquetStorage(DataStorageBackend):
     """Local filesystem storage for datasets and metadata.
 
     The on-disk layout is intentionally simple and readable:
@@ -280,7 +325,7 @@ class LocalParquetStorage(StorageBackend):
             meta_path: Path to the saved metadata JSON file.
 
         Returns:
-            A DatasetMetadata dict ready for PostgresMetadataBackend.register_dataset().
+            A DatasetMetadata dict ready for PostgresMetadataBackend.persist_metadata().
         """
 
         metadata = dataset.metadata if isinstance(dataset.metadata, dict) else {}
@@ -307,6 +352,8 @@ class LocalParquetStorage(StorageBackend):
             schema_version=metadata.get("schema_version"),
             measurement_profile=metadata.get("measurement_profile"),
             schema_normalization=metadata.get("schema_normalization"),
+            # Package version
+            mfethuls_version=_get_package_version(),
             # Full audit trail
             provenance=provenance,
         )
@@ -349,6 +396,29 @@ def dataset_in_storage(experiment: Experiment) -> bool:
     return LocalParquetStorage().dataset_in_storage(experiment)
 
 
+def save_dataset_to_storage(experiment: Experiment, dataset: Dataset) -> Tuple[str, str]:
+    """Persist a Dataset for the given experiment to local storage.
+
+    Returns the paths to the parquet and metadata files.
+    """
+
+    return LocalParquetStorage().save_dataset(experiment, dataset)
+
+
+def load_dataset_from_storage(experiment: Experiment) -> Dataset:
+    """Load a Dataset for the given experiment from local storage.
+
+    Raises FileNotFoundError if the parquet file is missing.
+    """
+
+    return LocalParquetStorage().load_dataset(experiment)
+
+
+# ==============================================================================
+# SECTION 4: Provenance & Metadata Helpers
+# ==============================================================================
+
+
 def _json_default(value):  # pragma: no cover - simple fallback helper
     """Best-effort JSON serialisation for metadata.
 
@@ -367,6 +437,7 @@ def _json_default(value):  # pragma: no cover - simple fallback helper
     return str(value)
 
 
+# TODO: Check if the source file metadata param is of any use
 def _extract_source_files(dataset: Dataset, metadata: Dict[str, Any]) -> List[str]:
     """Extract a stable list of source files from metadata or data columns."""
 
@@ -381,6 +452,8 @@ def _extract_source_files(dataset: Dataset, metadata: Dict[str, Any]) -> List[st
     return []
 
 
+#TODO: Not sure if it is worth having all this redundancy in provenance. 
+# Perhaps we can clean this up
 def _build_provenance_metadata(
     experiment: Experiment,
     dataset: Dataset,
@@ -443,36 +516,18 @@ def _build_provenance_metadata(
     }
 
 
-def save_dataset_to_storage(experiment: Experiment, dataset: Dataset) -> Tuple[str, str]:
-    """Persist a Dataset for the given experiment to local storage.
-
-    Returns the paths to the parquet and metadata files.
-    """
-
-    return LocalParquetStorage().save_dataset(experiment, dataset)
-
-
-def load_dataset_from_storage(experiment: Experiment) -> Dataset:
-    """Load a Dataset for the given experiment from local storage.
-
-    Raises FileNotFoundError if the parquet file is missing.
-    """
-
-    return LocalParquetStorage().load_dataset(experiment)
-
-
 def prepare_registration_metadata_for_postgres(
     experiment: Experiment, dataset: Dataset, parquet_path: str, meta_path: str
 ) -> Dict[str, Any]:
     """Prepare metadata for Postgres registration after saving to local storage.
 
     This is a convenience wrapper that bridges LocalParquetStorage and PostgresMetadataBackend.
-    Use this right after save_dataset_to_storage() to get a dict ready for register_dataset().
+    Use this right after save_dataset_to_storage() to get a dict ready for persist_metadata().
 
     Example:
         parquet_path, meta_path = save_dataset_to_storage(exp, dataset)
         metadata = prepare_registration_metadata_for_postgres(exp, dataset, parquet_path, meta_path)
-        postgres_backend.register_dataset(metadata)
+        postgres_backend.persist_metadata(metadata)
 
     Args:
         experiment: The experiment object.
@@ -481,13 +536,18 @@ def prepare_registration_metadata_for_postgres(
         meta_path: Metadata path returned by save_dataset_to_storage().
 
     Returns:
-        A dict ready for PostgresMetadataBackend.register_dataset().
+        A dict ready for PostgresMetadataBackend.persist_metadata().
     """
 
     return LocalParquetStorage().prepare_registration_metadata(experiment, dataset, parquet_path, meta_path)
 
 
-class PostgresMetadataBackend(StorageBackend):
+# ==============================================================================
+# SECTION 5: Postgres Metadata Backend
+# ==============================================================================
+
+
+class PostgresMetadataBackend(MetadataBackend):
     """Postgres-backed metadata storage using SQLAlchemy.
 
     This backend focuses on metadata registration (experiments, datasets).
@@ -545,6 +605,7 @@ class PostgresMetadataBackend(StorageBackend):
             -- Processing metadata
             schema_version TEXT,
             measurement_profile TEXT,
+            mfethuls_version TEXT,
             schema_normalization JSONB,
             
             -- Full audit trail (rich provenance metadata)
@@ -560,24 +621,8 @@ class PostgresMetadataBackend(StorageBackend):
             conn.execute(text(create_datasets))
             conn.commit()
 
-    def dataset_paths(self, experiment: Experiment) -> Tuple[str, str]:
-        """Not implemented for Postgres backend; use LocalParquetStorage for paths."""
-        raise NotImplementedError("PostgresMetadataBackend does not manage file paths. Use LocalParquetStorage.")
-
-    def dataset_in_storage(self, experiment: Experiment) -> bool:
-        """Not implemented for Postgres backend."""
-        raise NotImplementedError("PostgresMetadataBackend does not check file existence. Use LocalParquetStorage.")
-
-    def save_dataset(self, experiment: Experiment, dataset: Dataset) -> Tuple[str, str]:
-        """Not implemented for Postgres backend; use LocalParquetStorage for save."""
-        raise NotImplementedError("PostgresMetadataBackend does not write parquet files. Use LocalParquetStorage.")
-
-    def load_dataset(self, experiment: Experiment) -> Dataset:
-        """Not implemented for Postgres backend; use LocalParquetStorage for load."""
-        raise NotImplementedError("PostgresMetadataBackend does not read parquet files. Use LocalParquetStorage.")
-
-    def register_dataset(self, metadata: DatasetMetadata) -> Optional[int]:
-        """Register a dataset's metadata in Postgres using unified schema.
+    def persist_metadata(self, metadata: DatasetMetadata) -> Optional[int]:
+        """Persist a dataset's metadata in Postgres using unified schema.
 
         Follows the DatasetMetadata schema for consistency across backends.
 
@@ -592,12 +637,12 @@ class PostgresMetadataBackend(StorageBackend):
             "experiment_id, sample_id, run_id, experiment_name, "
             "instrument_name, instrument_type, instrument_model, "
             "dataset_name, storage_path, storage_format, "
-            "rows, cols, schema_version, measurement_profile, schema_normalization, provenance"
+            "rows, cols, schema_version, measurement_profile, mfethuls_version, schema_normalization, provenance"
             ") VALUES ("
             ":experiment_id, :sample_id, :run_id, :experiment_name, "
             ":instrument_name, :instrument_type, :instrument_model, "
             ":dataset_name, :storage_path, :storage_format, "
-            ":rows, :cols, :schema_version, :measurement_profile, :schema_normalization, :provenance"
+            ":rows, :cols, :schema_version, :measurement_profile, :mfethuls_version, :schema_normalization, :provenance"
             ") RETURNING id;"
         )
 
@@ -622,6 +667,7 @@ class PostgresMetadataBackend(StorageBackend):
             "measurement_profile": metadata.get("measurement_profile"),
             "schema_normalization": json.dumps(schema_norm) if isinstance(schema_norm, dict) else schema_norm,
             "provenance": json.dumps(provenance) if isinstance(provenance, dict) else provenance,
+            "mfethuls_version": metadata.get("mfethuls_version") or _get_package_version(),
         }
         try:
             with self.engine.connect() as conn:
@@ -633,3 +679,129 @@ class PostgresMetadataBackend(StorageBackend):
         except SQLAlchemyError:
             raise
         return None
+
+    def list_datasets(self, limit: int = 100, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Return a list of dataset rows matching optional filters.
+
+        Supported filter keys: `instrument_name`, `instrument_type`,
+        `schema_version`, `mfethuls_version`, `experiment_id`, `measurement_profile`.
+        """
+        filters = filters or {}
+        where_clauses: List[str] = []
+        params: Dict[str, Any] = {"limit": limit}
+
+        allowed = (
+            "instrument_name",
+            "instrument_type",
+            "schema_version",
+            "mfethuls_version",
+            "experiment_id",
+            "measurement_profile",
+        )
+        for key in allowed:
+            if key in filters and filters[key] is not None:
+                where_clauses.append(f"{key} = :{key}")
+                params[key] = filters[key]
+
+        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        sql = f"SELECT * FROM datasets {where_sql} ORDER BY created_at DESC LIMIT :limit"
+
+        with self.engine.connect() as conn:
+            res = conn.execute(text(sql), params)
+            try:
+                rows = [dict(r) for r in res.mappings().all()]
+            except Exception:
+                rows = [dict(r._mapping) for r in res.fetchall()]
+        return rows
+
+    def get_dataset_by_id(self, dataset_id: int) -> Optional[Dict[str, Any]]:
+        """Return a single dataset row by `id`, or None if not found."""
+        sql = "SELECT * FROM datasets WHERE id = :id LIMIT 1"
+        with self.engine.connect() as conn:
+            res = conn.execute(text(sql), {"id": dataset_id})
+            try:
+                row = res.mappings().first()
+            except Exception:
+                fetched = res.fetchone()
+                row = dict(fetched._mapping) if fetched is not None else None
+        return dict(row) if row is not None else None
+
+
+# ==============================================================================
+# SECTION 6: Storage Manager (Composition Layer)
+# ==============================================================================
+
+
+class StorageManager:
+    """Compose a DataStorageBackend and a MetadataBackend.
+
+    This helper centralises the common workflow: save dataset files with a
+    data backend (local Parquet, S3, etc.) and optionally persist metadata
+    with a metadata backend (Postgres, etc.).
+    """
+
+    def __init__(
+        self,
+        data_backend: Optional[DataStorageBackend] = None,
+        metadata_backend: Optional[MetadataBackend] = None,
+    ) -> None:
+        self.data_backend = data_backend or LocalParquetStorage()
+        self.metadata_backend = metadata_backend
+
+    def save_and_persist(
+        self, experiment: Experiment, dataset: Dataset
+    ) -> Tuple[str, str, Optional[int]]:
+        """Save dataset to the data backend and optionally persist metadata.
+
+        Returns a tuple: (parquet_path, meta_path, dataset_id_or_None).
+        """
+        parquet_path, meta_path = self.data_backend.save_dataset(experiment, dataset)
+        dataset_id: Optional[int] = None
+        if self.metadata_backend is not None:
+            metadata = prepare_registration_metadata_for_postgres(
+                experiment, dataset, parquet_path, meta_path
+            )
+            dataset_id = self.metadata_backend.persist_metadata(metadata)
+        return parquet_path, meta_path, dataset_id
+
+
+# ==============================================================================
+# SECTION 7: Public Module Wrappers (for Notebooks)
+# ==============================================================================
+
+
+def list_datasets(db_url: str, limit: int = 100, filters: Optional[Dict[str, Any]] = None) -> "pd.DataFrame":
+    """Convenience wrapper for notebooks: return datasets as a pandas DataFrame.
+
+    Args:
+        db_url: Postgres connection URL.
+        limit: Maximum number of rows to return.
+        filters: Optional dict of filters (see ``PostgresMetadataBackend.list_datasets``).
+
+    Returns:
+        A `pandas.DataFrame` with dataset rows (empty if none or if db_url is falsy).
+    """
+    if not db_url:
+        return pd.DataFrame()
+    backend = PostgresMetadataBackend(db_url)
+    rows = backend.list_datasets(limit=limit, filters=filters)
+    return pd.DataFrame(rows)
+
+
+def get_dataset(db_url: str, dataset_id: int) -> Optional["pd.Series"]:
+    """Convenience wrapper for notebooks: return a single dataset as a Series.
+
+    Args:
+        db_url: Postgres connection URL.
+        dataset_id: Numeric id of the dataset row.
+
+    Returns:
+        A `pandas.Series` or `None` if not found.
+    """
+    if not db_url:
+        return None
+    backend = PostgresMetadataBackend(db_url)
+    row = backend.get_dataset_by_id(dataset_id)
+    if row is None:
+        return None
+    return pd.Series(row)
