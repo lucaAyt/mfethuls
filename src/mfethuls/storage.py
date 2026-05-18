@@ -1,30 +1,37 @@
-"""Data storage and metadata management for datasets.
+"""Storage layer: data + metadata handling for mfethuls.
 
-This module provides a clean separation between:
-- DataStorageBackend: Manages bulk dataset files (Parquet, S3, etc.)
-- MetadataBackend: Manages searchable metadata (Postgres, etc.)
-- StorageManager: Composes both backends into a unified workflow
+This module separates concerns into:
+- DataStorageBackend: manages bulk dataset files (Parquet, S3, etc.)
+- MetadataBackend: manages searchable metadata (Postgres, etc.)
+- StorageManager: composes data and metadata backends for common flows
 
-Organization:
+Organization (sections present in-file):
 1. Abstract Base Classes & Type Definitions
 2. Configuration & Environment Utilities
 3. Local Parquet Storage Implementation
 4. Provenance & Metadata Helpers
 5. Postgres Metadata Backend
-6. Storage Manager (Composition Layer)
-7. Public Module Wrappers (for notebooks)
+6. DuckDB Query Backend
+7. Storage Manager (Composition Layer)
+8. Public Module Wrappers (for notebooks)
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 import pandas as pd
+
+try:
+    import duckdb  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    duckdb = None  # type: ignore
 
 try:
     from sqlalchemy import create_engine, MetaData, text
@@ -36,9 +43,8 @@ from .dataset import Dataset
 from .experiments import Experiment
 
 
-# ==============================================================================
-# SECTION 1: Abstract Base Classes & Type Definitions
-# ==============================================================================
+# Note: older monolithic `StorageBackend` was split into `DataStorageBackend`
+# and `MetadataBackend` to clearly separate file storage from metadata APIs.
 
 
 class DataStorageBackend:
@@ -120,9 +126,9 @@ class DatasetMetadata(TypedDict, total=False):
     provenance: Dict[str, Any]  # JSONB in Postgres
 
 
-# ==============================================================================
+# ======================================================================
 # SECTION 2: Configuration & Environment Utilities
-# ==============================================================================
+# ======================================================================
 
 
 def _get_package_version() -> str:
@@ -160,6 +166,26 @@ def _get_storage_root() -> str:
 
     os.makedirs(root, exist_ok=True)
     return root
+
+
+def _get_duckdb_path() -> str:
+    """Return the DuckDB file path for local query storage.
+
+    Resolution order (first non-empty wins):
+    - ``MFETHULS_DUCKDB_PATH`` env var
+    - ``<storage_root>/mfethuls.duckdb``
+    """
+
+    path = os.environ.get("MFETHULS_DUCKDB_PATH")
+    if path:
+        return os.path.abspath(path)
+
+    return os.path.join(_get_storage_root(), "mfethuls.duckdb")
+
+
+# ======================================================================
+# SECTION 3: Local Parquet Storage Implementation
+# ======================================================================
 
 
 def get_postgres_db_url() -> Optional[str]:
@@ -244,11 +270,7 @@ def _dataset_basename(experiment: Experiment) -> str:
     return "_".join(parts)
 
 
-# ==============================================================================
-# SECTION 3: Local Parquet Storage Implementation
-# ==============================================================================
-
-
+ 
 class LocalParquetStorage(DataStorageBackend):
     """Local filesystem storage for datasets and metadata.
 
@@ -380,6 +402,11 @@ class LocalParquetStorage(DataStorageBackend):
         return Dataset(data=data, metadata=metadata)
 
 
+    # ======================================================================
+    # SECTION 4: Provenance & Metadata Helpers
+    # ======================================================================
+
+
 def dataset_paths(experiment: Experiment) -> Tuple[str, str]:
     """Return the storage paths for an experiment.
 
@@ -412,11 +439,6 @@ def load_dataset_from_storage(experiment: Experiment) -> Dataset:
     """
 
     return LocalParquetStorage().load_dataset(experiment)
-
-
-# ==============================================================================
-# SECTION 4: Provenance & Metadata Helpers
-# ==============================================================================
 
 
 def _json_default(value):  # pragma: no cover - simple fallback helper
@@ -490,13 +512,6 @@ def _build_provenance_metadata(
             "format": {"data": "parquet", "metadata": "json"},
             "parquet_path": parquet_path,
             "metadata_path": meta_path,
-        },
-        "dataset": {
-            "row_count": int(dataset.data.shape[0]),
-            "column_count": int(dataset.data.shape[1]),
-            "columns": [str(column) for column in dataset.data.columns],
-        },
-        "instrument": {
             "instrument_name": experiment.instrument_name,
             "instrument_type": instrument_type,
             "instrument_model": instrument_model,
@@ -542,9 +557,9 @@ def prepare_registration_metadata_for_postgres(
     return LocalParquetStorage().prepare_registration_metadata(experiment, dataset, parquet_path, meta_path)
 
 
-# ==============================================================================
+# ======================================================================
 # SECTION 5: Postgres Metadata Backend
-# ==============================================================================
+# ======================================================================
 
 
 class PostgresMetadataBackend(MetadataBackend):
@@ -727,26 +742,135 @@ class PostgresMetadataBackend(MetadataBackend):
         return dict(row) if row is not None else None
 
 
-# ==============================================================================
-# SECTION 6: Storage Manager (Composition Layer)
-# ==============================================================================
+# ======================================================================
+# SECTION 6: DuckDB Query Backend
+# ======================================================================
+
+
+class DuckDBQueryBackend:
+    """DuckDB-backed query backend for Parquet datasets.
+
+    This backend registers Parquet files as DuckDB views for ad-hoc SQL
+    queries. It keeps a small registry table so datasets can be listed
+    and re-used across sessions.
+    """
+
+    def __init__(self, db_path: Optional[str] = None, read_only: bool = False) -> None:
+        if duckdb is None:
+            raise RuntimeError("duckdb is required for DuckDBQueryBackend. Install duckdb.")
+
+        resolved = db_path or _get_duckdb_path()
+        self.db_path = resolved if resolved == ":memory:" else os.path.abspath(resolved)
+        self.read_only = read_only
+        self._conn = duckdb.connect(self.db_path, read_only=read_only)
+        self._ensure_registry()
+
+    def _ensure_registry(self) -> None:
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS dataset_registry (
+                table_name TEXT PRIMARY KEY,
+                storage_path TEXT NOT NULL,
+                registered_at TIMESTAMP DEFAULT now()
+            );
+            """
+        )
+
+    @staticmethod
+    def _sanitize_table_name(name: str) -> str:
+        safe = re.sub(r"[^A-Za-z0-9_]+", "_", name).strip("_")
+        return safe or "dataset"
+
+    def register_parquet(self, storage_path: str, table_name: Optional[str] = None, overwrite: bool = True) -> str:
+        """Register a Parquet file as a DuckDB view.
+
+        Args:
+            storage_path: Local path or URI to the Parquet file.
+            table_name: Optional table/view name. If omitted, derived from path.
+            overwrite: When True, replace any existing view of the same name.
+
+        Returns:
+            The DuckDB view name created or replaced.
+        """
+
+        inferred = table_name or os.path.splitext(os.path.basename(storage_path))[0]
+        view_name = self._sanitize_table_name(inferred)
+        relation = self._conn.from_parquet(storage_path)
+        if overwrite:
+            try:
+                self._conn.unregister(view_name)
+            except Exception:
+                pass
+        self._conn.register(view_name, relation)
+        self._conn.execute(
+            """
+            INSERT INTO dataset_registry (table_name, storage_path)
+            VALUES (?, ?)
+            ON CONFLICT(table_name)
+            DO UPDATE SET storage_path = excluded.storage_path, registered_at = now();
+            """,
+            [view_name, storage_path],
+        )
+        return view_name
+
+    def list_registered(self) -> List[Dict[str, Any]]:
+        """Return the list of registered datasets."""
+
+        res = self._conn.execute(
+            "SELECT table_name, storage_path, registered_at FROM dataset_registry ORDER BY registered_at DESC;"
+        )
+        rows = res.fetchall()
+        return [
+            {
+                "table_name": row[0],
+                "storage_path": row[1],
+                "registered_at": row[2],
+            }
+            for row in rows
+        ]
+
+    def query(self, sql: str) -> pd.DataFrame:
+        """Run a SQL query and return results as a DataFrame."""
+
+        return self._conn.execute(sql).fetch_df()
+
+    def get_sqlalchemy_url(self) -> str:
+        """Return a SQLAlchemy-compatible DuckDB URL."""
+
+        if self.db_path == ":memory:":
+            return "duckdb:///:memory:"
+        path = self.db_path.replace("\\", "/")
+        return f"duckdb:///{path}"
+
+    def close(self) -> None:
+        """Close the underlying DuckDB connection."""
+
+        self._conn.close()
+
+
+    # ======================================================================
+    # SECTION 7: Storage Manager (Composition Layer)
+    # ======================================================================
 
 
 class StorageManager:
-    """Compose a DataStorageBackend and a MetadataBackend.
+    """Compose data, metadata, and optional query backends.
 
     This helper centralises the common workflow: save dataset files with a
-    data backend (local Parquet, S3, etc.) and optionally persist metadata
-    with a metadata backend (Postgres, etc.).
+    data backend (local Parquet, S3, etc.), optionally persist metadata with
+    a metadata backend (Postgres, etc.), and optionally register files with
+    a query backend (DuckDB).
     """
 
     def __init__(
         self,
         data_backend: Optional[DataStorageBackend] = None,
         metadata_backend: Optional[MetadataBackend] = None,
+        query_backend: Optional[DuckDBQueryBackend] = None,
     ) -> None:
         self.data_backend = data_backend or LocalParquetStorage()
         self.metadata_backend = metadata_backend
+        self.query_backend = query_backend
 
     def save_and_persist(
         self, experiment: Experiment, dataset: Dataset
@@ -762,12 +886,18 @@ class StorageManager:
                 experiment, dataset, parquet_path, meta_path
             )
             dataset_id = self.metadata_backend.persist_metadata(metadata)
+            print(_dataset_basename(experiment))
+        if self.query_backend is not None:
+            self.query_backend.register_parquet(
+                parquet_path,
+                table_name=_dataset_basename(experiment),
+            )
         return parquet_path, meta_path, dataset_id
 
 
-# ==============================================================================
-# SECTION 7: Public Module Wrappers (for Notebooks)
-# ==============================================================================
+    # ======================================================================
+    # SECTION 8: Public Module Wrappers (for Notebooks)
+    # ======================================================================
 
 
 def list_datasets(db_url: str, limit: int = 100, filters: Optional[Dict[str, Any]] = None) -> "pd.DataFrame":

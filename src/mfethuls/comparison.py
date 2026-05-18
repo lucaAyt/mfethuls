@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Sequence, TYPE_CHECKING
 
 import pandas as pd
 
 from .config_loader import load_experiment_dataset
 from .experiments import load_experiment_registry
 from .dataset import Dataset
+
+if TYPE_CHECKING:
+    from .storage import DuckDBQueryBackend
 
 
 logger = logging.getLogger(__name__)
@@ -68,10 +71,16 @@ def load_comparison_set(
     *,
     use_storage: bool = True,
     refresh: bool = False,
+    query_backend: "DuckDBQueryBackend | None" = None,
 ) -> ComparisonSet:
     """Compatibility wrapper for load_experiments."""
 
-    return load_experiments(experiment_names, use_storage=use_storage, refresh=refresh)
+    return load_experiments(
+        experiment_names,
+        use_storage=use_storage,
+        refresh=refresh,
+        query_backend=query_backend,
+    )
 
 
 def _load_comparison_from_names(
@@ -80,6 +89,7 @@ def _load_comparison_from_names(
     use_storage: bool = True,
     refresh: bool = False,
     db_url: str | None = None,
+    query_backend: "DuckDBQueryBackend | None" = None,
 ) -> ComparisonSet:
     names = [str(name) for name in experiment_names]
     if not names:
@@ -89,7 +99,13 @@ def _load_comparison_from_names(
     labels: list[str] = []
 
     for idx, name in enumerate(names):
-        dataset = load_experiment_dataset(name, use_storage=use_storage, refresh=refresh, db_url=db_url)
+        dataset = load_experiment_dataset(
+            name,
+            use_storage=use_storage,
+            refresh=refresh,
+            db_url=db_url,
+            query_backend=query_backend,
+        )
         if dataset is None:
             logger.warning("Not loading experiment %r because no dataset is associated with it.", name)
             continue
@@ -105,6 +121,7 @@ def load_experiments(
     use_storage: bool = True,
     refresh: bool = False,
     db_url: str | None = None,
+    query_backend: "DuckDBQueryBackend | None" = None,
 ) -> ComparisonSet:
     """Load multiple experiments into a comparison set for inspection or plotting.
 
@@ -112,7 +129,11 @@ def load_experiments(
     Postgres database after local storage save.
     """
     return _load_comparison_from_names(
-        experiment_names, use_storage=use_storage, refresh=refresh, db_url=db_url
+        experiment_names,
+        use_storage=use_storage,
+        refresh=refresh,
+        db_url=db_url,
+        query_backend=query_backend,
     )
 
 
@@ -122,6 +143,7 @@ def load_samples(
     registry_path: str | None = None,
     use_storage: bool = True,
     refresh: bool = False,
+    query_backend: "DuckDBQueryBackend | None" = None,
 ) -> ComparisonSet:
     """Load all experiments associated with one or more sample ids into a comparison set."""
 
@@ -144,4 +166,9 @@ def load_samples(
     if not experiment_names:
         raise ValueError(f"No experiments found for sample id(s): {requested_sample_ids}")
 
-    return _load_comparison_from_names(experiment_names, use_storage=use_storage, refresh=refresh)
+    return _load_comparison_from_names(
+        experiment_names,
+        use_storage=use_storage,
+        refresh=refresh,
+        query_backend=query_backend,
+    )

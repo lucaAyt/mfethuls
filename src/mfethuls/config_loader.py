@@ -3,7 +3,7 @@ import json
 import logging
 
 from collections import namedtuple
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from mfethuls.dataset import Dataset
 from mfethuls.factory import (
@@ -20,6 +20,9 @@ from mfethuls.storage import (
     PostgresMetadataBackend,
     StorageManager,
 )
+
+if TYPE_CHECKING:
+    from mfethuls.storage import DuckDBQueryBackend
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +71,11 @@ def filter_entries(filters):
 
 
 def load_experiment_dataset(
-    experiment_name, use_storage: bool = True, refresh: bool = False, db_url: Optional[str] = None
+    experiment_name,
+    use_storage: bool = True,
+    refresh: bool = False,
+    db_url: Optional[str] = None,
+    query_backend: "DuckDBQueryBackend | None" = None,
 ) -> Optional[Dataset]:
     """Load and parse data for a given experiment name into a Dataset.
 
@@ -130,7 +137,7 @@ def load_experiment_dataset(
     if effective_use_storage:
         try:
             metadata_backend = PostgresMetadataBackend(db_url) if db_url else None
-            manager = StorageManager(metadata_backend=metadata_backend)
+            manager = StorageManager(metadata_backend=metadata_backend, query_backend=query_backend)
             parquet_path, meta_path, dataset_id = manager.save_and_persist(exp, dataset)
             if os.environ.get("MFETHULS_STORAGE_DEBUG"):
                 logger.info("Saved Dataset for experiment %s to local storage", experiment_name)
