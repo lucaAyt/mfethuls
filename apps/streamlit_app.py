@@ -15,10 +15,10 @@ except Exception:  # pragma: no cover - optional dependency
     text = None  # type: ignore
 
 
-st.set_page_config(page_title="mfethuls DuckDB Explorer", layout="wide")
+st.set_page_config(page_title="mfethuls Explorer", layout="wide")
 
-st.title("mfethuls DuckDB Explorer")
-st.caption("Explore registered Parquet datasets via DuckDB.")
+st.title("mfethuls Explorer")
+st.caption("Explore registered datasets.")
 
 
 def _get_backend() -> DuckDBQueryBackend:
@@ -124,7 +124,7 @@ with st.sidebar.expander("Datasets", expanded=True):
         )
 
 with st.sidebar.expander("Query", expanded=False):
-    limit = st.number_input("Row limit", min_value=10, max_value=100000, value=500, step=10)
+    limit = st.number_input("Row limit", min_value=10, max_value=1000000, value=5000, step=10)
 
 if selected_tables:
     combined_frames: list[pd.DataFrame] = []
@@ -181,6 +181,36 @@ if selected_tables:
             color_col = None if hue_choice == "(none)" else hue_choice
             use_log_x = st.checkbox("Log X", value=False)
             use_log_y = st.checkbox("Log Y", value=False)
+            discrete_palettes = {
+                "Plotly": px.colors.qualitative.Plotly,
+                "D3": px.colors.qualitative.D3,
+                "G10": px.colors.qualitative.G10,
+                "T10": px.colors.qualitative.T10,
+                "Bold": px.colors.qualitative.Bold,
+                "Safe": px.colors.qualitative.Safe,
+                "Dark2": px.colors.qualitative.Dark2,
+                "Set2": px.colors.qualitative.Set2,
+                "Pastel": px.colors.qualitative.Pastel,
+            }
+            continuous_palettes = {
+                "Viridis": px.colors.sequential.Viridis,
+                "Cividis": px.colors.sequential.Cividis,
+                "Plasma": px.colors.sequential.Plasma,
+                "Inferno": px.colors.sequential.Inferno,
+                "Magma": px.colors.sequential.Magma,
+                "Turbo": px.colors.sequential.Turbo,
+                "Blues": px.colors.sequential.Blues,
+                "Greens": px.colors.sequential.Greens,
+                "Reds": px.colors.sequential.Reds,
+            }
+            palette_kind = st.selectbox("Palette type", options=["discrete", "continuous"], index=0)
+            if palette_kind == "continuous":
+                palette_name = st.selectbox("Color palette", options=list(continuous_palettes.keys()), index=0)
+            else:
+                palette_name = st.selectbox("Color palette", options=list(discrete_palettes.keys()), index=0)
+            custom_color = None
+            if color_col is None and len(y_cols) <= 1 and plot_type in {"scatter", "line"}:
+                custom_color = st.color_picker("Single-series color", value="#1f77b4")
 
             if not y_cols and plot_type != "histogram":
                 st.info("Select at least one Y axis column.")
@@ -197,14 +227,55 @@ if selected_tables:
                 if y_cols:
                     title = f"{x_col} vs {', '.join(y_cols)}"
 
-                if plot_type == "line":
-                    fig = px.line(long_df, x=x_col, y="_y_value", color=color, title=title)
-                elif plot_type == "histogram":
-                    fig = px.histogram(data, x=x_col, color=color_col, title=f"Histogram: {x_col}")
-                elif plot_type == "box":
-                    fig = px.box(long_df, x="_y_metric", y="_y_value", color=color, title=title)
+                discrete_sequence = None
+                continuous_scale = None
+                if palette_kind == "continuous" and color_col is not None:
+                    continuous_scale = continuous_palettes[palette_name]
                 else:
-                    fig = px.scatter(long_df, x=x_col, y="_y_value", color=color, title=title)
+                    discrete_sequence = discrete_palettes[palette_name]
+
+                if plot_type == "line":
+                    fig = px.line(
+                        long_df,
+                        x=x_col,
+                        y="_y_value",
+                        color=color,
+                        title=title,
+                        color_discrete_sequence=discrete_sequence,
+                    )
+                elif plot_type == "histogram":
+                    fig = px.histogram(
+                        data,
+                        x=x_col,
+                        color=color_col,
+                        title=f"Histogram: {x_col}",
+                        color_discrete_sequence=discrete_sequence,
+                    )
+                elif plot_type == "box":
+                    fig = px.box(
+                        long_df,
+                        x="_y_metric",
+                        y="_y_value",
+                        color=color,
+                        title=title,
+                        color_discrete_sequence=discrete_sequence,
+                    )
+                else:
+                    fig = px.scatter(
+                        long_df,
+                        x=x_col,
+                        y="_y_value",
+                        color=color,
+                        title=title,
+                        color_discrete_sequence=discrete_sequence,
+                    )
+
+                if continuous_scale is not None:
+                    fig.update_traces(marker={"colorscale": continuous_scale})
+                    fig.update_coloraxes(colorscale=continuous_scale)
+
+                if custom_color:
+                    fig.update_traces(marker={"color": custom_color}, line={"color": custom_color})
 
                 fig.update_yaxes(type="log" if use_log_y else "linear")
                 fig.update_xaxes(type="log" if use_log_x else "linear")
