@@ -71,6 +71,8 @@ def load_comparison_set(
     *,
     use_storage: bool = True,
     refresh: bool = False,
+    storage_mode: str = "local",
+    cloud_provider: str | None = None,
     query_backend: "DuckDBQueryBackend | None" = None,
 ) -> ComparisonSet:
     """Compatibility wrapper for load_experiments."""
@@ -79,6 +81,8 @@ def load_comparison_set(
         experiment_names,
         use_storage=use_storage,
         refresh=refresh,
+        storage_mode=storage_mode,
+        cloud_provider=cloud_provider,
         query_backend=query_backend,
     )
 
@@ -88,6 +92,8 @@ def _load_comparison_from_names(
     *,
     use_storage: bool = True,
     refresh: bool = False,
+    storage_mode: str = "local",
+    cloud_provider: str | None = None,
     db_url: str | None = None,
     query_backend: "DuckDBQueryBackend | None" = None,
 ) -> ComparisonSet:
@@ -103,6 +109,8 @@ def _load_comparison_from_names(
             name,
             use_storage=use_storage,
             refresh=refresh,
+            storage_mode=storage_mode,
+            cloud_provider=cloud_provider,
             db_url=db_url,
             query_backend=query_backend,
         )
@@ -120,6 +128,8 @@ def load_experiments(
     *,
     use_storage: bool = True,
     refresh: bool = False,
+    storage_mode: str = "local",
+    cloud_provider: str | None = None,
     db_url: str | None = None,
     query_backend: "DuckDBQueryBackend | None" = None,
 ) -> ComparisonSet:
@@ -132,6 +142,8 @@ def load_experiments(
         experiment_names,
         use_storage=use_storage,
         refresh=refresh,
+        storage_mode=storage_mode,
+        cloud_provider=cloud_provider,
         db_url=db_url,
         query_backend=query_backend,
     )
@@ -143,6 +155,8 @@ def load_samples(
     registry_path: str | None = None,
     use_storage: bool = True,
     refresh: bool = False,
+    storage_mode: str = "local",
+    cloud_provider: str | None = None,
     query_backend: "DuckDBQueryBackend | None" = None,
 ) -> ComparisonSet:
     """Load all experiments associated with one or more sample ids into a comparison set."""
@@ -170,5 +184,7 @@ def load_samples(
         experiment_names,
         use_storage=use_storage,
         refresh=refresh,
+        storage_mode=storage_mode,
+        cloud_provider=cloud_provider,
         query_backend=query_backend,
     )

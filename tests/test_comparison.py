@@ -6,8 +6,8 @@ from mfethuls.dataset import Dataset
 
 
 def test_load_comparison_set_to_dataframe_works(monkeypatch):
-    def _fake_loader(name, use_storage=True, refresh=False):
-        _ = use_storage, refresh
+    def _fake_loader(name, use_storage=True, refresh=False, **kwargs):
+        _ = use_storage, refresh, kwargs
         return {
             "exp_a": pd.DataFrame({"temperature_C": [25.0, 50.0], "heat_flow_mW": [0.1, 0.2]}),
             "exp_b": pd.DataFrame({"temperature_C": [30.0, 60.0], "heat_flow_mW": [0.3, 0.4]}),
@@ -18,8 +18,8 @@ def test_load_comparison_set_to_dataframe_works(monkeypatch):
     monkeypatch.setattr(
         comparison_module,
         "load_experiment_dataset",
-        lambda name, use_storage=True, refresh=False: Dataset(
-            data=_fake_loader(name, use_storage, refresh),
+        lambda name, use_storage=True, refresh=False, **kwargs: Dataset(
+            data=_fake_loader(name, use_storage, refresh, **kwargs),
             metadata={"experiment_id": name, "experiment_name": f"name_{name}"},
         ),
     )
@@ -36,8 +36,8 @@ def test_load_comparison_set_to_dataframe_works(monkeypatch):
 
 
 def test_load_experiments_is_preferred_alias(monkeypatch):
-    def _fake_loader(name, use_storage=True, refresh=False):
-        _ = use_storage, refresh
+    def _fake_loader(name, use_storage=True, refresh=False, **kwargs):
+        _ = use_storage, refresh, kwargs
         return Dataset(
             data=pd.DataFrame({"temperature_C": [25.0], "heat_flow_mW": [0.1]}),
             metadata={"experiment_id": name, "experiment_name": f"name_{name}"},
@@ -65,8 +65,8 @@ def test_load_samples_filters_registry_and_loads_matching_experiments(monkeypatc
 
     monkeypatch.setattr(comparison_module, "load_experiment_registry", lambda registry_path=None: registry)
 
-    def _fake_loader(name, use_storage=True, refresh=False):
-        _ = use_storage, refresh
+    def _fake_loader(name, use_storage=True, refresh=False, **kwargs):
+        _ = use_storage, refresh, kwargs
         loaded_names.append(name)
         return Dataset(
             data=pd.DataFrame({"temperature_C": [25.0], "heat_flow_mW": [0.1]}),

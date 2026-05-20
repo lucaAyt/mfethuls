@@ -18,6 +18,7 @@ Organization (sections present in-file):
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -32,6 +33,20 @@ try:
     import duckdb  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
     duckdb = None  # type: ignore
+
+try:
+    import boto3  # type: ignore
+    from botocore.exceptions import ClientError  # type: ignore
+    from botocore.config import Config  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    boto3 = None  # type: ignore
+    ClientError = None  # type: ignore
+    Config = None  # type: ignore
+
+try:
+    from azure.storage.blob import BlobServiceClient  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    BlobServiceClient = None  # type: ignore
 
 try:
     from sqlalchemy import create_engine, MetaData, text
@@ -183,6 +198,41 @@ def _get_duckdb_path() -> str:
     return os.path.join(_get_storage_root(), "mfethuls.duckdb")
 
 
+def _normalize_prefix(prefix: Optional[str]) -> str:
+    if not prefix:
+        return ""
+    return prefix.strip("/")
+
+
+def _join_storage_key(*parts: Optional[str]) -> str:
+    cleaned = [part.strip("/") for part in parts if part and part.strip("/")]
+    return "/".join(cleaned)
+
+
+def _get_s3_config() -> Dict[str, Optional[str]]:
+    return {
+        "bucket": os.environ.get("MFETHULS_S3_BUCKET"),
+        "prefix": _normalize_prefix(os.environ.get("MFETHULS_S3_PREFIX")),
+        "region": os.environ.get("MFETHULS_S3_REGION"),
+        "endpoint": os.environ.get("MFETHULS_S3_ENDPOINT"),
+    }
+
+def _construct_s3_endpoint_url() -> Optional[str]:
+    config = _get_s3_config()
+    return f"https://{config['bucket']}.{config['region']}.{config['endpoint']}"
+
+
+def _get_azure_blob_config() -> Dict[str, Optional[str]]:
+    return {
+        "connection_string": os.environ.get("MFETHULS_AZURE_CONNECTION_STRING"),
+        "account": os.environ.get("MFETHULS_AZURE_ACCOUNT"),
+        "container": os.environ.get("MFETHULS_AZURE_CONTAINER"),
+        "prefix": _normalize_prefix(os.environ.get("MFETHULS_AZURE_PREFIX")),
+        "key": os.environ.get("MFETHULS_AZURE_KEY"),
+        "sas_token": os.environ.get("MFETHULS_AZURE_SAS_TOKEN"),
+    }
+
+
 # ======================================================================
 # SECTION 3: Local Parquet Storage Implementation
 # ======================================================================
@@ -325,60 +375,13 @@ class LocalParquetStorage(DataStorageBackend):
             dataset,
             parquet_path,
             meta_path,
+            storage_backend="local_filesystem",
         )
 
         with open(meta_path, "w", encoding="utf8") as f:
             json.dump(metadata_to_store, f, default=_json_default)
 
         return parquet_path, meta_path
-
-    def prepare_registration_metadata(
-        self, experiment: Experiment, dataset: Dataset, parquet_path: str, meta_path: str
-    ) -> DatasetMetadata:
-        """Prepare metadata for Postgres registration using unified schema.
-
-        This bridges the format written to disk with what PostgresMetadataBackend expects.
-        Extracts all query-relevant fields following the DatasetMetadata schema.
-
-        Args:
-            experiment: The experiment object.
-            dataset: The dataset object.
-            parquet_path: Path to the saved parquet file.
-            meta_path: Path to the saved metadata JSON file.
-
-        Returns:
-            A DatasetMetadata dict ready for PostgresMetadataBackend.persist_metadata().
-        """
-
-        metadata = dataset.metadata if isinstance(dataset.metadata, dict) else {}
-        provenance = _build_provenance_metadata(experiment, dataset, parquet_path, meta_path)
-
-        return DatasetMetadata(
-            # Core identifiers
-            experiment_id=experiment.experiment_id,
-            sample_id=experiment.sample_id,
-            run_id=experiment.run_id,
-            experiment_name=experiment.name,
-            # Instrument info
-            instrument_name=experiment.instrument_name,
-            instrument_type=metadata.get("instrument_type"),
-            instrument_model=metadata.get("instrument_model"),
-            # Storage
-            dataset_name=_dataset_basename(experiment),
-            storage_path=parquet_path,
-            storage_format="parquet",
-            # Data shape
-            rows=int(dataset.data.shape[0]),
-            cols=int(dataset.data.shape[1]),
-            # Processing metadata
-            schema_version=metadata.get("schema_version"),
-            measurement_profile=metadata.get("measurement_profile"),
-            schema_normalization=metadata.get("schema_normalization"),
-            # Package version
-            mfethuls_version=_get_package_version(),
-            # Full audit trail
-            provenance=provenance,
-        )
 
     def load_dataset(self, experiment: Experiment) -> Dataset:
         """Load a dataset previously saved with :meth:`save_dataset`."""
@@ -400,6 +403,269 @@ class LocalParquetStorage(DataStorageBackend):
         metadata.setdefault("instrument_name", experiment.instrument_name)
 
         return Dataset(data=data, metadata=metadata)
+
+
+class S3ParquetStorage(DataStorageBackend):
+    """S3-backed storage for datasets and metadata JSON files."""
+
+    def __init__(
+        self,
+        bucket: Optional[str] = None,
+        prefix: Optional[str] = None,
+        region: Optional[str] = None,
+        endpoint_url: Optional[str] = None,
+        client: Any = None,
+    ) -> None:
+        if boto3 is None or ClientError is None:
+            raise RuntimeError("boto3 is required for S3ParquetStorage. Install boto3.")
+
+        config = _get_s3_config()
+        self.bucket = bucket or config.get("bucket")
+        self.prefix = _normalize_prefix(prefix or config.get("prefix"))
+        self.region = region or config.get("region")
+        self.endpoint_url = endpoint_url or _construct_s3_endpoint_url()
+
+        if not self.bucket:
+            raise ValueError("S3 bucket is required. Set MFETHULS_S3_BUCKET or pass bucket.")
+
+        # Allow an explicit client (useful for mocking), or a session which
+        # will be used to create a client. If neither is provided, fall back
+        # to the default boto3.client. Endpoint support enables S3-compatible
+        # services (DigitalOcean Spaces, MinIO, etc.).
+        self.client = client or boto3.client("s3", 
+                                             region_name=self.region,
+                                             endpoint_url=self.endpoint_url,
+                                             aws_access_key_id=os.environ.get("MFETHULS_S3_ACCESS_KEY"),
+                                             aws_secret_access_key=os.environ.get("MFETHULS_S3_SECRET_KEY"),
+                                             config=Config(signature_version="s3v4"))
+
+    def _s3_key(self, experiment: Experiment, suffix: str) -> str:
+        base = _dataset_basename(experiment)
+        filename = f"{base}{suffix}"
+        return _join_storage_key(self.prefix, experiment.instrument_name, experiment.experiment_id, filename)
+
+    def dataset_paths(self, experiment: Experiment) -> Tuple[str, str]:
+        parquet_key = self._s3_key(experiment, ".parquet")
+        meta_key = self._s3_key(experiment, ".metadata.json")
+        parquet_path = f"s3://{self.bucket}/{parquet_key}"
+        meta_path = f"s3://{self.bucket}/{meta_key}"
+        return parquet_path, meta_path
+
+    def dataset_in_storage(self, experiment: Experiment) -> bool:
+        parquet_key = self._s3_key(experiment, ".parquet")
+        try:
+            self.client.head_object(Bucket=self.bucket, Key=parquet_key)
+            return True
+        except ClientError:
+            return False
+
+    def save_dataset(self, experiment: Experiment, dataset: Dataset) -> Tuple[str, str]:
+        parquet_key = self._s3_key(experiment, ".parquet")
+        meta_key = self._s3_key(experiment, ".metadata.json")
+        parquet_path, meta_path = self.dataset_paths(experiment)
+
+        parquet_buffer = io.BytesIO()
+        dataset.data.to_parquet(parquet_buffer, index=False)
+        parquet_buffer.seek(0)
+        self.client.put_object(Bucket=self.bucket, Key=parquet_key, Body=parquet_buffer.getvalue())
+
+        metadata_to_store = dict(dataset.metadata)
+        metadata_to_store.setdefault("experiment_id", experiment.experiment_id)
+        metadata_to_store.setdefault("sample_id", experiment.sample_id)
+        metadata_to_store.setdefault("run_id", experiment.run_id)
+        metadata_to_store.setdefault("instrument_name", experiment.instrument_name)
+        metadata_to_store["provenance"] = _build_provenance_metadata(
+            experiment,
+            dataset,
+            parquet_path,
+            meta_path,
+            storage_backend="s3",
+        )
+
+        meta_body = json.dumps(metadata_to_store, default=_json_default).encode("utf8")
+        self.client.put_object(
+            Bucket=self.bucket,
+            Key=meta_key,
+            Body=meta_body,
+            ContentType="application/json",
+        )
+
+        return parquet_path, meta_path
+
+    def load_dataset(self, experiment: Experiment) -> Dataset:
+        parquet_key = self._s3_key(experiment, ".parquet")
+        meta_key = self._s3_key(experiment, ".metadata.json")
+
+        try:
+            parquet_obj = self.client.get_object(Bucket=self.bucket, Key=parquet_key)
+        except ClientError as exc:
+            raise FileNotFoundError(f"No stored dataset found at s3://{self.bucket}/{parquet_key}") from exc
+
+        parquet_bytes = parquet_obj["Body"].read()
+        data = pd.read_parquet(io.BytesIO(parquet_bytes))
+
+        metadata: Dict[str, Any] = {}
+        try:
+            meta_obj = self.client.get_object(Bucket=self.bucket, Key=meta_key)
+            metadata = json.loads(meta_obj["Body"].read().decode("utf8"))
+        except ClientError:
+            metadata = {}
+
+        metadata.setdefault("experiment_id", experiment.experiment_id)
+        metadata.setdefault("sample_id", experiment.sample_id)
+        metadata.setdefault("run_id", experiment.run_id)
+        metadata.setdefault("instrument_name", experiment.instrument_name)
+
+        return Dataset(data=data, metadata=metadata)
+
+
+class AzureBlobParquetStorage(DataStorageBackend):
+    """Azure Blob storage backend for datasets and metadata JSON files."""
+
+    def __init__(
+        self,
+        account: Optional[str] = None,
+        container: Optional[str] = None,
+        prefix: Optional[str] = None,
+        connection_string: Optional[str] = None,
+        credential: Optional[str] = None,
+        service_client: Any = None,
+    ) -> None:
+        if BlobServiceClient is None:
+            raise RuntimeError(
+                "azure-storage-blob is required for AzureBlobParquetStorage. Install azure-storage-blob."
+            )
+
+        config = _get_azure_blob_config()
+        self.connection_string = connection_string or config.get("connection_string")
+        self.account = account or config.get("account")
+        self.container = container or config.get("container")
+        self.prefix = _normalize_prefix(prefix or config.get("prefix"))
+        self.credential = credential or config.get("key") or config.get("sas_token")
+
+        if not self.container:
+            raise ValueError("Azure container is required. Set MFETHULS_AZURE_CONTAINER or pass container.")
+
+        if service_client is not None:
+            self.service_client = service_client
+        elif self.connection_string:
+            self.service_client = BlobServiceClient.from_connection_string(self.connection_string)
+        else:
+            if not self.account:
+                raise ValueError(
+                    "Azure account is required. Set MFETHULS_AZURE_ACCOUNT or MFETHULS_AZURE_CONNECTION_STRING."
+                )
+            account_url = f"https://{self.account}.blob.core.windows.net"
+            self.service_client = BlobServiceClient(account_url=account_url, credential=self.credential)
+
+        self.container_client = self.service_client.get_container_client(self.container)
+
+    def _blob_key(self, experiment: Experiment, suffix: str) -> str:
+        base = _dataset_basename(experiment)
+        filename = f"{base}{suffix}"
+        return _join_storage_key(self.prefix, experiment.instrument_name, experiment.experiment_id, filename)
+
+    def _blob_url(self, blob_key: str) -> str:
+        account_name = self.account or self.service_client.account_name
+        return f"https://{account_name}.blob.core.windows.net/{self.container}/{blob_key}"
+
+    def dataset_paths(self, experiment: Experiment) -> Tuple[str, str]:
+        parquet_key = self._blob_key(experiment, ".parquet")
+        meta_key = self._blob_key(experiment, ".metadata.json")
+        parquet_path = self._blob_url(parquet_key)
+        meta_path = self._blob_url(meta_key)
+        return parquet_path, meta_path
+
+    def dataset_in_storage(self, experiment: Experiment) -> bool:
+        parquet_key = self._blob_key(experiment, ".parquet")
+        blob_client = self.container_client.get_blob_client(parquet_key)
+        try:
+            blob_client.get_blob_properties()
+            return True
+        except Exception:
+            return False
+
+    def save_dataset(self, experiment: Experiment, dataset: Dataset) -> Tuple[str, str]:
+        parquet_key = self._blob_key(experiment, ".parquet")
+        meta_key = self._blob_key(experiment, ".metadata.json")
+        parquet_path, meta_path = self.dataset_paths(experiment)
+
+        parquet_buffer = io.BytesIO()
+        dataset.data.to_parquet(parquet_buffer, index=False)
+        parquet_buffer.seek(0)
+
+        parquet_client = self.container_client.get_blob_client(parquet_key)
+        parquet_client.upload_blob(parquet_buffer.getvalue(), overwrite=True)
+
+        metadata_to_store = dict(dataset.metadata)
+        metadata_to_store.setdefault("experiment_id", experiment.experiment_id)
+        metadata_to_store.setdefault("sample_id", experiment.sample_id)
+        metadata_to_store.setdefault("run_id", experiment.run_id)
+        metadata_to_store.setdefault("instrument_name", experiment.instrument_name)
+        metadata_to_store["provenance"] = _build_provenance_metadata(
+            experiment,
+            dataset,
+            parquet_path,
+            meta_path,
+            storage_backend="azure_blob",
+        )
+
+        meta_body = json.dumps(metadata_to_store, default=_json_default).encode("utf8")
+        meta_client = self.container_client.get_blob_client(meta_key)
+        meta_client.upload_blob(meta_body, overwrite=True)
+
+        return parquet_path, meta_path
+
+    def load_dataset(self, experiment: Experiment) -> Dataset:
+        parquet_key = self._blob_key(experiment, ".parquet")
+        meta_key = self._blob_key(experiment, ".metadata.json")
+
+        parquet_client = self.container_client.get_blob_client(parquet_key)
+        try:
+            parquet_bytes = parquet_client.download_blob().readall()
+        except Exception as exc:
+            raise FileNotFoundError(f"No stored dataset found at {self._blob_url(parquet_key)}") from exc
+
+        data = pd.read_parquet(io.BytesIO(parquet_bytes))
+
+        metadata: Dict[str, Any] = {}
+        meta_client = self.container_client.get_blob_client(meta_key)
+        try:
+            metadata = json.loads(meta_client.download_blob().readall().decode("utf8"))
+        except Exception:
+            metadata = {}
+
+        metadata.setdefault("experiment_id", experiment.experiment_id)
+        metadata.setdefault("sample_id", experiment.sample_id)
+        metadata.setdefault("run_id", experiment.run_id)
+        metadata.setdefault("instrument_name", experiment.instrument_name)
+
+        return Dataset(data=data, metadata=metadata)
+
+
+class CombinedStorageBackend(DataStorageBackend):
+    """Persist datasets to multiple backends while using one as canonical."""
+
+    def __init__(self, primary: DataStorageBackend, secondary: DataStorageBackend) -> None:
+        self.primary = primary
+        self.secondary = secondary
+
+    def dataset_paths(self, experiment: Experiment) -> Tuple[str, str]:
+        return self.primary.dataset_paths(experiment)
+
+    def dataset_in_storage(self, experiment: Experiment) -> bool:
+        return self.primary.dataset_in_storage(experiment)
+
+    def save_dataset(self, experiment: Experiment, dataset: Dataset) -> Tuple[str, str]:
+        paths = self.primary.save_dataset(experiment, dataset)
+        try:
+            self.secondary.save_dataset(experiment, dataset)
+        except Exception:
+            pass
+        return paths
+
+    def load_dataset(self, experiment: Experiment) -> Dataset:
+        return self.primary.load_dataset(experiment)
 
 
     # ======================================================================
@@ -481,6 +747,7 @@ def _build_provenance_metadata(
     dataset: Dataset,
     parquet_path: str,
     meta_path: str,
+    storage_backend: str = "local_filesystem",
 ) -> Dict[str, Any]:
     """Build provenance metadata block for persisted datasets."""
 
@@ -508,7 +775,7 @@ def _build_provenance_metadata(
         "saved_at_utc": datetime.now(timezone.utc).isoformat(),
         "mfethuls_version": _get_package_version(),
         "storage": {
-            "backend": "local_filesystem",
+            "backend": storage_backend,
             "format": {"data": "parquet", "metadata": "json"},
             "parquet_path": parquet_path,
             "metadata_path": meta_path,
@@ -531,30 +798,58 @@ def _build_provenance_metadata(
     }
 
 
-def prepare_registration_metadata_for_postgres(
-    experiment: Experiment, dataset: Dataset, parquet_path: str, meta_path: str
-) -> Dict[str, Any]:
-    """Prepare metadata for Postgres registration after saving to local storage.
+def _get_storage_backend_label(data_backend: DataStorageBackend) -> str:
+    if isinstance(data_backend, CombinedStorageBackend):
+        return _get_storage_backend_label(data_backend.primary)
+    if isinstance(data_backend, S3ParquetStorage):
+        return "s3"
+    if isinstance(data_backend, AzureBlobParquetStorage):
+        return "azure_blob"
+    return "local_filesystem"
 
-    This is a convenience wrapper that bridges LocalParquetStorage and PostgresMetadataBackend.
-    Use this right after save_dataset_to_storage() to get a dict ready for persist_metadata().
 
-    Example:
-        parquet_path, meta_path = save_dataset_to_storage(exp, dataset)
-        metadata = prepare_registration_metadata_for_postgres(exp, dataset, parquet_path, meta_path)
-        postgres_backend.persist_metadata(metadata)
+def _prepare_registration_metadata(
+    experiment: Experiment,
+    dataset: Dataset,
+    parquet_path: str,
+    meta_path: str,
+    storage_backend: str,
+) -> DatasetMetadata:
+    metadata = dataset.metadata if isinstance(dataset.metadata, dict) else {}
+    provenance = _build_provenance_metadata(
+        experiment,
+        dataset,
+        parquet_path,
+        meta_path,
+        storage_backend=storage_backend,
+    )
 
-    Args:
-        experiment: The experiment object.
-        dataset: The dataset object.
-        parquet_path: Path returned by save_dataset_to_storage().
-        meta_path: Metadata path returned by save_dataset_to_storage().
-
-    Returns:
-        A dict ready for PostgresMetadataBackend.persist_metadata().
-    """
-
-    return LocalParquetStorage().prepare_registration_metadata(experiment, dataset, parquet_path, meta_path)
+    return DatasetMetadata(
+        # Core identifiers
+        experiment_id=experiment.experiment_id,
+        sample_id=experiment.sample_id,
+        run_id=experiment.run_id,
+        experiment_name=experiment.name,
+        # Instrument info
+        instrument_name=experiment.instrument_name,
+        instrument_type=metadata.get("instrument_type"),
+        instrument_model=metadata.get("instrument_model"),
+        # Storage
+        dataset_name=_dataset_basename(experiment),
+        storage_path=parquet_path,
+        storage_format="parquet",
+        # Data shape
+        rows=int(dataset.data.shape[0]),
+        cols=int(dataset.data.shape[1]),
+        # Processing metadata
+        schema_version=metadata.get("schema_version"),
+        measurement_profile=metadata.get("measurement_profile"),
+        schema_normalization=metadata.get("schema_normalization"),
+        # Package version
+        mfethuls_version=_get_package_version(),
+        # Full audit trail
+        provenance=provenance,
+    )
 
 
 # ======================================================================
@@ -898,11 +1193,15 @@ class StorageManager:
         parquet_path, meta_path = self.data_backend.save_dataset(experiment, dataset)
         dataset_id: Optional[int] = None
         if self.metadata_backend is not None:
-            metadata = prepare_registration_metadata_for_postgres(
-                experiment, dataset, parquet_path, meta_path
+            storage_backend = _get_storage_backend_label(self.data_backend)
+            metadata = _prepare_registration_metadata(
+                experiment,
+                dataset,
+                parquet_path,
+                meta_path,
+                storage_backend=storage_backend,
             )
             dataset_id = self.metadata_backend.persist_metadata(metadata)
-            print(_dataset_basename(experiment))
         if self.query_backend is not None:
             self.query_backend.register_parquet(
                 parquet_path,

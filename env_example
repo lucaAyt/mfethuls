@@ -9,6 +9,31 @@ PATH_TO_LOCAL_STORAGE=/home/user/Documents/data_dump
 MFETHULS_STORAGE_DEBUG=True
 MFETHULS_DISABLE_STORAGE=0
 
+# DuckDB config
+MFETHULS_DUCKDB_PATH=/home/user/Documents/mfethuls.duckdb
+
+# Postgres metadata config (optional)
+MFETHULS_POSTGRES_ENABLED=false
+MFETHULS_POSTGRES_URL=postgresql://mfethuls:testpass@localhost:5432/mfethuls
+# MFETHULS_POSTGRES_USER=mfethuls
+# MFETHULS_POSTGRES_PASSWORD=testpass
+# MFETHULS_POSTGRES_HOST=localhost
+# MFETHULS_POSTGRES_PORT=5432
+# MFETHULS_POSTGRES_DB=mfethuls
+
+# S3 storage config (optional)
+MFETHULS_S3_BUCKET=your-bucket
+MFETHULS_S3_PREFIX=mfethuls
+MFETHULS_S3_REGION=us-east-1
+
+# Azure Blob storage config (optional)
+MFETHULS_AZURE_CONNECTION_STRING=
+MFETHULS_AZURE_ACCOUNT=youraccount
+MFETHULS_AZURE_KEY=
+MFETHULS_AZURE_SAS_TOKEN=
+MFETHULS_AZURE_CONTAINER=mfethuls
+MFETHULS_AZURE_PREFIX=mfethuls
+
 # Instrument folder names where data is stored
 UV_VIS_FOLDER_NAME=UV_Vis
 TGA_FOLDER_NAME=TGA

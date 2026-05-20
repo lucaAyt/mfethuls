@@ -310,13 +310,12 @@ def test_dataset_storage_roundtrip_uses_temp_folder(monkeypatch):
         except PackageNotFoundError:
             expected_version = "unknown"
         assert provenance["mfethuls_version"] == expected_version
-        assert provenance["dataset"]["row_count"] == 3
-        assert provenance["instrument"]["instrument_name"] == "dummy_instrument"
-        assert provenance["instrument"]["parser_key"] == "uv_vis:flame"
         assert provenance["schema"]["schema_version"] == "1.0"
         assert provenance["schema"]["warning_count"] == 1
         assert provenance["source"]["source_file_count"] == 2
         assert provenance["source"]["source_files"] == ["run1.txt", "run2.txt"]
+        assert "dataset" not in provenance
+        assert "instrument" not in provenance
 
 
 def test_load_experiment_registry_normalizes_instrument_name_case():

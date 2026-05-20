@@ -15,9 +15,11 @@ from mfethuls.factory import (
 )
 from mfethuls.experiments import get_experiment
 from mfethuls.storage import (
-    dataset_in_storage,
-    load_dataset_from_storage,
+    AzureBlobParquetStorage,
+    CombinedStorageBackend,
+    LocalParquetStorage,
     PostgresMetadataBackend,
+    S3ParquetStorage,
     StorageManager,
 )
 
@@ -74,6 +76,8 @@ def load_experiment_dataset(
     experiment_name,
     use_storage: bool = True,
     refresh: bool = False,
+    storage_mode: str = "local",
+    cloud_provider: Optional[str] = None,
     db_url: Optional[str] = None,
     query_backend: "DuckDBQueryBackend | None" = None,
 ) -> Optional[Dataset]:
@@ -85,7 +89,7 @@ def load_experiment_dataset(
     interface for users who only know the experiment name.
 
     If db_url is provided, the dataset metadata will also be registered in the
-    specified Postgres database after successful local storage save.
+    specified Postgres database after successful storage save.
     """
 
     exp = get_experiment(experiment_name)
@@ -101,13 +105,21 @@ def load_experiment_dataset(
     disable_storage_env = os.environ.get("MFETHULS_DISABLE_STORAGE", "").lower()
     effective_use_storage = use_storage and disable_storage_env not in {"1", "true", "yes"}
 
-    # If requested, try to serve from local storage cache first.
-    if effective_use_storage and not refresh:
+    data_backend = None
+    if effective_use_storage:
+        data_backend = _build_data_backend(storage_mode, cloud_provider)
+
+    cache_backend = data_backend
+    if effective_use_storage and (storage_mode or "").strip().lower() == "both":
+        cache_backend = LocalParquetStorage()
+
+    # If requested, try to serve from storage cache first.
+    if effective_use_storage and not refresh and cache_backend is not None:
         try:
-            if dataset_in_storage(exp):
+            if cache_backend.dataset_in_storage(exp):
                 if os.environ.get("MFETHULS_STORAGE_DEBUG"):
-                    logger.info("Loading Dataset for experiment %s from local storage cache", experiment_name)
-                return load_dataset_from_storage(exp)
+                    logger.info("Loading Dataset for experiment %s from storage cache", experiment_name)
+                return cache_backend.load_dataset(exp)
         except Exception:  # noqa: BLE001
             # Best-effort cache: fall back to parsing on any storage issue.
             if os.environ.get("MFETHULS_STORAGE_DEBUG"):
@@ -137,10 +149,14 @@ def load_experiment_dataset(
     if effective_use_storage:
         try:
             metadata_backend = PostgresMetadataBackend(db_url) if db_url else None
-            manager = StorageManager(metadata_backend=metadata_backend, query_backend=query_backend)
+            manager = StorageManager(
+                data_backend=data_backend,
+                metadata_backend=metadata_backend,
+                query_backend=query_backend,
+            )
             parquet_path, meta_path, dataset_id = manager.save_and_persist(exp, dataset)
             if os.environ.get("MFETHULS_STORAGE_DEBUG"):
-                logger.info("Saved Dataset for experiment %s to local storage", experiment_name)
+                logger.info("Saved Dataset for experiment %s to storage backend", experiment_name)
                 if dataset_id:
                     logger.info(
                         "Persisted dataset metadata for experiment %s in Postgres (dataset_id=%s)",
@@ -152,3 +168,25 @@ def load_experiment_dataset(
                 logger.exception("Failed to save/persist Dataset for experiment %s", experiment_name)
 
     return dataset
+
+
+def _build_data_backend(storage_mode: str, cloud_provider: Optional[str]) -> "LocalParquetStorage | S3ParquetStorage | AzureBlobParquetStorage | CombinedStorageBackend":
+    mode = (storage_mode or "local").strip().lower()
+    if mode not in {"local", "cloud", "both"}:
+        raise ValueError("storage_mode must be one of: local, cloud, both")
+
+    if mode == "local":
+        return LocalParquetStorage()
+
+    provider = (cloud_provider or "").strip().lower()
+    if provider in {"s3", "aws"}:
+        cloud_backend = S3ParquetStorage()
+    elif provider in {"azure", "azure_blob", "blob", "azureblob"}:
+        cloud_backend = AzureBlobParquetStorage()
+    else:
+        raise ValueError("cloud_provider must be set to 's3' or 'azure' when storage_mode is cloud or both")
+
+    if mode == "cloud":
+        return cloud_backend
+
+    return CombinedStorageBackend(primary=cloud_backend, secondary=LocalParquetStorage())

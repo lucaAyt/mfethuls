@@ -423,7 +423,8 @@ def test_plot_uv_vis_logs_when_inferred_grouping_ties(caplog):
 def test_load_comparison_set_preserves_order_and_options(monkeypatch):
     calls = []
 
-    def _fake_loader(name, use_storage=True, refresh=False):
+    def _fake_loader(name, use_storage=True, refresh=False, **kwargs):
+        _ = kwargs
         calls.append((name, use_storage, refresh))
         return Dataset(
             data=pd.DataFrame({"wavelength_nm": [200.0], "absorbance_a_u": [0.1]}),
@@ -455,14 +456,14 @@ def test_load_comparison_set_label_fallbacks(monkeypatch):
         ),
     ]
 
-    def _fake_loader(name, use_storage=True, refresh=False):
-        _ = name, use_storage, refresh
+    def _fake_loader(name, use_storage=True, refresh=False, **kwargs):
+        _ = name, use_storage, refresh, kwargs
         return queue.pop(0)
 
     monkeypatch.setattr("mfethuls.comparison.load_experiment_dataset", _fake_loader)
 
     result = load_comparison_set(["exp_a", "exp_b"])
-    assert result.labels == ["dataset_1", "dataset_2"]
+    assert result.labels == ["EXP777", "dataset_2"]
 
 
 def test_plot_comparison_auto_overlay_when_shared_x():
