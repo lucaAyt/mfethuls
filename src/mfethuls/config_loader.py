@@ -118,7 +118,7 @@ def load_experiment_dataset(
         try:
             if cache_backend.dataset_in_storage(exp):
                 if os.environ.get("MFETHULS_STORAGE_DEBUG"):
-                    logger.info("Loading Dataset for experiment %s from storage cache", experiment_name)
+                    logger.warning("Loading Dataset for experiment %s from storage cache in %s", experiment_name, cache_backend.__class__.__name__)
                 return cache_backend.load_dataset(exp)
         except Exception:  # noqa: BLE001
             # Best-effort cache: fall back to parsing on any storage issue.

@@ -217,9 +217,45 @@ def _get_s3_config() -> Dict[str, Optional[str]]:
         "endpoint": os.environ.get("MFETHULS_S3_ENDPOINT"),
     }
 
-def _construct_s3_endpoint_url() -> Optional[str]:
+def _get_s3_endpoint_url() -> Optional[str]:
     config = _get_s3_config()
-    return f"https://{config['bucket']}.{config['region']}.{config['endpoint']}"
+    region = config.get("region")
+    endpoint = config.get("endpoint")
+    if endpoint:
+        if endpoint.startswith(("http://", "https://")):
+            return endpoint
+        if region and not endpoint.startswith(f"{region}."):
+            return f"https://{region}.{endpoint}"
+        return f"https://{endpoint}"
+    if region:
+        return f"https://{region}.digitaloceanspaces.com"
+    return None
+
+def _get_duckdb_s3_config() -> Dict[str, Optional[str]]:
+    return {
+        "region": os.environ.get("MFETHULS_S3_REGION"),
+        "endpoint": os.environ.get("MFETHULS_S3_ENDPOINT"),
+        "access_key_id": os.environ.get("MFETHULS_S3_ACCESS_KEY"),
+        "secret_access_key": os.environ.get("MFETHULS_S3_SECRET_KEY"),
+    }
+
+
+def _get_duckdb_s3_endpoint_host(region: Optional[str], endpoint: Optional[str]) -> Optional[str]:
+    """Return the host DuckDB should use for an S3-compatible endpoint."""
+
+    resolved_region = (region or "").strip()
+    resolved_endpoint = (endpoint or "").strip()
+
+    if not resolved_endpoint:
+        return f"{resolved_region}.digitaloceanspaces.com" if resolved_region else None
+
+    if resolved_endpoint.startswith(("http://", "https://")):
+        resolved_endpoint = resolved_endpoint.split("//", 1)[1]
+
+    if resolved_endpoint.endswith("digitaloceanspaces.com"):
+        return f"{resolved_region}.digitaloceanspaces.com" if resolved_region else resolved_endpoint
+
+    return resolved_endpoint
 
 
 def _get_azure_blob_config() -> Dict[str, Optional[str]]:
@@ -423,7 +459,7 @@ class S3ParquetStorage(DataStorageBackend):
         self.bucket = bucket or config.get("bucket")
         self.prefix = _normalize_prefix(prefix or config.get("prefix"))
         self.region = region or config.get("region")
-        self.endpoint_url = endpoint_url or _construct_s3_endpoint_url()
+        self.endpoint_url = endpoint_url or _get_s3_endpoint_url()
 
         if not self.bucket:
             raise ValueError("S3 bucket is required. Set MFETHULS_S3_BUCKET or pass bucket.")
@@ -497,6 +533,7 @@ class S3ParquetStorage(DataStorageBackend):
         meta_key = self._s3_key(experiment, ".metadata.json")
 
         try:
+            #TODO: Work on speed here - possiblly multithreading
             parquet_obj = self.client.get_object(Bucket=self.bucket, Key=parquet_key)
         except ClientError as exc:
             raise FileNotFoundError(f"No stored dataset found at s3://{self.bucket}/{parquet_key}") from exc
@@ -1058,8 +1095,49 @@ class DuckDBQueryBackend:
         self.db_path = resolved if resolved == ":memory:" else os.path.abspath(resolved)
         self.read_only = read_only
         self._conn = duckdb.connect(self.db_path, read_only=read_only)
+        self._s3_configured = False
         self._ensure_registry()
         self._rehydrate_views()
+
+    @staticmethod
+    def _is_s3_uri(storage_path: str) -> bool:
+        return storage_path.strip().lower().startswith("s3://")
+
+    def _ensure_s3_configured(self) -> None:
+        if self._s3_configured:
+            return
+        self._configure_s3_access()
+        self._s3_configured = True
+
+    def _configure_s3_access(self) -> None:
+        config = _get_duckdb_s3_config()
+        if not all(config.get(key) for key in ("region", "endpoint", "access_key_id", "secret_access_key")):
+            return
+
+        try:
+            self._conn.execute("INSTALL httpfs;")
+            self._conn.execute("LOAD httpfs;")
+        except Exception:
+            pass
+
+        endpoint_host = _get_duckdb_s3_endpoint_host(config.get("region"), config.get("endpoint"))
+        if not endpoint_host:
+            return
+
+        self._conn.execute(
+            f"""
+            CREATE OR REPLACE SECRET do_spaces_secret (
+                TYPE S3,
+                PROVIDER CONFIG,
+                KEY_ID '{config.get('access_key_id')}',
+                SECRET '{config.get('secret_access_key')}',
+                REGION '{config.get('region')}',
+                ENDPOINT '{endpoint_host}',
+                URL_STYLE 'vhost',
+                USE_SSL TRUE
+            );
+            """
+        )
 
     def _ensure_registry(self) -> None:
         self._conn.execute(
@@ -1078,6 +1156,8 @@ class DuckDBQueryBackend:
         ).fetchall()
         for table_name, storage_path in rows:
             try:
+                if self._is_s3_uri(storage_path):
+                    self._ensure_s3_configured()
                 relation = self._conn.from_parquet(storage_path)
                 try:
                     self._conn.unregister(table_name)
@@ -1106,6 +1186,8 @@ class DuckDBQueryBackend:
 
         inferred = table_name or os.path.splitext(os.path.basename(storage_path))[0]
         view_name = self._sanitize_table_name(inferred)
+        if self._is_s3_uri(storage_path):
+            self._ensure_s3_configured()
         relation = self._conn.from_parquet(storage_path)
         if overwrite:
             try:
