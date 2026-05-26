@@ -60,6 +60,7 @@ def _get_postgres_engine():
     if not db_url:
         return None
     _POSTGRES_ENGINE = create_engine(db_url)
+    print("Postgres engine initialized for job store and metadata lookup.")
     return _POSTGRES_ENGINE
 
 
@@ -109,6 +110,7 @@ with st.sidebar.expander("Datasets", expanded=True):
     else:
         instrument_rows = []
         for _, row in registry.iterrows():
+            print(storage_path := row.get("storage_path", ""))
             instrument_rows.append(
                 {
                     "table_name": row.get("table_name"),

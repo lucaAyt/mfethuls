@@ -1,0 +1,54 @@
+{
+  "info": {
+    "name": "mfethuls-mvp",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Registry Preview",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "file", "type": "file", "src": "" }
+          ]
+        },
+        "url": "http://localhost:8000/registry/preview"
+      }
+    },
+    {
+      "name": "Ingest",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "file", "type": "file", "src": "" },
+            { "key": "storage_mode", "value": "both", "type": "text" },
+            { "key": "cloud_provider", "value": "s3", "type": "text" }
+          ]
+        },
+        "url": "http://localhost:8000/ingest"
+      }
+    },
+    {
+      "name": "Jobs - Get",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "http://localhost:8000/jobs/{{job_id}}"
+      }
+    },
+    {
+      "name": "Datasets - List",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "http://localhost:8000/datasets"
+      }
+    }
+  ]
+}

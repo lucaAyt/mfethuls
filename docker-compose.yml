@@ -1,0 +1,64 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: mfethuls-pg
+    environment:
+      POSTGRES_USER: mfethuls
+      POSTGRES_PASSWORD: mfethuls
+      POSTGRES_DB: mfethuls
+    ports:
+      - "5432:5432"
+    volumes:
+      - mfethuls_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mfethuls"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: python:3.11-slim
+    container_name: mfethuls-api
+    working_dir: /app
+    volumes:
+      - ./:/app
+    environment:
+      MFETHULS_DUCKDB_PATH: /app/.mfethuls_storage/mfethuls.duckdb
+      MFETHULS_POSTGRES_ENABLED: ${MFETHULS_POSTGRES_ENABLED}
+      MFETHULS_POSTGRES_USER: ${MFETHULS_POSTGRES_USER}
+      MFETHULS_POSTGRES_PASSWORD: ${MFETHULS_POSTGRES_PASSWORD}
+      MFETHULS_POSTGRES_DB: ${MFETHULS_POSTGRES_DB}
+      MFETHULS_POSTGRES_HOST: ${MFETHULS_POSTGRES_HOST}
+      MFETHULS_POSTGRES_PORT: ${MFETHULS_POSTGRES_PORT}
+    command: >
+      bash -lc "pip install -e . && python scripts/run_api.py"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  worker:
+    image: python:3.11-slim
+    container_name: mfethuls-worker
+    working_dir: /app
+    volumes:
+      - ./:/app
+    environment:
+      MFETHULS_DUCKDB_PATH: /app/.mfethuls_storage/mfethuls.duckdb
+      MFETHULS_POSTGRES_ENABLED: ${MFETHULS_POSTGRES_ENABLED}
+      MFETHULS_POSTGRES_USER: ${MFETHULS_POSTGRES_USER}
+      MFETHULS_POSTGRES_PASSWORD: ${MFETHULS_POSTGRES_PASSWORD}
+      MFETHULS_POSTGRES_DB: ${MFETHULS_POSTGRES_DB}
+      MFETHULS_POSTGRES_HOST: ${MFETHULS_POSTGRES_HOST}
+      MFETHULS_POSTGRES_PORT: ${MFETHULS_POSTGRES_PORT}
+    command: >
+      bash -lc "pip install -e . && python scripts/run_worker.py"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  mfethuls_pg_data:

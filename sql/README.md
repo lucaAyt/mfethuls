@@ -13,6 +13,10 @@ Location: `sql/migrations/`
 - Intentionally left commented out; run when dataset sizes or query latency
   justify adding indexes.
 
+0003_create_ingest_jobs.sql
+- Creates the `ingest_jobs` table used by the control-plane job store.
+- Safe to run multiple times.
+
 How to run:
 
 - Locally with `psql`:
