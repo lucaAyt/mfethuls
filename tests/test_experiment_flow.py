@@ -10,7 +10,7 @@ from mfethuls.dataset import Dataset
 from mfethuls.experiments import Experiment
 from mfethuls.experiments import get_experiment, load_experiment_registry
 from mfethuls.factory import parse_experiment
-from mfethuls.config_loader import load_experiment_dataset
+from mfethuls.config.loader import load_experiment_dataset
 from mfethuls.storage import (
     dataset_in_storage,
     load_dataset_from_storage,

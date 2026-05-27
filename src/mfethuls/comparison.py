@@ -6,7 +6,7 @@ from typing import Sequence, TYPE_CHECKING
 
 import pandas as pd
 
-from .config_loader import load_experiment_dataset
+from .config.loader import load_experiment_dataset
 from .experiments import load_experiment_registry
 from .dataset import Dataset
 

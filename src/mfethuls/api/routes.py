@@ -1,62 +1,25 @@
+"""API route handlers."""
+
 from __future__ import annotations
 
-import io
 import os
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-
 import pandas as pd
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 
-from .experiments import _normalize_optional_str
-from .job_store import create_job, get_job as get_job_record
-from .registry_validator import RegistryValidator
-from .storage import DuckDBQueryBackend
+from ..experiments import _normalize_optional_str
+from ..registry_validator import RegistryValidator
+from ..storage.job_store import create_job, get_job as get_job_record
+from .schemas import QueryRequest
+from .utils import get_api_storage_root, get_query_backend, read_tabular_content
 
-
-app = FastAPI(title="mfethuls-mvp-api")
-
-_QUERY_BACKEND: DuckDBQueryBackend | None = None
-
-
-def _get_query_backend() -> DuckDBQueryBackend:
-    global _QUERY_BACKEND
-    if _QUERY_BACKEND is None:
-        _QUERY_BACKEND = DuckDBQueryBackend()
-    return _QUERY_BACKEND
+router = APIRouter()
 
 
-def _get_api_storage_root() -> str:
-    root = os.path.join(os.getcwd(), ".mfethuls_registry")
-    os.makedirs(root, exist_ok=True)
-    return root
-
-
-def _read_tabular_content(content_bytes: bytes) -> pd.DataFrame:
-    """Read a CSV/XLSX payload into a DataFrame."""
-
-    try:
-        return pd.read_excel(io.BytesIO(content_bytes))
-    except Exception:
-        try:
-            return pd.read_csv(io.BytesIO(content_bytes))
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Could not parse file: {exc}") from exc
-
-
-class QueryRequest(BaseModel):
-    project_id: str
-    sql: str
-    dataset_ids: Optional[List[str]] = None
-    mode: str = "sync"
-    limit: int = Field(default=1000, ge=1, le=10000)
-    offset: int = Field(default=0, ge=0)
-
-
-@app.post("/registry/preview")
+@router.post("/registry/preview")
 async def registry_preview(file: UploadFile | None = File(None)) -> Dict[str, Any]:
     """Parse uploaded spreadsheet (CSV/XLSX) and return per-row validation."""
 
@@ -64,7 +27,7 @@ async def registry_preview(file: UploadFile | None = File(None)) -> Dict[str, An
         raise HTTPException(status_code=400, detail="file (CSV/XLSX) must be uploaded")
 
     content = await file.read()
-    df = _read_tabular_content(content)
+    df = read_tabular_content(content)
 
     required_cols = {"name", "experiment_id", "instrument_name"}
     missing = required_cols.difference(set(df.columns))
@@ -73,7 +36,6 @@ async def registry_preview(file: UploadFile | None = File(None)) -> Dict[str, An
 
     rows: List[Dict[str, Any]] = []
     for idx, rec in enumerate(df.to_dict(orient="records"), start=1):
-        name = rec.get("name")
         experiment_id = rec.get("experiment_id")
         instrument_name = _normalize_optional_str(rec.get("instrument_name"))
 
@@ -92,7 +54,8 @@ async def registry_preview(file: UploadFile | None = File(None)) -> Dict[str, An
 
     return {"rows": rows}
 
-@app.post("/ingest")
+
+@router.post("/ingest")
 async def ingest(
     file: UploadFile | None = File(None),
     storage_mode: str = "local",
@@ -104,7 +67,7 @@ async def ingest(
         raise HTTPException(status_code=400, detail="file (CSV/XLSX) must be uploaded")
 
     content = await file.read()
-    df = _read_tabular_content(content)
+    df = read_tabular_content(content)
 
     required_cols = {"name", "experiment_id", "instrument_name"}
     missing = required_cols.difference(set(df.columns))
@@ -112,7 +75,7 @@ async def ingest(
         raise HTTPException(status_code=400, detail={"missing_columns": sorted(list(missing))})
 
     job_id = uuid.uuid4().hex
-    registry_path = os.path.join(_get_api_storage_root(), f"registry_{job_id}.parquet")
+    registry_path = os.path.join(get_api_storage_root(), f"registry_{job_id}.parquet")
     df.to_parquet(registry_path, index=False)
 
     create_job(job_id, registry_path, storage_mode, cloud_provider)
@@ -125,7 +88,7 @@ async def ingest(
     return JSONResponse(content=payload, status_code=202, headers={"Location": f"/jobs/{job_id}"})
 
 
-@app.get("/jobs/{job_id}")
+@router.get("/jobs/{job_id}")
 async def get_job(job_id: str) -> Dict[str, Any]:
     job = get_job_record(job_id)
     if job is None:
@@ -133,7 +96,7 @@ async def get_job(job_id: str) -> Dict[str, Any]:
     return job
 
 
-@app.get("/datasets")
+@router.get("/datasets")
 async def list_datasets() -> List[Dict[str, Any]]:
     return [
         {
@@ -144,13 +107,13 @@ async def list_datasets() -> List[Dict[str, Any]]:
             "storage_path": row["storage_path"],
             "registered_at": row["registered_at"],
         }
-        for row in _get_query_backend().list_registered()
+        for row in get_query_backend().list_registered()
     ]
 
 
-@app.post("/queries")
+@router.post("/queries")
 async def post_query(payload: QueryRequest) -> Dict[str, Any]:
-    backend = _get_query_backend()
+    backend = get_query_backend()
 
     if payload.dataset_ids:
         registered = {row["table_name"] for row in backend.list_registered()}
@@ -183,6 +146,6 @@ async def post_query(payload: QueryRequest) -> Dict[str, Any]:
     }
 
 
-@app.get("/health")
+@router.get("/health")
 async def health() -> Dict[str, str]:
     return {"status": "ok"}

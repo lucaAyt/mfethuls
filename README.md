@@ -40,6 +40,16 @@ pip install -e .
 - Consult the notebook ``notebooks\tutorial_basic_usecase`` for an example.
 - For developers, please work on a suitable branch and send a pull request.
 
+## 📁 Package layout (dev)
+
+- `mfethuls/api`: FastAPI app wiring (`app.py`), route handlers (`routes.py`), schemas, and helpers.
+- `mfethuls/storage`: storage backends, metadata persistence, DuckDB query backend, and storage manager.
+
+API entrypoint:
+```python
+from mfethuls.api import app
+```
+
 ## 📃 License
 
 MIT

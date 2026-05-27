@@ -5,7 +5,7 @@ import os
 import uuid
 from typing import Any, Dict, List, Optional
 
-from .storage import get_postgres_db_url
+from . import get_postgres_db_url
 
 try:
     from sqlalchemy import create_engine, text

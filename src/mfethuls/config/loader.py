@@ -30,8 +30,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Load config
-instrument_config_path = os.path.join(os.path.dirname(__file__), 'config', 'instrument_params.json')
-with open(instrument_config_path, encoding='utf8') as f:
+instrument_config_path = os.path.join(os.path.dirname(__file__), "instrument_params.json")
+with open(instrument_config_path, encoding="utf8") as f:
     config = json.load(f)
     for entry in config:
         if isinstance(entry.get("name"), str):

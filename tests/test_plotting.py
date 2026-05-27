@@ -155,8 +155,8 @@ def test_plot_dsc_omits_boundary_profiles_in_comparison_overlay():
     assert legend is not None
     legend_labels = [text.get_text() for text in legend.get_texts()]
     # Should only contain the two "Heating" profiles (one per dataset), not boundary profiles
-    assert "dataset_1 | Heating" in legend_labels
-    assert "dataset_2 | Heating" in legend_labels
+    assert "EXP_DSC_A | Heating" in legend_labels
+    assert "EXP_DSC_B | Heating" in legend_labels
     # Should NOT contain blank labels or boundary profiles
     assert "" not in legend_labels
     assert not any("start" in label for label in legend_labels)

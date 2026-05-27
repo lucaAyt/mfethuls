@@ -5,7 +5,7 @@ import pytest
 from dotenv import load_dotenv
 
 from mfethuls import factory
-from mfethuls.config_loader import load_experiment_dataset
+from mfethuls.config.loader import load_experiment_dataset
 from mfethuls.experiments import load_experiment_registry
 
 
