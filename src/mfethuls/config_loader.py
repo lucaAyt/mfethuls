@@ -17,6 +17,7 @@ from mfethuls.experiments import get_experiment
 from mfethuls.storage import (
     AzureBlobParquetStorage,
     CombinedStorageBackend,
+    get_postgres_db_url,
     LocalParquetStorage,
     PostgresMetadataBackend,
     S3ParquetStorage,
@@ -90,6 +91,10 @@ def load_experiment_dataset(
 
     If db_url is provided, the dataset metadata will also be registered in the
     specified Postgres database after successful storage save.
+
+    When `db_url` is not provided, metadata persistence can be enabled via the
+    `MFETHULS_METADATA_DB_ENABLED` env var (`1`/`true`/`yes`). In that mode,
+    the DB URL is resolved from Postgres env settings via `get_postgres_db_url`.
     """
 
     exp = get_experiment(experiment_name)
@@ -148,7 +153,12 @@ def load_experiment_dataset(
     meta_path = None
     if effective_use_storage:
         try:
-            metadata_backend = PostgresMetadataBackend(db_url) if db_url else None
+            resolved_db_url = db_url
+            metadata_db_enabled_env = os.environ.get("MFETHULS_METADATA_DB_ENABLED", "").lower()
+            if not resolved_db_url and metadata_db_enabled_env in {"1", "true", "yes"}:
+                resolved_db_url = get_postgres_db_url()
+
+            metadata_backend = PostgresMetadataBackend(resolved_db_url) if resolved_db_url else None
             manager = StorageManager(
                 data_backend=data_backend,
                 metadata_backend=metadata_backend,

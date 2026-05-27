@@ -123,6 +123,8 @@ class DatasetMetadata(TypedDict, total=False):
     # Data storage info
     dataset_name: str
     storage_path: str
+    local_storage_path: Optional[str]
+    cloud_storage_path: Optional[str]
     storage_format: str  # Default: 'parquet'
 
     # Data shape (useful for filtering by dataset size)
@@ -845,12 +847,18 @@ def _get_storage_backend_label(data_backend: DataStorageBackend) -> str:
     return "local_filesystem"
 
 
+def _is_cloud_backend(data_backend: DataStorageBackend) -> bool:
+    return isinstance(data_backend, (S3ParquetStorage, AzureBlobParquetStorage))
+
+
 def _prepare_registration_metadata(
     experiment: Experiment,
     dataset: Dataset,
     parquet_path: str,
     meta_path: str,
     storage_backend: str,
+    local_storage_path: Optional[str] = None,
+    cloud_storage_path: Optional[str] = None,
 ) -> DatasetMetadata:
     metadata = dataset.metadata if isinstance(dataset.metadata, dict) else {}
     provenance = _build_provenance_metadata(
@@ -874,6 +882,8 @@ def _prepare_registration_metadata(
         # Storage
         dataset_name=_dataset_basename(experiment),
         storage_path=parquet_path,
+        local_storage_path=local_storage_path,
+        cloud_storage_path=cloud_storage_path,
         storage_format="parquet",
         # Data shape
         rows=int(dataset.data.shape[0]),
@@ -943,6 +953,8 @@ class PostgresMetadataBackend(MetadataBackend):
             -- Data storage info
             dataset_name TEXT NOT NULL,
             storage_path TEXT NOT NULL,
+            local_storage_path TEXT,
+            cloud_storage_path TEXT,
             storage_format TEXT DEFAULT 'parquet',
             
             -- Data shape
@@ -959,7 +971,10 @@ class PostgresMetadataBackend(MetadataBackend):
             provenance JSONB,
             
             -- Timestamps
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+
+            UNIQUE (experiment_id, dataset_name)
         );
         """
 
@@ -983,14 +998,33 @@ class PostgresMetadataBackend(MetadataBackend):
             "INSERT INTO datasets ("
             "experiment_id, sample_id, run_id, experiment_name, "
             "instrument_name, instrument_type, instrument_model, "
-            "dataset_name, storage_path, storage_format, "
-            "rows, cols, schema_version, measurement_profile, mfethuls_version, schema_normalization, provenance"
+            "dataset_name, storage_path, local_storage_path, cloud_storage_path, storage_format, "
+            "rows, cols, schema_version, measurement_profile, mfethuls_version, schema_normalization, provenance, created_at, updated_at"
             ") VALUES ("
             ":experiment_id, :sample_id, :run_id, :experiment_name, "
             ":instrument_name, :instrument_type, :instrument_model, "
-            ":dataset_name, :storage_path, :storage_format, "
-            ":rows, :cols, :schema_version, :measurement_profile, :mfethuls_version, :schema_normalization, :provenance"
-            ") RETURNING id;"
+            ":dataset_name, :storage_path, :local_storage_path, :cloud_storage_path, :storage_format, "
+            ":rows, :cols, :schema_version, :measurement_profile, :mfethuls_version, :schema_normalization, :provenance, now(), now()"
+            ") ON CONFLICT (experiment_id, dataset_name) DO UPDATE SET "
+            "sample_id = EXCLUDED.sample_id, "
+            "run_id = EXCLUDED.run_id, "
+            "experiment_name = EXCLUDED.experiment_name, "
+            "instrument_name = EXCLUDED.instrument_name, "
+            "instrument_type = EXCLUDED.instrument_type, "
+            "instrument_model = EXCLUDED.instrument_model, "
+            "storage_path = EXCLUDED.storage_path, "
+            "local_storage_path = EXCLUDED.local_storage_path, "
+            "cloud_storage_path = EXCLUDED.cloud_storage_path, "
+            "storage_format = EXCLUDED.storage_format, "
+            "rows = EXCLUDED.rows, "
+            "cols = EXCLUDED.cols, "
+            "schema_version = EXCLUDED.schema_version, "
+            "measurement_profile = EXCLUDED.measurement_profile, "
+            "mfethuls_version = EXCLUDED.mfethuls_version, "
+            "schema_normalization = EXCLUDED.schema_normalization, "
+            "provenance = EXCLUDED.provenance, "
+            "updated_at = now() "
+            "RETURNING id;"
         )
 
         # Convert dict fields to JSON strings for JSONB columns
@@ -1007,6 +1041,8 @@ class PostgresMetadataBackend(MetadataBackend):
             "instrument_model": metadata.get("instrument_model"),
             "dataset_name": metadata.get("dataset_name"),
             "storage_path": metadata.get("storage_path"),
+            "local_storage_path": metadata.get("local_storage_path"),
+            "cloud_storage_path": metadata.get("cloud_storage_path"),
             "storage_format": metadata.get("storage_format", "parquet"),
             "rows": metadata.get("rows"),
             "cols": metadata.get("cols"),
@@ -1031,7 +1067,8 @@ class PostgresMetadataBackend(MetadataBackend):
         """Return a list of dataset rows matching optional filters.
 
         Supported filter keys: `instrument_name`, `instrument_type`,
-        `schema_version`, `mfethuls_version`, `experiment_id`, `measurement_profile`.
+        `schema_version`, `mfethuls_version`, `experiment_id`, `measurement_profile`,
+        `local_storage_path`, `cloud_storage_path`.
         """
         filters = filters or {}
         where_clauses: List[str] = []
@@ -1044,6 +1081,8 @@ class PostgresMetadataBackend(MetadataBackend):
             "mfethuls_version",
             "experiment_id",
             "measurement_profile",
+            "local_storage_path",
+            "cloud_storage_path",
         )
         for key in allowed:
             if key in filters and filters[key] is not None:
@@ -1051,7 +1090,7 @@ class PostgresMetadataBackend(MetadataBackend):
                 params[key] = filters[key]
 
         where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
-        sql = f"SELECT * FROM datasets {where_sql} ORDER BY created_at DESC LIMIT :limit"
+        sql = f"SELECT * FROM datasets {where_sql} ORDER BY updated_at DESC NULLS LAST, created_at DESC LIMIT :limit"
 
         with self.engine.connect() as conn:
             res = conn.execute(text(sql), params)
@@ -1273,6 +1312,25 @@ class StorageManager:
         Returns a tuple: (parquet_path, meta_path, dataset_id_or_None).
         """
         parquet_path, meta_path = self.data_backend.save_dataset(experiment, dataset)
+        local_storage_path: Optional[str] = None
+        cloud_storage_path: Optional[str] = None
+
+        if isinstance(self.data_backend, CombinedStorageBackend):
+            primary_path, _ = self.data_backend.primary.dataset_paths(experiment)
+            secondary_path, _ = self.data_backend.secondary.dataset_paths(experiment)
+            if _is_cloud_backend(self.data_backend.primary):
+                cloud_storage_path = primary_path
+            else:
+                local_storage_path = primary_path
+            if _is_cloud_backend(self.data_backend.secondary):
+                cloud_storage_path = secondary_path
+            else:
+                local_storage_path = secondary_path
+        elif _is_cloud_backend(self.data_backend):
+            cloud_storage_path = parquet_path
+        else:
+            local_storage_path = parquet_path
+
         dataset_id: Optional[int] = None
         if self.metadata_backend is not None:
             storage_backend = _get_storage_backend_label(self.data_backend)
@@ -1282,6 +1340,8 @@ class StorageManager:
                 parquet_path,
                 meta_path,
                 storage_backend=storage_backend,
+                local_storage_path=local_storage_path,
+                cloud_storage_path=cloud_storage_path,
             )
             dataset_id = self.metadata_backend.persist_metadata(metadata)
         if self.query_backend is not None:

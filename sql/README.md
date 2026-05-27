@@ -17,6 +17,18 @@ Location: `sql/migrations/`
 - Creates the `ingest_jobs` table used by the control-plane job store.
 - Safe to run multiple times.
 
+0004_upsert_dataset_metadata.sql
+- Adds `updated_at` to `datasets`, deduplicates legacy rows, and creates a
+  unique index on `(experiment_id, dataset_name)` so refreshes upsert instead
+  of inserting duplicates.
+- Safe to run multiple times after the table exists.
+
+0005_add_dataset_location_columns.sql
+- Adds explicit `local_storage_path` and `cloud_storage_path` columns to
+  `datasets` and backfills them from the canonical path and provenance when
+  possible.
+- Safe to run multiple times after the table exists.
+
 How to run:
 
 - Locally with `psql`:

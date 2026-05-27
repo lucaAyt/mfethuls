@@ -60,23 +60,54 @@ def _get_postgres_engine():
     if not db_url:
         return None
     _POSTGRES_ENGINE = create_engine(db_url)
-    print("Postgres engine initialized for job store and metadata lookup.")
     return _POSTGRES_ENGINE
 
 
 def _get_instrument_from_postgres(storage_path: str) -> Optional[str]:
+    row = _get_dataset_row_from_postgres(storage_path)
+    if row is None:
+        return None
+    value = row.get("instrument_name")
+    if value is not None and str(value).strip():
+        return str(value)
+    return None
+
+
+def _get_dataset_row_from_postgres(storage_path: str) -> Optional[dict]:
     engine = _get_postgres_engine()
     if engine is None:
         return None
-    query = text(
-        "SELECT instrument_name FROM datasets WHERE storage_path = :path ORDER BY created_at DESC LIMIT 1"
+
+    # Prefer new schema fields, but keep a legacy fallback query for older DBs.
+    primary_query = text(
+        "SELECT instrument_name, storage_path, local_storage_path, cloud_storage_path "
+        "FROM datasets "
+        "WHERE storage_path = :path OR local_storage_path = :path OR cloud_storage_path = :path "
+        "ORDER BY updated_at DESC NULLS LAST, created_at DESC "
+        "LIMIT 1"
     )
+    fallback_query = text(
+        "SELECT instrument_name, storage_path, NULL::text AS local_storage_path, NULL::text AS cloud_storage_path "
+        "FROM datasets "
+        "WHERE storage_path = :path "
+        "ORDER BY created_at DESC "
+        "LIMIT 1"
+    )
+
     try:
         with engine.connect() as conn:
-            res = conn.execute(query, {"path": storage_path})
+            try:
+                res = conn.execute(primary_query, {"path": storage_path})
+            except Exception:
+                res = conn.execute(fallback_query, {"path": storage_path})
             row = res.fetchone()
-            if row and row[0] is not None and str(row[0]).strip():
-                return str(row[0])
+            if row is not None:
+                return {
+                    "instrument_name": row[0],
+                    "storage_path": row[1],
+                    "local_storage_path": row[2],
+                    "cloud_storage_path": row[3],
+                }
     except Exception:
         return None
     return None
@@ -110,19 +141,68 @@ with st.sidebar.expander("Datasets", expanded=True):
     else:
         instrument_rows = []
         for _, row in registry.iterrows():
-            print(storage_path := row.get("storage_path", ""))
+            storage_path = str(row.get("storage_path", ""))
+            postgres_row = _get_dataset_row_from_postgres(storage_path)
             instrument_rows.append(
                 {
                     "table_name": row.get("table_name"),
-                    "instrument": _get_instrument_label(str(row.get("storage_path", ""))),
+                    "instrument": _get_instrument_label(storage_path),
+                    "active_storage_path": storage_path,
+                    "local_storage_path": (postgres_row or {}).get("local_storage_path"),
+                    "cloud_storage_path": (postgres_row or {}).get("cloud_storage_path"),
+                    # active_location: one of 'local', 'cloud', 'both', 'unknown'
+                    "active_location": (
+                        "both"
+                        if (postgres_row or {}).get("local_storage_path") and (postgres_row or {}).get("cloud_storage_path")
+                        else ("local" if (postgres_row or {}).get("local_storage_path") else ("cloud" if (postgres_row or {}).get("cloud_storage_path") else "unknown"))
+                    ),
                 }
             )
         st.caption("Registered views and instruments")
-        st.dataframe(pd.DataFrame(instrument_rows), use_container_width=True)
+        df_rows = pd.DataFrame(instrument_rows)
+        # Add a compact per-row badge for quick visual scanning
+        def _badge_for(loc: str) -> str:
+            if loc == "local":
+                return "🟢 Local"
+            if loc == "cloud":
+                return "☁️ Cloud"
+            if loc == "both":
+                return "🟣 Both"
+            return "❓ Unknown"
+
+        try:
+            df_rows["active_location_badge"] = df_rows["active_location"].apply(_badge_for)
+        except Exception:
+            df_rows["active_location_badge"] = ""
+
+        # Drop noisy columns and prefer a compact column ordering
+        for c in ["cloud_storage_path", "active_location"]:
+            if c in df_rows.columns:
+                df_rows = df_rows.drop(columns=[c])
+
+        cols = [c for c in ["table_name", "instrument", "active_location_badge"] if c in df_rows.columns]
+        # Reverse ordering so newest entries appear first
+        try:
+            df_rows = df_rows.iloc[::-1].reset_index(drop=True)
+        except Exception:
+            pass
+        # Show compact dataframe and provide a multiselect to choose views
+        st.dataframe(df_rows[cols], use_container_width=True)
+
+        # Small summary badges for active locations
+        try:
+            counts = df_rows["active_location_badge"].map(lambda s: s.split()[0]).replace({"🟢": "local", "☁️": "cloud", "🟣": "both", "❓": "unknown"}).value_counts().to_dict()
+        except Exception:
+            counts = {}
+        col_loc, col_cloud, col_both, col_unknown = st.columns(4)
+        col_loc.metric("Local", counts.get("local", 0))
+        col_cloud.metric("Cloud", counts.get("cloud", 0))
+        col_both.metric("Both", counts.get("both", 0))
+        col_unknown.metric("Unknown", counts.get("unknown", 0))
 
         selected_tables = st.multiselect(
             "Select registered views",
-            options=registry["table_name"].tolist(),
+            options=df_rows["table_name"].tolist(),
         )
 
 with st.sidebar.expander("Query", expanded=False):
