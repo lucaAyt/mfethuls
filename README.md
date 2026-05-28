@@ -33,6 +33,17 @@ cd mfethuls
 pip install -e .
 ```
 
+For API and worker containers, use the slimmer runtime extras:
+```shell
+pip install -e '.[service]'
+```
+
+Add plotting or notebook tooling only when needed locally:
+```shell
+pip install -e '.[viz]'
+pip install -e '.[notebook]'
+```
+
 ## 🚁 Usage
 
 
@@ -44,6 +55,7 @@ pip install -e .
 
 - `mfethuls/api`: FastAPI app wiring (`app.py`), route handlers (`routes.py`), schemas, and helpers.
 - `mfethuls/storage`: storage backends, metadata persistence, DuckDB query backend, and storage manager.
+- `mfethuls/plotting`: optional plotting helpers used by the CLI and notebooks when the `viz` extra is installed.
 
 API entrypoint:
 ```python

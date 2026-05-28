@@ -2,8 +2,6 @@ import os
 import logging
 import argparse
 
-import matplotlib.pyplot as plt
-
 import mfethuls.parsers
 import mfethuls.factory as factory
 from mfethuls import load_experiments, plot_experiments
@@ -180,6 +178,13 @@ def mainX(argv: list[str] | None = None):
     print(f"Combined dataframe head:\n{combined.head(5)}")
 
     if args.plot:
+        try:
+            from matplotlib import pyplot as plt
+        except Exception as exc:  # noqa: BLE001
+            print("ERROR: plotting requires the 'viz' extra (install with pip install -e '.[viz]').")
+            print(f"  Import failed: {exc!r}")
+            return
+
         fig, ax = plot_experiments(comparison, mode=args.plot_mode)
         if args.plot_output:
             fig.savefig(args.plot_output, bbox_inches="tight")

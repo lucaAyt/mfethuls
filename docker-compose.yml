@@ -2,24 +2,28 @@ version: "3.9"
 
 services:
   postgres:
-    image: postgres:15
+    image: postgres:16-alpine
     container_name: mfethuls-pg
     environment:
-      POSTGRES_USER: mfethuls
-      POSTGRES_PASSWORD: mfethuls
-      POSTGRES_DB: mfethuls
+      POSTGRES_USER: ${MFETHULS_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${MFETHULS_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${MFETHULS_POSTGRES_DB}
     ports:
       - "5432:5432"
     volumes:
       - mfethuls_pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mfethuls"]
+      test: ["CMD-SHELL", "pg_isready -U ${MFETHULS_POSTGRES_USER}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   api:
-    image: python:3.11-slim
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MFETHULS_EXTRAS: service
     container_name: mfethuls-api
     working_dir: /app
     volumes:
@@ -30,10 +34,9 @@ services:
       MFETHULS_POSTGRES_USER: ${MFETHULS_POSTGRES_USER}
       MFETHULS_POSTGRES_PASSWORD: ${MFETHULS_POSTGRES_PASSWORD}
       MFETHULS_POSTGRES_DB: ${MFETHULS_POSTGRES_DB}
-      MFETHULS_POSTGRES_HOST: ${MFETHULS_POSTGRES_HOST}
+      MFETHULS_POSTGRES_HOST: ${MFETHULS_POSTGRES_HOST_SERVICE}
       MFETHULS_POSTGRES_PORT: ${MFETHULS_POSTGRES_PORT}
-    command: >
-      bash -lc "pip install -e . && python scripts/run_api.py"
+    command: ["api"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,7 +44,11 @@ services:
       - "8000:8000"
 
   worker:
-    image: python:3.11-slim
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MFETHULS_EXTRAS: "service,cloud"
     container_name: mfethuls-worker
     working_dir: /app
     volumes:
@@ -52,10 +59,9 @@ services:
       MFETHULS_POSTGRES_USER: ${MFETHULS_POSTGRES_USER}
       MFETHULS_POSTGRES_PASSWORD: ${MFETHULS_POSTGRES_PASSWORD}
       MFETHULS_POSTGRES_DB: ${MFETHULS_POSTGRES_DB}
-      MFETHULS_POSTGRES_HOST: ${MFETHULS_POSTGRES_HOST}
+      MFETHULS_POSTGRES_HOST: ${MFETHULS_POSTGRES_HOST_SERVICE}
       MFETHULS_POSTGRES_PORT: ${MFETHULS_POSTGRES_PORT}
-    command: >
-      bash -lc "pip install -e . && python scripts/run_worker.py"
+    command: ["worker"]
     depends_on:
       postgres:
         condition: service_healthy
