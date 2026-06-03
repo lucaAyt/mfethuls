@@ -112,7 +112,7 @@ def update_job(job_id: str, **fields: Any) -> Dict[str, Any]:
     for key, value in fields.items():
         if key == "datasets":
             params[key] = json.dumps(value)
-            assignments.append(f"{key} = :{key}::jsonb")
+            assignments.append(f"{key} = CAST(:{key} AS JSONB)")
         else:
             params[key] = value
             assignments.append(f"{key} = :{key}")

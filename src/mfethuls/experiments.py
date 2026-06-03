@@ -154,6 +154,8 @@ def load_experiment_registry(path: Optional[str] = None) -> pd.DataFrame:
     _, ext = os.path.splitext(path.lower())
     if ext in {".xlsx", ".xls"}:
         df = pd.read_excel(path)
+    elif ext in {".parquet", ".pq"}:
+        df = pd.read_parquet(path)
     else:
         df = pd.read_csv(path)
 

@@ -1,18 +1,18 @@
 import json
 import os
-from typing import Optional
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from mfethuls.storage import DuckDBQueryBackend, _get_duckdb_path, get_postgres_db_url
+from mfethuls.config.loader import ingest_experiment_dataset
+from mfethuls.config.mode import is_service_mode
+from mfethuls.experiments import load_experiment_registry
+from mfethuls.storage import DuckDBQueryBackend, _get_duckdb_path
 
-try:
-    from sqlalchemy import create_engine, text
-except Exception:  # pragma: no cover - optional dependency
-    create_engine = None  # type: ignore
-    text = None  # type: ignore
+# Streamlit is a local-only tool (notebooks/interactive exploration).
+if is_service_mode():
+    st.warning("Streamlit is designed for local mode only. Use the API for service data.")
 
 
 st.set_page_config(page_title="mfethuls Explorer", layout="wide")
@@ -47,76 +47,12 @@ def _query_table_cached(db_path: str, table_name: str, limit: int) -> pd.DataFra
         backend.close()
 
 
-_POSTGRES_ENGINE = None
-
-
-def _get_postgres_engine():
-    global _POSTGRES_ENGINE
-    if _POSTGRES_ENGINE is not None:
-        return _POSTGRES_ENGINE
-    if create_engine is None or text is None:
-        return None
-    db_url = get_postgres_db_url()
-    if not db_url:
-        return None
-    _POSTGRES_ENGINE = create_engine(db_url)
-    return _POSTGRES_ENGINE
-
-
-def _get_instrument_from_postgres(storage_path: str) -> Optional[str]:
-    row = _get_dataset_row_from_postgres(storage_path)
-    if row is None:
-        return None
-    value = row.get("instrument_name")
-    if value is not None and str(value).strip():
-        return str(value)
-    return None
-
-
-def _get_dataset_row_from_postgres(storage_path: str) -> Optional[dict]:
-    engine = _get_postgres_engine()
-    if engine is None:
-        return None
-
-    # Prefer new schema fields, but keep a legacy fallback query for older DBs.
-    primary_query = text(
-        "SELECT instrument_name, storage_path, local_storage_path, cloud_storage_path "
-        "FROM datasets "
-        "WHERE storage_path = :path OR local_storage_path = :path OR cloud_storage_path = :path "
-        "ORDER BY updated_at DESC NULLS LAST, created_at DESC "
-        "LIMIT 1"
-    )
-    fallback_query = text(
-        "SELECT instrument_name, storage_path, NULL::text AS local_storage_path, NULL::text AS cloud_storage_path "
-        "FROM datasets "
-        "WHERE storage_path = :path "
-        "ORDER BY created_at DESC "
-        "LIMIT 1"
-    )
-
-    try:
-        with engine.connect() as conn:
-            try:
-                res = conn.execute(primary_query, {"path": storage_path})
-            except Exception:
-                res = conn.execute(fallback_query, {"path": storage_path})
-            row = res.fetchone()
-            if row is not None:
-                return {
-                    "instrument_name": row[0],
-                    "storage_path": row[1],
-                    "local_storage_path": row[2],
-                    "cloud_storage_path": row[3],
-                }
-    except Exception:
-        return None
-    return None
+@st.cache_data(show_spinner=False)
+def _load_experiment_registry_cached(path: str) -> pd.DataFrame:
+    return load_experiment_registry(path)
 
 
 def _get_instrument_label(storage_path: str) -> str:
-    postgres_value = _get_instrument_from_postgres(storage_path)
-    if postgres_value:
-        return postgres_value
     meta_path = os.path.splitext(storage_path)[0] + ".metadata.json"
     if not os.path.exists(meta_path):
         return "(unknown)"
@@ -134,6 +70,73 @@ def _get_instrument_label(storage_path: str) -> str:
 backend = _get_backend()
 registry = _load_registry_cached(backend.db_path)
 
+with st.sidebar.expander("Ingest", expanded=False):
+    st.caption("Local ingestion: parses raw files and writes to local storage only.")
+    registry_path = os.environ.get("PATH_TO_REGISTRY", "")
+    registry_path = st.text_input("Experiment registry path", value=registry_path)
+    refresh_ingest = st.checkbox("Re-parse even if cached", value=False)
+
+    experiment_names: list[str] = []
+    if registry_path:
+        try:
+            exp_registry = _load_experiment_registry_cached(registry_path)
+            experiment_names = (
+                exp_registry.get("name", pd.Series(dtype=str))
+                .dropna()
+                .astype(str)
+                .tolist()
+            )
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Failed to load experiment registry: {exc}")
+
+    selected_experiments: list[str] = []
+    if experiment_names:
+        select_all = st.checkbox("Select all experiments", value=False)
+        if select_all:
+            selected_experiments = experiment_names
+            st.caption(f"Selected {len(selected_experiments)} experiments.")
+        else:
+            selected_experiments = st.multiselect("Experiments", options=experiment_names)
+    else:
+        st.info("Provide a valid registry path to list experiments.")
+
+    if st.button("Ingest experiments", disabled=not selected_experiments):
+        total = len(selected_experiments)
+        progress = st.progress(0) if total > 1 else None
+        results: list[tuple[str, dict]] = []
+        failures: list[str] = []
+        with st.spinner("Ingesting experiments..."):
+            for idx, experiment_name in enumerate(selected_experiments, start=1):
+                try:
+                    result = ingest_experiment_dataset(
+                        experiment_name,
+                        refresh=refresh_ingest,
+                        storage_mode="local",
+                        cloud_provider=None,
+                        db_url=None,
+                        query_backend=backend,
+                    )
+                    results.append((experiment_name, result or {}))
+                except Exception as exc:  # noqa: BLE001
+                    failures.append(experiment_name)
+                    st.error(f"{experiment_name}: {exc}")
+                if progress is not None:
+                    progress.progress(idx / total)
+
+        status_counts: dict[str, int] = {}
+        for _, result in results:
+            status = str(result.get("status") or "unknown")
+            status_counts[status] = status_counts.get(status, 0) + 1
+
+        if failures:
+            st.warning(f"{len(failures)} experiments failed.")
+        st.success("Ingestion complete.")
+        if status_counts:
+            summary = ", ".join(f"{k}: {v}" for k, v in status_counts.items())
+            st.caption(f"Status summary: {summary}")
+        st.cache_data.clear()
+        st.rerun()
+
 with st.sidebar.expander("Datasets", expanded=True):
     if registry.empty:
         st.warning("No datasets registered yet.")
@@ -142,45 +145,16 @@ with st.sidebar.expander("Datasets", expanded=True):
         instrument_rows = []
         for _, row in registry.iterrows():
             storage_path = str(row.get("storage_path", ""))
-            postgres_row = _get_dataset_row_from_postgres(storage_path)
             instrument_rows.append(
                 {
                     "table_name": row.get("table_name"),
                     "instrument": _get_instrument_label(storage_path),
-                    "active_storage_path": storage_path,
-                    "local_storage_path": (postgres_row or {}).get("local_storage_path"),
-                    "cloud_storage_path": (postgres_row or {}).get("cloud_storage_path"),
-                    # active_location: one of 'local', 'cloud', 'both', 'unknown'
-                    "active_location": (
-                        "both"
-                        if (postgres_row or {}).get("local_storage_path") and (postgres_row or {}).get("cloud_storage_path")
-                        else ("local" if (postgres_row or {}).get("local_storage_path") else ("cloud" if (postgres_row or {}).get("cloud_storage_path") else "unknown"))
-                    ),
+                    "storage_path": storage_path,
                 }
             )
         st.caption("Registered views and instruments")
         df_rows = pd.DataFrame(instrument_rows)
-        # Add a compact per-row badge for quick visual scanning
-        def _badge_for(loc: str) -> str:
-            if loc == "local":
-                return "🟢 Local"
-            if loc == "cloud":
-                return "☁️ Cloud"
-            if loc == "both":
-                return "🟣 Both"
-            return "❓ Unknown"
-
-        try:
-            df_rows["active_location_badge"] = df_rows["active_location"].apply(_badge_for)
-        except Exception:
-            df_rows["active_location_badge"] = ""
-
-        # Drop noisy columns and prefer a compact column ordering
-        for c in ["cloud_storage_path", "active_location"]:
-            if c in df_rows.columns:
-                df_rows = df_rows.drop(columns=[c])
-
-        cols = [c for c in ["table_name", "instrument", "active_location_badge"] if c in df_rows.columns]
+        cols = [c for c in ["table_name", "instrument", "storage_path"] if c in df_rows.columns]
         # Reverse ordering so newest entries appear first
         try:
             df_rows = df_rows.iloc[::-1].reset_index(drop=True)
@@ -188,17 +162,6 @@ with st.sidebar.expander("Datasets", expanded=True):
             pass
         # Show compact dataframe and provide a multiselect to choose views
         st.dataframe(df_rows[cols], use_container_width=True)
-
-        # Small summary badges for active locations
-        try:
-            counts = df_rows["active_location_badge"].map(lambda s: s.split()[0]).replace({"🟢": "local", "☁️": "cloud", "🟣": "both", "❓": "unknown"}).value_counts().to_dict()
-        except Exception:
-            counts = {}
-        col_loc, col_cloud, col_both, col_unknown = st.columns(4)
-        col_loc.metric("Local", counts.get("local", 0))
-        col_cloud.metric("Cloud", counts.get("cloud", 0))
-        col_both.metric("Both", counts.get("both", 0))
-        col_unknown.metric("Unknown", counts.get("unknown", 0))
 
         selected_tables = st.multiselect(
             "Select registered views",

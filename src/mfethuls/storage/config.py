@@ -111,6 +111,9 @@ def _get_azure_blob_config() -> Dict[str, Optional[str]]:
 
 
 def get_postgres_db_url() -> Optional[str]:
+    from ..config.mode import is_service_mode
+    if not is_service_mode():
+        return None
     enabled = os.environ.get("MFETHULS_POSTGRES_ENABLED", "").lower()
     if enabled not in {"1", "true", "yes"}:
         return None

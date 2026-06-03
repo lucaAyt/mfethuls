@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from ..experiments import _normalize_optional_str
 from ..registry_validator import RegistryValidator
+from ..config.mode import is_service_mode
 from ..storage.job_store import create_job, get_job as get_job_record
 from .schemas import QueryRequest
 from .utils import get_api_storage_root, get_query_backend, read_tabular_content
@@ -19,9 +20,16 @@ from .utils import get_api_storage_root, get_query_backend, read_tabular_content
 router = APIRouter()
 
 
+def _ensure_service_mode() -> None:
+    if not is_service_mode():
+        raise HTTPException(status_code=400, detail="API is only available in service mode")
+
+
 @router.post("/registry/preview")
 async def registry_preview(file: UploadFile | None = File(None)) -> Dict[str, Any]:
     """Parse uploaded spreadsheet (CSV/XLSX) and return per-row validation."""
+
+    _ensure_service_mode()
 
     if file is None:
         raise HTTPException(status_code=400, detail="file (CSV/XLSX) must be uploaded")
@@ -63,6 +71,8 @@ async def ingest(
 ) -> Dict[str, Any]:
     """Start ingestion job. This endpoint is control-plane only."""
 
+    _ensure_service_mode()
+
     if file is None:
         raise HTTPException(status_code=400, detail="file (CSV/XLSX) must be uploaded")
 
@@ -90,6 +100,7 @@ async def ingest(
 
 @router.get("/jobs/{job_id}")
 async def get_job(job_id: str) -> Dict[str, Any]:
+    _ensure_service_mode()
     job = get_job_record(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
@@ -98,6 +109,7 @@ async def get_job(job_id: str) -> Dict[str, Any]:
 
 @router.get("/datasets")
 async def list_datasets() -> List[Dict[str, Any]]:
+    _ensure_service_mode()
     return [
         {
             "dataset_id": row["table_name"],
@@ -113,6 +125,7 @@ async def list_datasets() -> List[Dict[str, Any]]:
 
 @router.post("/queries")
 async def post_query(payload: QueryRequest) -> Dict[str, Any]:
+    _ensure_service_mode()
     backend = get_query_backend()
 
     if payload.dataset_ids:
@@ -148,4 +161,5 @@ async def post_query(payload: QueryRequest) -> Dict[str, Any]:
 
 @router.get("/health")
 async def health() -> Dict[str, str]:
+    _ensure_service_mode()
     return {"status": "ok"}

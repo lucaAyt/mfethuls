@@ -3,7 +3,7 @@ import json
 import logging
 
 from collections import namedtuple
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 from mfethuls.dataset import Dataset
 from mfethuls.factory import (
@@ -23,6 +23,7 @@ from mfethuls.storage import (
     S3ParquetStorage,
     StorageManager,
 )
+from mfethuls.config.mode import is_service_mode
 
 if TYPE_CHECKING:
     from mfethuls.storage import DuckDBQueryBackend
@@ -73,6 +74,142 @@ def filter_entries(filters):
     ]
 
 
+def _resolve_metadata_db_url(db_url: Optional[str]) -> Optional[str]:
+    if not is_service_mode():
+        return None
+    if db_url:
+        return db_url
+
+    metadata_db_enabled_env = os.environ.get("MFETHULS_METADATA_DB_ENABLED", "").lower()
+    if metadata_db_enabled_env in {"1", "true", "yes"}:
+        return get_postgres_db_url()
+
+    return None
+
+
+def get_cached_dataset(exp, cache_backend, experiment_name: str) -> Optional[Dataset]:
+    if cache_backend is None:
+        return None
+
+    if cache_backend.dataset_in_storage(exp):
+        if os.environ.get("MFETHULS_STORAGE_DEBUG"):
+            logger.warning(
+                "Loading Dataset for experiment %s from storage cache in %s",
+                experiment_name,
+                cache_backend.__class__.__name__,
+            )
+        return cache_backend.load_dataset(exp)
+
+    return None
+
+
+def ensure_registered(exp, data_backend, query_backend: "DuckDBQueryBackend | None") -> Optional[str]:
+    if data_backend is None or query_backend is None:
+        return None
+
+    parquet_path, _ = data_backend.dataset_paths(exp)
+    return query_backend.register_parquet(parquet_path)
+
+
+def persist_dataset(
+    exp,
+    dataset: Dataset,
+    data_backend,
+    db_url: Optional[str],
+    query_backend: "DuckDBQueryBackend | None",
+    experiment_name: str,
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    if data_backend is None:
+        return None, None, None
+
+    resolved_db_url = _resolve_metadata_db_url(db_url)
+    metadata_backend = PostgresMetadataBackend(resolved_db_url) if resolved_db_url else None
+    manager = StorageManager(
+        data_backend=data_backend,
+        metadata_backend=metadata_backend,
+        query_backend=query_backend,
+    )
+    parquet_path, meta_path, dataset_id = manager.save_and_persist(exp, dataset)
+    if os.environ.get("MFETHULS_STORAGE_DEBUG"):
+        logger.info("Saved Dataset for experiment %s to storage backend", experiment_name)
+        if dataset_id:
+            logger.info(
+                "Persisted dataset metadata for experiment %s in Postgres (dataset_id=%s)",
+                experiment_name,
+                dataset_id,
+            )
+    return parquet_path, meta_path, dataset_id
+
+
+def ingest_experiment_dataset(
+    experiment_name,
+    use_storage: bool = True,
+    refresh: bool = False,
+    storage_mode: str = "local",
+    cloud_provider: Optional[str] = None,
+    db_url: Optional[str] = None,
+    query_backend: "DuckDBQueryBackend | None" = None,
+) -> Optional[dict[str, Any]]:
+    exp = get_experiment(experiment_name)
+
+    if exp.instrument_name is None:
+        logger.warning(
+            "Skipping experiment %r: it is registered but has no associated instrument data yet.",
+            experiment_name,
+        )
+        return {"status": "skipped"}
+
+    disable_storage_env = os.environ.get("MFETHULS_DISABLE_STORAGE", "").lower()
+    effective_use_storage = use_storage and disable_storage_env not in {"1", "true", "yes"}
+    if not effective_use_storage:
+        return {"status": "skipped"}
+
+    data_backend = _build_data_backend(storage_mode, cloud_provider)
+    cache_backend = data_backend
+    if (storage_mode or "").strip().lower() == "both":
+        cache_backend = LocalParquetStorage()
+
+    if not refresh:
+        cached_dataset = get_cached_dataset(exp, cache_backend, experiment_name)
+        if cached_dataset is not None:
+            dataset_id = ensure_registered(exp, data_backend, query_backend)
+            parquet_path, _ = data_backend.dataset_paths(exp)
+            return {
+                "status": "registered",
+                "dataset_id": dataset_id,
+                "storage_path": parquet_path,
+            }
+
+    filters = {"name": [exp.instrument_name]}
+    bundle = prepare_instruments(filters=filters, experiments=[exp.experiment_id])
+
+    try:
+        instrument = bundle.instruments[exp.instrument_name]
+        dict_data_paths = bundle.data_paths[exp.instrument_name]
+    except KeyError as exc:
+        raise KeyError(
+            f"Instrument {exp.instrument_name!r} for experiment {experiment_name!r} "
+            f"is not present in the current instrument configuration."
+        ) from exc
+
+    dataset = _parse_experiment(exp, dict_data_paths, instrument)
+    parquet_path, _, dataset_id = persist_dataset(
+        exp,
+        dataset,
+        data_backend,
+        db_url,
+        query_backend,
+        experiment_name,
+    )
+    if parquet_path or dataset_id:
+        return {
+            "status": "persisted",
+            "dataset_id": dataset_id,
+            "storage_path": parquet_path,
+        }
+    return {"status": "failed"}
+
+
 def load_experiment_dataset(
     experiment_name,
     use_storage: bool = True,
@@ -119,16 +256,11 @@ def load_experiment_dataset(
         cache_backend = LocalParquetStorage()
 
     # If requested, try to serve from storage cache first.
-    if effective_use_storage and not refresh and cache_backend is not None:
-        try:
-            if cache_backend.dataset_in_storage(exp):
-                if os.environ.get("MFETHULS_STORAGE_DEBUG"):
-                    logger.warning("Loading Dataset for experiment %s from storage cache in %s", experiment_name, cache_backend.__class__.__name__)
-                return cache_backend.load_dataset(exp)
-        except Exception:  # noqa: BLE001
-            # Best-effort cache: fall back to parsing on any storage issue.
-            if os.environ.get("MFETHULS_STORAGE_DEBUG"):
-                logger.exception("Falling back to fresh parse for experiment %s due to storage error", experiment_name)
+    if effective_use_storage and not refresh:
+        cached_dataset = get_cached_dataset(exp, cache_backend, experiment_name)
+        if cached_dataset is not None:
+            ensure_registered(exp, data_backend, query_backend)
+            return cached_dataset
 
     # Restrict to the instrument associated with this experiment.
     filters = {"name": [exp.instrument_name]}
@@ -149,33 +281,15 @@ def load_experiment_dataset(
     # Persist to local storage for future fast loading, and optionally persist
     # metadata to Postgres via StorageManager. Never fail the call if
     # persistence itself has issues.
-    parquet_path = None
-    meta_path = None
     if effective_use_storage:
-        try:
-            resolved_db_url = db_url
-            metadata_db_enabled_env = os.environ.get("MFETHULS_METADATA_DB_ENABLED", "").lower()
-            if not resolved_db_url and metadata_db_enabled_env in {"1", "true", "yes"}:
-                resolved_db_url = get_postgres_db_url()
-
-            metadata_backend = PostgresMetadataBackend(resolved_db_url) if resolved_db_url else None
-            manager = StorageManager(
-                data_backend=data_backend,
-                metadata_backend=metadata_backend,
-                query_backend=query_backend,
-            )
-            parquet_path, meta_path, dataset_id = manager.save_and_persist(exp, dataset)
-            if os.environ.get("MFETHULS_STORAGE_DEBUG"):
-                logger.info("Saved Dataset for experiment %s to storage backend", experiment_name)
-                if dataset_id:
-                    logger.info(
-                        "Persisted dataset metadata for experiment %s in Postgres (dataset_id=%s)",
-                        experiment_name,
-                        dataset_id,
-                    )
-        except Exception:  # noqa: BLE001
-            if os.environ.get("MFETHULS_STORAGE_DEBUG"):
-                logger.exception("Failed to save/persist Dataset for experiment %s", experiment_name)
+        persist_dataset(
+            exp,
+            dataset,
+            data_backend,
+            db_url,
+            query_backend,
+            experiment_name,
+        )
 
     return dataset
 
@@ -185,7 +299,12 @@ def _build_data_backend(storage_mode: str, cloud_provider: Optional[str]) -> "Lo
     if mode not in {"local", "cloud", "both"}:
         raise ValueError("storage_mode must be one of: local, cloud, both")
 
+    if mode in {"cloud", "both"} and not is_service_mode():
+        raise ValueError("cloud storage is only available in service mode")
+
     if mode == "local":
+        #TODO: Check if this log is outputting
+        logger.info("Using LocalParquetStorage as data backend")
         return LocalParquetStorage()
 
     provider = (cloud_provider or "").strip().lower()

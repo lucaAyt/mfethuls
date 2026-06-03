@@ -1,32 +1,55 @@
-# User details for path construction
+# mfethuls Environment Configuration
+# 
+# Set MFETHULS_MODE to either "local" (default) or "service"
+# - local: notebook/streamlit tools, writes to local storage only, no DB
+# - service: API/worker, writes to shared DB and optional cloud storage
 
-# Critical Paths
+##========== MODE SELECTION ==========
+# Default is "local" (safe for notebooks and local tools)
+# Set to "service" when running the API or worker
+MFETHULS_MODE=local
+
+##========== LOCAL MODE CONFIG (notebooks, streamlit) ==========
+# These settings apply when MFETHULS_MODE=local
+# Local mode uses only local storage and DuckDB, no Postgres/cloud
+
+# Data paths for instrument files
 PATH_TO_DATA=/home/user/Documents
 PATH_TO_REGISTRY=/home/user/Documents/experiment_registry.csv
+
+# Local storage for datasets and metadata
 PATH_TO_LOCAL_STORAGE=/home/user/Documents/data_dump
 
-# Debugging configs
-MFETHULS_STORAGE_DEBUG=True
-MFETHULS_DISABLE_STORAGE=0
-
-# DuckDB config
+# DuckDB storage path (local mode uses this automatically)
 MFETHULS_DUCKDB_PATH=/home/user/Documents/mfethuls.duckdb
 
-# Postgres metadata config (optional)
-MFETHULS_POSTGRES_ENABLED=false
-MFETHULS_POSTGRES_URL=postgresql://mfethuls:testpass@localhost:5432/mfethuls
-# MFETHULS_POSTGRES_USER=mfethuls
-# MFETHULS_POSTGRES_PASSWORD=testpass
-# MFETHULS_POSTGRES_HOST=localhost
-# MFETHULS_POSTGRES_PORT=5432
-# MFETHULS_POSTGRES_DB=mfethuls
+# Debugging
+MFETHULS_STORAGE_DEBUG=false
+MFETHULS_DISABLE_STORAGE=0
 
-# S3 storage config (optional)
+##========== SERVICE MODE CONFIG (API/worker) ==========
+# These settings apply when MFETHULS_MODE=service
+# Service mode can write to Postgres and cloud storage
+
+# Postgres metadata backend (service mode only)
+MFETHULS_POSTGRES_ENABLED=false
+MFETHULS_POSTGRES_USER=mfethuls
+MFETHULS_POSTGRES_PASSWORD=testpass
+MFETHULS_POSTGRES_HOST=localhost
+MFETHULS_POSTGRES_PORT=5432
+MFETHULS_POSTGRES_DB=mfethuls
+MFETHULS_POSTGRES_HOST_SERVICE=postgres
+
+# Cloud storage (S3, service mode only)
+# Set credentials to enable S3 storage
 MFETHULS_S3_BUCKET=your-bucket
 MFETHULS_S3_PREFIX=mfethuls
-MFETHULS_S3_REGION=us-east-1
+MFETHULS_S3_REGION=fra1
+MFETHULS_S3_ENDPOINT=digitaloceanspaces.com
+MFETHULS_S3_ACCESS_KEY=
+MFETHULS_S3_SECRET_KEY=
 
-# Azure Blob storage config (optional)
+# Cloud storage (Azure Blob, service mode only)
 MFETHULS_AZURE_CONNECTION_STRING=
 MFETHULS_AZURE_ACCOUNT=youraccount
 MFETHULS_AZURE_KEY=
@@ -34,7 +57,8 @@ MFETHULS_AZURE_SAS_TOKEN=
 MFETHULS_AZURE_CONTAINER=mfethuls
 MFETHULS_AZURE_PREFIX=mfethuls
 
-# Instrument folder names where data is stored
+##========== INSTRUMENT FOLDER NAMES ==========
+# These map instrument types to folder names in PATH_TO_DATA
 UV_VIS_FOLDER_NAME=UV_Vis
 TGA_FOLDER_NAME=TGA
 FTIR_FOLDER_NAME=FTIR
@@ -46,7 +70,8 @@ SEC_FOLDER_NAME=SEC
 DMA_FOLDER_NAME=DMA
 SAXS_FOLDER_NAME=SAXS
 
-# Testing configs
-MFETHULS_TEST_DATA_ROOT = /home/user/Documents/mfethuls_test_data
-MFETHULS_TEST_REGISTRY = /home/user/Documents/experiments_template.csv
-MFETHULS_TEST_LOCAL_STORAGE = /home/user/Documents/storage_local_cache
+##========== TESTING CONFIG ==========
+# Optional paths for test data (local mode)
+MFETHULS_TEST_DATA_ROOT=/home/user/Documents/mfethuls_test_data
+MFETHULS_TEST_REGISTRY=/home/user/Documents/experiments_template.csv
+MFETHULS_TEST_LOCAL_STORAGE=/home/user/Documents/storage_local_cache

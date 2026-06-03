@@ -1,123 +1,124 @@
 from __future__ import annotations
 
-import os
+import logging
 import time
 from typing import Any, Dict, List, Optional
 
-import pandas as pd
-
-from .config.loader import _build_data_backend, load_experiment_dataset
-from .experiments import _normalize_optional_str, register_experiment
+from .config.loader import ingest_experiment_dataset
+from .experiments import get_experiment, load_experiment_registry
 from .storage.job_store import claim_next_job, get_job, update_job
-from .registry_validator import RegistryValidator
 from .storage import DuckDBQueryBackend, get_postgres_db_url
 
-
-def _load_registry(path: str) -> pd.DataFrame:
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Registry file not found: {path}")
-    return pd.read_parquet(path)
+logger = logging.getLogger(__name__)
 
 
 def process_job(job_id: str) -> Optional[Dict[str, Any]]:
     job = get_job(job_id)
     if job is None:
+        logger.warning("job_id=%s not found", job_id)
         return None
 
     registry_path = job.get("registry_storage_path")
     if not registry_path:
+        logger.warning("job_id=%s missing registry_storage_path", job_id)
         return update_job(job_id, status="failed", message="missing registry_storage_path")
 
     try:
+        logger.info("job_id=%s starting ingest", job_id)
         update_job(job_id, status="running", progress=5, message="reading registry")
-        df = _load_registry(registry_path)
+        df = load_experiment_registry(registry_path)
+
+        # Get list of registered experiment names
+        experiment_names = df["name"].dropna().tolist()
+        experiment_names = [str(name) for name in experiment_names]
+        if not experiment_names:
+            raise ValueError("load_experiments requires at least one experiment name.")
 
         storage_mode = (job.get("storage_mode") or "local").strip().lower()
         cloud_provider = job.get("cloud_provider")
-        data_backend = _build_data_backend(storage_mode, cloud_provider)
+        logger.info(
+            "job_id=%s loaded registry rows=%d storage_mode=%s cloud_provider=%s",
+            job_id,
+            len(df.index),
+            storage_mode,
+            cloud_provider,
+        )
         query_backend = DuckDBQueryBackend()
         db_url = get_postgres_db_url()
         dataset_results: List[Dict[str, Any]] = []
 
-        from .experiments import Experiment
-
-        total = max(len(df.index), 1)
-        for idx, rec in enumerate(df.to_dict(orient="records"), start=1):
-            name = rec.get("name")
-            experiment_id = rec.get("experiment_id")
-            instrument_name = _normalize_optional_str(rec.get("instrument_name"))
-            sample_id = _normalize_optional_str(rec.get("sample_id"))
-            run_id = _normalize_optional_str(rec.get("run_id")) or "R001"
-            metadata = {
-                k: v
-                for k, v in rec.items()
-                if k
-                not in {
-                    "name",
-                    "experiment_id",
-                    "instrument_name",
-                    "sample_id",
-                    "run_id",
-                    "description",
-                    "measurement_profile",
-                }
-            }
+        total = max(len(experiment_names), 1)
+        for idx, experiment_name in enumerate(experiment_names, start=1):
 
             try:
-                validated_experiment_id = RegistryValidator.validate_experiment_id(experiment_id)
-                exp = Experiment(
-                    name=name,
-                    experiment_id=validated_experiment_id,
-                    instrument_name=instrument_name,
-                    sample_id=sample_id,
-                    run_id=run_id,
-                    metadata=metadata,
+                if not experiment_name:
+                    raise ValueError("missing experiment name")
+                exp = get_experiment(experiment_name)
+                logger.info(
+                    "job_id=%s row=%d/%d processing experiment_id=%s instrument=%s",
+                    job_id,
+                    idx,
+                    total,
+                    exp.experiment_id,
+                    exp.instrument_name,
                 )
-                register_experiment(exp)
 
-                if data_backend.dataset_in_storage(exp):
-                    parquet_path, _ = data_backend.dataset_paths(exp)
-                    dataset_id = query_backend.register_parquet(parquet_path)
-                    dataset_results.append(
-                        {
-                            "experiment_id": exp.experiment_id,
-                            "dataset_id": dataset_id,
-                            "storage_path": parquet_path,
-                            "status": "registered",
-                        }
+                result = ingest_experiment_dataset(
+                    exp.name,
+                    use_storage=True,
+                    refresh=False,
+                    storage_mode=storage_mode,
+                    cloud_provider=cloud_provider,
+                    db_url=db_url,
+                    query_backend=query_backend,
+                )
+                status = (result or {}).get("status", "skipped")
+                dataset_id = (result or {}).get("dataset_id")
+                storage_path = (result or {}).get("storage_path")
+                entry: Dict[str, Any] = {
+                    "experiment_id": exp.experiment_id,
+                    "status": status,
+                }
+                if dataset_id:
+                    entry["dataset_id"] = dataset_id
+                if storage_path:
+                    entry["storage_path"] = storage_path
+                dataset_results.append(entry)
+
+                if status == "registered":
+                    logger.info(
+                        "job_id=%s experiment_id=%s registered dataset_id=%s",
+                        job_id,
+                        exp.experiment_id,
+                        dataset_id,
                     )
+                elif status == "persisted":
+                    logger.info(
+                        "job_id=%s experiment_id=%s persisted dataset_id=%s",
+                        job_id,
+                        exp.experiment_id,
+                        dataset_id,
+                    )
+                elif status == "skipped":
+                    logger.info("job_id=%s experiment_id=%s skipped", job_id, exp.experiment_id)
                 else:
-                    dataset = load_experiment_dataset(
-                        exp.name,
-                        use_storage=True,
-                        refresh=False,
-                        storage_mode=storage_mode,
-                        cloud_provider=cloud_provider,
-                        db_url=db_url,
-                        query_backend=query_backend,
+                    logger.warning(
+                        "job_id=%s experiment_id=%s ingestion status=%s",
+                        job_id,
+                        exp.experiment_id,
+                        status,
                     )
-                    if dataset is None:
-                        dataset_results.append(
-                            {
-                                "experiment_id": exp.experiment_id,
-                                "status": "skipped",
-                            }
-                        )
-                    else:
-                        parquet_path, _ = data_backend.dataset_paths(exp)
-                        dataset_id = query_backend.register_parquet(parquet_path)
-                        dataset_results.append(
-                            {
-                                "experiment_id": exp.experiment_id,
-                                "dataset_id": dataset_id,
-                                "storage_path": parquet_path,
-                                "status": "persisted",
-                            }
-                        )
             except Exception:
+                logger.exception(
+                    "job_id=%s row=%d/%d failed experiment_id=%s",
+                    job_id,
+                    idx,
+                    total,
+                    experiment_name,
+                )
                 dataset_results.append(
                     {
-                        "experiment_id": experiment_id,
+                        "experiment_id": experiment_name,
                         "status": "failed",
                     }
                 )
@@ -139,8 +140,10 @@ def process_job(job_id: str) -> Optional[Dict[str, Any]]:
             datasets=dataset_results,
             registry_table=registry_table,
         )
+        logger.info("job_id=%s ingest completed registry_table=%s", job_id, registry_table)
         return get_job(job_id)
     except Exception as exc:  # pragma: no cover - worker level catch
+        logger.exception("job_id=%s ingest failed", job_id)
         return update_job(job_id, status="failed", message=f"ingest failed: {exc}")
 
 
