@@ -3,7 +3,7 @@
     "type": "dsc",
     "model": "prior",
     "name": "dsc",
-    "experiments": [],
+    "folder_name": "DSC",
     "characterizer": {
       "type": "dsc_profiling",
       "sensitivity": 0.1
@@ -13,7 +13,7 @@
     "type": "dsc",
     "model": "perkin_elmer",
     "name": "dsc_perkin_elmer",
-    "experiments": [],
+    "folder_name": "DSC",
     "characterizer": {
       "type": "dsc_profiling",
       "sensitivity": 0.01
@@ -23,7 +23,7 @@
     "type": "dsc",
     "model": "mettler_toledo",
     "name": "dsc_mettler_toledo",
-    "experiments": [],
+    "folder_name": "DSC",
     "characterizer": {
       "type": "dsc_profiling",
       "sensitivity": 0.1
@@ -33,60 +33,60 @@
     "type": "uv_vis",
     "model": "flame",
     "name": "uv_insitu",
-    "experiments": []
+    "folder_name": "UV_VIS"
   },
   {
     "type": "uv_vis",
     "model": "Shimadzu",
     "name": "uv_vis",
-    "experiments": []
+    "folder_name": "UV_VIS"
   },
   {
     "type": "rheometer",
     "model": "anton_paar",
     "name": "rheometer",
-    "experiments": []
+    "folder_name": "Rheology"
   },
   {
     "type": "tga",
     "model": "tgaX",
     "name": "tga",
-    "experiments": []
+    "folder_name": "TGA"
   },
   {
     "type": "nmr",
     "model": "bruker_nmr",
     "name": "nmr",
-    "experiments": []
+    "folder_name": "NMR"
   },
   {
     "type": "ftir",
     "model": "bruker",
     "name": "ftir",
-    "experiments": []
+    "folder_name": "FTIR"
   },
   {
     "type": "sec",
     "model": "agilent",
     "name": "sec",
-    "experiments": []
+    "folder_name": "SEC"
   },
   {
     "type": "dma",
     "model": "ta_q800",
     "name": "dma",
-    "experiments": []
+    "folder_name": "DMA"
   },
   {
     "type": "saxs",
     "model": "anton_paar",
     "name": "saxs",
-    "experiments": []
+    "folder_name": "SAXS"
   },
   {
     "type": "ms",
     "model": "bruker",
     "name": "ms",
-    "experiments": []
+    "folder_name": "MS"
   }
 ]

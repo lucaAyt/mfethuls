@@ -7,15 +7,15 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
 
-from ..experiments import _normalize_optional_str
-from ..registry_validator import RegistryValidator
 from ..config.mode import is_service_mode
+from ..registry_validator import validate_registry_dataframe
+from ..experiments import resolve_registry_path, read_tabular_content
 from ..storage.job_store import create_job, get_job as get_job_record
 from .schemas import QueryRequest
-from .utils import get_api_storage_root, get_query_backend, read_tabular_content
+from .utils import duckdb_session, get_api_storage_root, read_tabular_content_bytes
 
 router = APIRouter()
 
@@ -25,42 +25,33 @@ def _ensure_service_mode() -> None:
         raise HTTPException(status_code=400, detail="API is only available in service mode")
 
 
+async def _read_registry_upload_async(file: UploadFile) -> pd.DataFrame:
+    if file is not None:
+        content = await file.read()
+        return read_tabular_content_bytes(content)
+    raise HTTPException(status_code=400, detail="No file (CSV/XLSX) uploaded from path; check path")
+
+
+# This is for when a file is being checked (uploaded). PATH_TO_REGISTRY and the registry 
+# is in our mfethuls-api volume. We should check the file paths routing aswell.
 @router.post("/registry/preview")
 async def registry_preview(file: UploadFile | None = File(None)) -> Dict[str, Any]:
     """Parse uploaded spreadsheet (CSV/XLSX) and return per-row validation."""
 
     _ensure_service_mode()
 
-    if file is None:
-        raise HTTPException(status_code=400, detail="file (CSV/XLSX) must be uploaded")
+    if file:
+        df = await _read_registry_upload_async(file)
+    else:
+        registry_path = resolve_registry_path(os.environ.get("PATH_TO_REGISTRY"))
+        df = read_tabular_content(registry_path)
 
-    content = await file.read()
-    df = read_tabular_content(content)
-
-    required_cols = {"name", "experiment_id", "instrument_name"}
-    missing = required_cols.difference(set(df.columns))
-    if missing:
-        raise HTTPException(status_code=400, detail={"missing_columns": sorted(list(missing))})
-
-    rows: List[Dict[str, Any]] = []
-    for idx, rec in enumerate(df.to_dict(orient="records"), start=1):
-        experiment_id = rec.get("experiment_id")
-        instrument_name = _normalize_optional_str(rec.get("instrument_name"))
-
-        valid = True
-        warnings: List[Dict[str, str]] = []
-        try:
-            RegistryValidator.validate_experiment_id(experiment_id)
-        except Exception:
-            valid = False
-            warnings.append({"field": "experiment_id", "message": "invalid format"})
-
-        if instrument_name is None:
-            warnings.append({"field": "instrument_name", "message": "missing instrument_name"})
-
-        rows.append({"row_number": idx, "values": rec, "valid": valid, "warnings": warnings})
-
-    return {"rows": rows}
+    data_root = os.environ.get("PATH_TO_DATA")
+    return validate_registry_dataframe(
+        df,
+        check_data_paths=bool(data_root),
+        data_root=data_root,
+    )
 
 
 @router.post("/ingest")
@@ -68,21 +59,29 @@ async def ingest(
     file: UploadFile | None = File(None),
     storage_mode: str = "local",
     cloud_provider: Optional[str] = None,
+    allow_invalid: bool = Query(False),
 ) -> Dict[str, Any]:
     """Start ingestion job. This endpoint is control-plane only."""
 
     _ensure_service_mode()
 
-    if file is None:
-        raise HTTPException(status_code=400, detail="file (CSV/XLSX) must be uploaded")
+    df = await _read_registry_upload_async(file)
 
-    content = await file.read()
-    df = read_tabular_content(content)
-
-    required_cols = {"name", "experiment_id", "instrument_name"}
-    missing = required_cols.difference(set(df.columns))
-    if missing:
-        raise HTTPException(status_code=400, detail={"missing_columns": sorted(list(missing))})
+    data_root = os.environ.get("PATH_TO_DATA")
+    validation = validate_registry_dataframe(
+        df,
+        check_data_paths=bool(data_root),
+        data_root=data_root,
+    )
+    if not allow_invalid and validation["summary"]["invalid"] > 0:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Registry contains invalid rows",
+                "summary": validation["summary"],
+                "invalid_rows": [row for row in validation["rows"] if not row["valid"]],
+            },
+        )
 
     job_id = uuid.uuid4().hex
     registry_path = os.path.join(get_api_storage_root(), f"registry_{job_id}.parquet")
@@ -110,38 +109,43 @@ async def get_job(job_id: str) -> Dict[str, Any]:
 @router.get("/datasets")
 async def list_datasets() -> List[Dict[str, Any]]:
     _ensure_service_mode()
-    return [
-        {
-            "dataset_id": row["table_name"],
-            "name": row["table_name"],
-            "storage_mode": "local",
-            "queryable": True,
-            "storage_path": row["storage_path"],
-            "registered_at": row["registered_at"],
-        }
-        for row in get_query_backend().list_registered()
-    ]
+    with duckdb_session(read_only=True) as backend:
+        return [
+            {
+                "dataset_id": row["table_name"],
+                "name": row["table_name"],
+                "storage_mode": "local",
+                "queryable": True,
+                "storage_path": row["storage_path"],
+                "registered_at": row["registered_at"],
+            }
+            for row in backend.list_registered()
+        ]
 
 
 @router.post("/queries")
 async def post_query(payload: QueryRequest) -> Dict[str, Any]:
     _ensure_service_mode()
-    backend = get_query_backend()
 
-    if payload.dataset_ids:
-        registered = {row["table_name"] for row in backend.list_registered()}
-        missing = [dataset_id for dataset_id in payload.dataset_ids if dataset_id not in registered]
-        if missing:
-            raise HTTPException(status_code=404, detail={"missing_dataset_ids": missing})
+    with duckdb_session(read_only=True) as backend:
+        if payload.dataset_ids:
+            registered = {row["table_name"] for row in backend.list_registered()}
+            missing = [
+                dataset_id for dataset_id in payload.dataset_ids if dataset_id not in registered
+            ]
+            if missing:
+                raise HTTPException(status_code=404, detail={"missing_dataset_ids": missing})
 
-    query_id = uuid.uuid4().hex
-    started = pd.Timestamp.utcnow()
-    base_sql = payload.sql.strip().rstrip(";")
-    paginated_sql = f"SELECT * FROM ({base_sql}) AS q LIMIT {payload.limit} OFFSET {payload.offset}"
-    try:
-        frame = backend.query(paginated_sql)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Query failed: {exc}") from exc
+        query_id = uuid.uuid4().hex
+        started = pd.Timestamp.utcnow()
+        base_sql = payload.sql.strip().rstrip(";")
+        paginated_sql = (
+            f"SELECT * FROM ({base_sql}) AS q LIMIT {payload.limit} OFFSET {payload.offset}"
+        )
+        try:
+            frame = backend.query(paginated_sql)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Query failed: {exc}") from exc
 
     execution_ms = int((pd.Timestamp.utcnow() - started).total_seconds() * 1000)
 

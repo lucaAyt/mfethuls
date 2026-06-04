@@ -12,6 +12,8 @@ import os
 import re
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple
 
+import pandas as pd
+
 from mfethuls.parsers.registry import _PARSER_REGISTRY
 from mfethuls.schema_normalization import _load_instrument_schema
 
@@ -211,6 +213,53 @@ class RegistryValidator:
 
         return len(errors) == 0, errors
 
+    def validate_experiment_details(
+        self,
+        experiment: Experiment,
+        *,
+        check_data_paths: bool = False,
+        data_root: Optional[str] = None,
+    ) -> Tuple[List[str], List[Tuple[str, str]]]:
+        """Validate an Experiment and collect warnings.
+
+        Returns (errors, warnings) where warnings are tuples of (field, message).
+        """
+        warnings: List[Tuple[str, str]] = []
+
+        if experiment.instrument_name is None:
+            warnings.append(
+                ("instrument_name", "missing instrument_name")
+            )
+            return [], warnings
+
+        ok, errors = self.validate_experiment(experiment)
+        if not ok:
+            return errors, warnings
+
+        if check_data_paths:
+            data_root = data_root or os.environ.get("PATH_TO_DATA")
+            if not data_root:
+                warnings.append(
+                    ("data_path", "No data_root provided; cannot validate data paths.")
+                )
+            else:
+                entry = _get_instrument_entry(experiment.instrument_name)
+                folder_name = entry.get("folder_name") if entry else None
+                if not folder_name:
+                    warnings.append(
+                        (
+                            "data_path",
+                            f"Instrument '{experiment.instrument_name}' has no folder_name configured.",
+                        )
+                    )
+                    exp_dir = os.path.join(data_root, experiment.experiment_id)
+                else:
+                    exp_dir = os.path.join(data_root, folder_name, experiment.experiment_id)
+                if not os.path.isdir(exp_dir):
+                    warnings.append(("data_path", f"No data folder at {exp_dir}"))
+
+        return [], warnings
+
     @staticmethod
     def validate_experiment_id(experiment_id: str) -> str:
         """Validate and return a canonical experiment id (e.g. EXP001)."""
@@ -360,3 +409,64 @@ class RegistryValidator:
                 all_errors[instr_name].append(f"No schema for type '{instr_type}'")
 
         return len(all_errors) == 0, all_errors
+
+def validate_registry_dataframe(
+    df: pd.DataFrame,
+    *,
+    check_data_paths: bool = False,
+    data_root: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Validate all rows in an uploaded registry spreadsheet.
+
+    Uses the same rules as pre-parse validation (instrument config, parser,
+    schema, profiles) without mutating the in-memory experiment registry.
+    """
+
+    from mfethuls.experiments import experiment_from_registry_record
+
+    validator = RegistryValidator()
+    rows_out: List[Dict[str, Any]] = []
+    valid_count = 0
+
+    for idx, rec in enumerate(df.to_dict(orient="records"), start=1):
+        row_result = experiment_from_registry_record(rec)
+        errors = [{"field": "registry", "message": message} for message in row_result.errors]
+        warnings = [{"field": "registry", "message": message} for message in row_result.warnings]
+
+        experiment = row_result.experiment
+        if experiment is not None and not row_result.errors:
+            extra_errors, extra_warnings = validator.validate_experiment_details(
+                experiment,
+                check_data_paths=check_data_paths,
+                data_root=data_root,
+            )
+            if extra_errors:
+                errors.extend(
+                    [{"field": "instrument", "message": message} for message in extra_errors]
+                )
+            for field, message in extra_warnings:
+                warnings.append({"field": field, "message": message})
+
+        is_valid = len(errors) == 0
+        if is_valid:
+            valid_count += 1
+
+        rows_out.append(
+            {
+                "row_number": idx,
+                "values": rec,
+                "valid": is_valid,
+                "errors": errors,
+                "warnings": warnings,
+            }
+        )
+
+    total = len(rows_out)
+    return {
+        "rows": rows_out,
+        "summary": {
+            "total": total,
+            "valid": valid_count,
+            "invalid": total - valid_count,
+        },
+    }

@@ -8,6 +8,7 @@ A scalable, extensible Python framework for parsing, characterizing, and handlin
 
 The pinned top-level objectives live in [ROADMAP.md](ROADMAP.md).
 The normalization and canonical schema rules live in [SCHEMA_CONTRACT.md](SCHEMA_CONTRACT.md).
+System architecture and data-flow diagrams: [docs/architecture.md](docs/architecture.md).
 
 ## 🔧 Install
 It is recommended to build from within a virtual environment:<br> 
@@ -50,6 +51,22 @@ pip install -e '.[notebook]'
 - For usage you will need to edit the `env_example` file after installation and save as `.env` in the same location.
 - Consult the notebook ``notebooks\tutorial_basic_usecase`` for an example.
 - For developers, please work on a suitable branch and send a pull request.
+
+### Service mode (Docker API + worker)
+
+1. Copy `env_example` to `.env` and set `MFETHULS_POSTGRES_ENABLED=true` with credentials matching `docker-compose.yml`.
+2. Run `docker compose up --build`.
+3. Smoke-check the API:
+
+```shell
+curl http://localhost:8000/health
+curl -X POST http://localhost:8000/registry/preview -F "file=@path/to/experiments_template.csv"
+curl -X POST http://localhost:8000/ingest -F "file=@path/to/experiments_template.csv"
+curl http://localhost:8000/jobs/<job_id>
+curl http://localhost:8000/datasets
+```
+
+Ingest requires Postgres (`MFETHULS_POSTGRES_ENABLED=true`). The API opens DuckDB read-only per request; the worker closes DuckDB after each job so both can share `MFETHULS_DUCKDB_PATH`.
 
 ## 📁 Package layout (dev)
 

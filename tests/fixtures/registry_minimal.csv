@@ -1,0 +1,2 @@
+name,experiment_id,instrument_name,sample_id,run_id,status
+api_smoke_test,EXP999,dsc_mettler_toledo,S001,R001,to_analyse

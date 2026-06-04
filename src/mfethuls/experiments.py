@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import logging
 import os
@@ -14,7 +14,7 @@ from .registry_validator import RegistryValidator
 logger = logging.getLogger(__name__)
 
 
-def _resolve_registry_path(path: Optional[str] = None) -> str:
+def resolve_registry_path(path: Optional[str] = None) -> str:
     """Resolve the registry path from an explicit argument or environment defaults."""
 
     if path:
@@ -110,6 +110,79 @@ def register_experiment(exp: Experiment) -> None:
     _EXPERIMENT_REGISTRY[exp.name] = exp
 
 
+@dataclass
+class RegistryRowResult:
+    """Outcome of parsing a single registry spreadsheet row."""
+
+    experiment: Optional[Experiment]
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+
+def experiment_from_registry_record(rec: dict) -> RegistryRowResult:
+    """Build an Experiment from a registry row without registering it."""
+
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    name = _normalize_optional_str(rec.get("name"))
+    if name is None:
+        errors.append("missing required field: name")
+        return RegistryRowResult(experiment=None, errors=errors, warnings=warnings)
+
+    experiment_id = rec.get("experiment_id")
+    try:
+        validated_experiment_id = RegistryValidator.validate_experiment_id(experiment_id)
+    except ValueError as exc:
+        errors.append(str(exc))
+        return RegistryRowResult(experiment=None, errors=errors, warnings=warnings)
+
+    description = _normalize_optional_str(rec.get("description"))
+    explicit_measurement_profile = _normalize_optional_str(rec.get("measurement_profile"))
+    sample_id = _normalize_optional_str(rec.get("sample_id"))
+    raw_run_id = _normalize_optional_str(rec.get("run_id"))
+    run_id = raw_run_id or "R001"
+    instrument_name = _normalize_optional_str(rec.get("instrument_name"))
+
+    measurement_profile = explicit_measurement_profile or _infer_measurement_profile_from_text(
+        description
+    )
+
+    if instrument_name is None:
+        warnings.append(
+            "missing instrument_name; row is visible in the registry but cannot be analysed yet"
+        )
+
+    metadata: Dict[str, Any] = {}
+    for key, value in rec.items():
+        if key in {
+            "name",
+            "experiment_id",
+            "instrument_name",
+            "sample_id",
+            "run_id",
+            "description",
+            "measurement_profile",
+        }:
+            continue
+        metadata[key] = value
+
+    if description is not None:
+        metadata["description"] = description
+    if measurement_profile is not None:
+        metadata["registry_measurement_profile"] = measurement_profile
+
+    exp = Experiment(
+        name=name,
+        experiment_id=validated_experiment_id,
+        instrument_name=instrument_name,
+        sample_id=sample_id,
+        run_id=run_id,
+        metadata=metadata,
+    )
+    return RegistryRowResult(experiment=exp, errors=errors, warnings=warnings)
+
+
 def get_experiment(name: str) -> Experiment:
     """Retrieve an Experiment by its human-friendly name.
 
@@ -122,7 +195,25 @@ def get_experiment(name: str) -> Experiment:
         raise KeyError(f"Unknown experiment name: {name!r}") from exc
 
 
-def load_experiment_registry(path: Optional[str] = None) -> pd.DataFrame:
+def read_tabular_content(path: str) -> pd.DataFrame:
+    """Read a CSV/XLSX file into a DataFrame."""
+
+    _, ext = os.path.splitext(path.lower())
+    if ext in {".xlsx", ".xls"}:
+        df = pd.read_excel(path)
+    elif ext in {".parquet", ".pq"}:
+        df = pd.read_parquet(path)
+    else:
+        df = pd.read_csv(path)
+    return df
+
+
+def load_experiment_registry(
+    path: Optional[str] = None,
+    *,
+    check_data_paths: bool = False,
+    data_root: Optional[str] = None,
+) -> pd.DataFrame:
     """Load experiments from a CSV/Excel file into the in-memory registry.
 
     The file is expected to contain at least the following columns:
@@ -149,15 +240,8 @@ def load_experiment_registry(path: Optional[str] = None) -> pd.DataFrame:
     """
 
     # Resolve to an absolute path for clearer error messages.
-    path = _resolve_registry_path(path)
-
-    _, ext = os.path.splitext(path.lower())
-    if ext in {".xlsx", ".xls"}:
-        df = pd.read_excel(path)
-    elif ext in {".parquet", ".pq"}:
-        df = pd.read_parquet(path)
-    else:
-        df = pd.read_csv(path)
+    path = resolve_registry_path(path)
+    df = read_tabular_content(path)
 
     required_cols = {"name", "experiment_id", "instrument_name"}
     missing = required_cols.difference(df.columns)
@@ -166,79 +250,39 @@ def load_experiment_registry(path: Optional[str] = None) -> pd.DataFrame:
             f"Experiment registry at {path!r} is missing required columns: {sorted(missing)}"
         )
 
+    validator = RegistryValidator()
     records = df.to_dict(orient="records")
 
     for rec in records:
-        name = rec.get("name")
-        experiment_id = rec.get("experiment_id")
-
-        #TODO: We should be more strict about experiments with valid 
-        # experiment_id but no sample_id and instrument data
-        try:
-            validated_experiment_id = RegistryValidator.validate_experiment_id(experiment_id)
-        except ValueError:
+        row_result = experiment_from_registry_record(rec)
+        if row_result.errors:
             logger.warning(
-                "Skipping registry row %r because experiment_id %r is invalid.",
-                name,
-                experiment_id,
+                "Skipping registry row %r: %s",
+                rec.get("name"),
+                "; ".join(row_result.errors),
+            )
+            continue
+        if row_result.experiment is None:
+            continue
+
+        extra_errors, extra_warnings = validator.validate_experiment_details(
+            row_result.experiment,
+            check_data_paths=check_data_paths,
+            data_root=data_root,
+        )
+        if extra_errors:
+            logger.warning(
+                "Skipping registry row %r: %s",
+                rec.get("name"),
+                "; ".join(extra_errors),
             )
             continue
 
-        description = _normalize_optional_str(rec.get("description"))
-        explicit_measurement_profile = _normalize_optional_str(rec.get("measurement_profile"))
+        for message in row_result.warnings:
+            logger.warning("Registry row %r: %s", rec.get("name"), message)
+        for _, message in extra_warnings:
+            logger.warning("Registry row %r: %s", rec.get("name"), message)
 
-        # Normalise optional identifiers so that empty cells / NaN from
-        # Excel/CSV are treated as missing.
-        sample_id = _normalize_optional_str(rec.get("sample_id"))
-
-        raw_run_id = _normalize_optional_str(rec.get("run_id"))
-        run_id = raw_run_id or "R001"
-
-        # Instrument name is required *per experiment* for analysis. Allow the
-        # column to exist but individual rows may be empty/NaN to represent an
-        # experiment that has not (yet) been analysed on an instrument.
-        instrument_name = _normalize_optional_str(rec.get("instrument_name"))
-
-        measurement_profile = explicit_measurement_profile or _infer_measurement_profile_from_text(description)
-
-        if instrument_name is None:
-            # Keep a placeholder entry so callers can distinguish between
-            # an experiment that exists but has no associated instrument data
-            # and an experiment name that is not present in the registry.
-            logger.warning(
-                "Registering experiment %r (id %r) without instrument_name; "
-                "it will be visible in the registry but cannot be analysed yet.",
-                name,
-                experiment_id,
-            )
-
-        # Everything else becomes metadata.
-        metadata: Dict[str, Any] = {}
-        for key, value in rec.items():
-            if key in {
-                "name",
-                "experiment_id",
-                "instrument_name",
-                "sample_id",
-                "run_id",
-                "description",
-                "measurement_profile",
-            }:
-                continue
-            metadata[key] = value
-
-        if description is not None:
-            metadata["description"] = description
-        if measurement_profile is not None:
-            metadata["registry_measurement_profile"] = measurement_profile
-        exp = Experiment(
-            name=name,
-            experiment_id=validated_experiment_id,
-            instrument_name=instrument_name,
-            sample_id=sample_id,
-            run_id=run_id,
-            metadata=metadata,
-        )
-        register_experiment(exp)
+        register_experiment(row_result.experiment)
 
     return df

@@ -11,15 +11,15 @@ from mfethuls.registry_validator import RegistryValidator, RegistryValidationErr
 
 # Load environment variables from .env
 load_dotenv()
-DATA_ROOT_PATH = os.environ.get('PATH_TO_DATA')
 
 
-# Use .env but entries in instrument_params.json (data_subdir) can override .env
-def get_data_root_path(entry):
-    if "data_subdir" in entry:
-        return os.path.join(DATA_ROOT_PATH, entry["data_subdir"])
-    env_key = f'{entry["type"].upper()}_FOLDER_NAME'
-    return os.path.join(DATA_ROOT_PATH, os.environ.get(env_key, entry["type"]))
+# Prefer explicit folder name from config/instrument_params.json. Fallback is .env 
+def get_data_root_path(folder_name=None, instrument_type=None):
+    data_root = os.environ.get("PATH_TO_DATA")
+    if folder_name:
+        return os.path.join(data_root, folder_name)
+    env_key = f'{instrument_type.upper()}_FOLDER_NAME'
+    return os.path.join(data_root, os.environ.get(env_key, instrument_type))
 
 
 # Constructs paths from .env and user requirements

@@ -46,21 +46,21 @@ def prepare_instruments(filters=None, experiments=None):
     dict_data_paths = {}
 
     for entry in filter_entries(filters):
-        type_ = entry["type"]
-        model = entry["model"]
-        name = entry["name"]
-        exps = entry["experiments"] if not experiments else experiments
+        type_ = entry.get("type")
+        model = entry.get("model")
+        name = entry.get("name")
+        folder_name = entry.get("folder_name")
         characterizer = None
 
         if "characterizer" in entry:
             characterizer = create_characterizer(type_, entry["characterizer"])
 
-        data_root = get_data_root_path(entry)
-        instr = create_instrument(type_, name, model, characterizer, data_root)
+        data_path = get_data_root_path(folder_name, type_)
+        instr = create_instrument(type_, name, model, characterizer, data_path)
         instruments[name] = instr
 
         # Load data paths assoc. with instrument and experiments specified
-        dict_data_paths[name] = instrument_data_path_constructor(data_root, exps)
+        dict_data_paths[name] = instrument_data_path_constructor(data_path, experiments)
 
     return InstrumentBundle(instruments, dict_data_paths)
 

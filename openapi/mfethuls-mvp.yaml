@@ -1,14 +1,14 @@
 openapi: 3.1.0
 info:
-  title: MFethuls Ingest & Query API (MVP)
-  version: "0.1.0"
-  description: Minimal OpenAPI spec for registry preview, manual ingest, jobs, datasets and queries.
+  title: mfethuls Ingest and Query API
+  version: "0.2.0"
+  description: Registry preview, ingest jobs, datasets, and SQL queries (service mode).
 servers:
-  - url: https://api.example.com/v1
+  - url: http://localhost:8000
 paths:
   /registry/preview:
     post:
-      summary: Parse and preview a registry spreadsheet without ingesting
+      summary: Parse and validate a registry spreadsheet without ingesting
       requestBody:
         required: true
         content:
@@ -24,7 +24,24 @@ paths:
                 $ref: '#/components/schemas/PreviewResponse'
   /ingest:
     post:
-      summary: Start ingestion job (manual trigger)
+      summary: Start ingestion job
+      parameters:
+        - in: query
+          name: storage_mode
+          schema:
+            type: string
+            enum: [local, cloud, both]
+            default: local
+        - in: query
+          name: cloud_provider
+          schema:
+            type: string
+            enum: [s3, azure]
+        - in: query
+          name: allow_invalid
+          schema:
+            type: boolean
+            default: false
       requestBody:
         required: true
         content:
@@ -38,6 +55,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JobResponse'
+        '422':
+          description: Registry contains invalid rows (strict mode)
   /jobs/{job_id}:
     get:
       summary: Get job status
@@ -56,11 +75,7 @@ paths:
                 $ref: '#/components/schemas/JobResponse'
   /datasets:
     get:
-      summary: List datasets
-      parameters:
-        - in: query
-          name: project_id
-          schema: { type: string }
+      summary: List DuckDB-registered datasets
       responses:
         '200':
           description: Dataset list
@@ -72,7 +87,7 @@ paths:
                   $ref: '#/components/schemas/DatasetSummary'
   /queries:
     post:
-      summary: Execute SQL against registered datasets/views
+      summary: Execute SQL against registered DuckDB views
       requestBody:
         required: true
         content:
@@ -81,30 +96,17 @@ paths:
               $ref: '#/components/schemas/QueryRequest'
       responses:
         '200':
-          description: Synchronous result
+          description: Query result
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/QueryResponse'
-        '202':
-          description: Async job accepted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JobResponse'
   /health:
     get:
-      summary: Liveness
+      summary: Liveness (service mode only)
       responses:
         '200':
           description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
 components:
   schemas:
     PreviewUpload:
@@ -120,33 +122,49 @@ components:
         rows:
           type: array
           items:
-            type: object
-            properties:
-              row_number:
-                type: integer
-              values:
-                type: object
-              valid:
-                type: boolean
-              warnings:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    field: { type: string }
-                    message: { type: string }
+            $ref: '#/components/schemas/PreviewRow'
+        summary:
+          $ref: '#/components/schemas/PreviewSummary'
+    PreviewRow:
+      type: object
+      properties:
+        row_number:
+          type: integer
+        values:
+          type: object
+        valid:
+          type: boolean
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationMessage'
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationMessage'
+    PreviewSummary:
+      type: object
+      properties:
+        total:
+          type: integer
+        valid:
+          type: integer
+        invalid:
+          type: integer
+    ValidationMessage:
+      type: object
+      properties:
+        field:
+          type: string
+        message:
+          type: string
     IngestUpload:
       type: object
+      required: [file]
       properties:
         file:
           type: string
           format: binary
-        storage_mode:
-          type: string
-          enum: [local, cloud, both]
-        cloud_provider:
-          type: string
-          enum: [s3, azure]
     JobResponse:
       type: object
       properties:
@@ -157,8 +175,6 @@ components:
           enum: [queued, running, completed, failed]
         progress:
           type: integer
-          minimum: 0
-          maximum: 100
         message:
           type: string
         registry_storage_path:
@@ -170,46 +186,66 @@ components:
           items:
             type: object
             properties:
-              experiment_id: { type: string }
-              dataset_id: { type: string }
-              storage_path: { type: string }
-              status: { type: string }
+              experiment_id:
+                type: string
+              dataset_id:
+                type: string
+              storage_path:
+                type: string
+              status:
+                type: string
     DatasetSummary:
       type: object
       properties:
-        dataset_id: { type: string }
-        name: { type: string }
-        storage_mode: { type: string }
-        queryable: { type: boolean }
+        dataset_id:
+          type: string
+        name:
+          type: string
+        storage_mode:
+          type: string
+        queryable:
+          type: boolean
+        storage_path:
+          type: string
+        registered_at:
+          type: string
     QueryRequest:
       type: object
-      required: [project_id, sql]
+      required: [sql]
       properties:
-        project_id: { type: string }
+        sql:
+          type: string
         dataset_ids:
           type: array
-          items: { type: string }
-        sql: { type: string }
-        mode:
-          type: string
-          enum: [sync, async]
-          default: sync
+          items:
+            type: string
+        limit:
+          type: integer
+          default: 1000
+        offset:
+          type: integer
+          default: 0
     QueryResponse:
       type: object
       properties:
-        query_id: { type: string }
+        query_id:
+          type: string
         status:
           type: string
-          enum: [completed, running, failed]
         columns:
           type: array
           items:
             type: object
             properties:
-              name: { type: string }
-              type: { type: string }
+              name:
+                type: string
+              type:
+                type: string
         rows:
           type: array
           items:
             type: array
-            items: {}
+        pagination:
+          type: object
+        execution_ms:
+          type: integer

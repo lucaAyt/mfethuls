@@ -1,0 +1,2 @@
+name,experiment_id,instrument_name,sample_id,run_id,status
+bad_instrument_row,EXP998,nonexistent_instrument_xyz,S001,R001,to_analyse

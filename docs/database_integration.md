@@ -69,20 +69,6 @@ Provenance & metadata contracts
 - Store `schema_normalization` containing applied schema, warnings, and renamed columns
 - Store `provenance` with `parser_version`, `mfethuls_version`, and `storage` backend info
 
-Next dev tasks (initial prototype)
-1. Implement `LocalParquetStorage` (write parquet to local path)
-2. Implement `PostgresMetadataBackend` (register experiments & datasets)
-3. Wire the parser/factory to write parquet and call metadata backend when `--persist-metadata` is enabled
-4. Provide a DuckDB helper to run queries over selected parquet paths
+Implemented in the codebase: local/cloud Parquet backends, `PostgresMetadataBackend`, DuckDB `dataset_registry`, and the service worker job queue. See [architecture.md](architecture.md) for current data flows.
 
-Notes
-- We'll use SQLAlchemy for the Postgres backend; add to project dependencies when ready
-- For S3 support, use `s3fs` + DuckDB or `pyarrow` to read/write parquet
-
-```yaml
-pyproject / deps suggestion:
-- sqlalchemy
-- psycopg2-binary
-- s3fs (optional for S3)
-- duckdb (optional)
-```
+Remaining design gap: populate the Postgres `experiments` table from registry rows on ingest (datasets are persisted today).

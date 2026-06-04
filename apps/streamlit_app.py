@@ -3,6 +3,7 @@ import os
 
 import pandas as pd
 import plotly.express as px
+import plotly.io as pio
 import streamlit as st
 
 from mfethuls.config.loader import ingest_experiment_dataset
@@ -45,6 +46,31 @@ def _query_table_cached(db_path: str, table_name: str, limit: int) -> pd.DataFra
         return backend.query(query)
     finally:
         backend.close()
+
+
+def _figure_bytes(fig, fmt: str) -> bytes:
+    if fmt == "html":
+        return fig.to_html(include_plotlyjs="cdn", full_html=True).encode("utf8")
+    return pio.to_image(fig, format=fmt)
+
+
+def _figure_download_name(title: str, fmt: str) -> str:
+    safe_title = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in title).strip("_")
+    if not safe_title:
+        safe_title = "figure"
+    return f"{safe_title}.{fmt}"
+
+
+def _finite_bounds(values: pd.Series) -> tuple[float, float] | None:
+    numeric = pd.to_numeric(values, errors="coerce").dropna()
+    if numeric.empty:
+        return None
+    lower = float(numeric.min())
+    upper = float(numeric.max())
+    if lower == upper:
+        pad = abs(lower) * 0.05 or 1.0
+        return lower - pad, upper + pad
+    return lower, upper
 
 
 @st.cache_data(show_spinner=False)
@@ -322,8 +348,83 @@ if selected_tables:
                 if custom_color:
                     fig.update_traces(marker={"color": custom_color}, line={"color": custom_color})
 
+                x_bounds = _finite_bounds(data[x_col])
+                y_bounds = _finite_bounds(long_df["_y_value"]) if not long_df.empty else None
+
+                save_plot_export_slot = None
+                with st.expander("Export plot", expanded=False):
+                    st.caption(
+                        "Use these controls to define the saved zoomed view. The browser's mouse zoom state is not available to Streamlit."
+                    )
+                    range_cols = st.columns(2)
+                    x_min_default = x_bounds[0] if x_bounds else None
+                    x_max_default = x_bounds[1] if x_bounds else None
+                    y_min_default = y_bounds[0] if y_bounds else None
+                    y_max_default = y_bounds[1] if y_bounds else None
+
+                    use_custom_x_range = range_cols[0].checkbox("Limit X range", value=False)
+                    use_custom_y_range = range_cols[1].checkbox("Limit Y range", value=False)
+
+                    x_min = x_max = None
+                    y_min = y_max = None
+                    if use_custom_x_range and x_bounds:
+                        x_range_cols = st.columns(2)
+                        x_min = x_range_cols[0].number_input("X min", value=float(x_min_default), format="%.6f")
+                        x_max = x_range_cols[1].number_input("X max", value=float(x_max_default), format="%.6f")
+                    elif use_custom_x_range:
+                        st.info("X range controls are unavailable because the selected X axis has no numeric bounds.")
+
+                    if use_custom_y_range and y_bounds:
+                        y_range_cols = st.columns(2)
+                        y_min = y_range_cols[0].number_input("Y min", value=float(y_min_default), format="%.6f")
+                        y_max = y_range_cols[1].number_input("Y max", value=float(y_max_default), format="%.6f")
+                    elif use_custom_y_range:
+                        st.info("Y range controls are unavailable because the selected Y axis has no numeric bounds.")
+
+                    st.divider()
+                    st.caption("Save the adjusted figure from the current panel state.")
+                    save_plot_export_slot = st.container()
+
                 fig.update_yaxes(type="log" if use_log_y else "linear")
                 fig.update_xaxes(type="log" if use_log_x else "linear")
-                st.plotly_chart(fig, use_container_width=True)
+                if use_custom_x_range and x_bounds and x_min is not None and x_max is not None:
+                    fig.update_xaxes(range=[x_min, x_max])
+                if use_custom_y_range and y_bounds and y_min is not None and y_max is not None:
+                    fig.update_yaxes(range=[y_min, y_max])
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                    config={
+                        "displaylogo": False,
+                        "toImageButtonOptions": {"format": "svg", "filename": "mfethuls_figure"},
+                    },
+                )
+
+                if save_plot_export_slot is not None:
+                    with save_plot_export_slot:
+                        export_cols = st.columns(2)
+                        for col, fmt in zip(export_cols, ["svg", "png"]):
+                            label = fmt.upper()
+                            try:
+                                export_bytes = _figure_bytes(fig, fmt)
+                                col.download_button(
+                                    f"Download {label}",
+                                    data=export_bytes,
+                                    file_name=_figure_download_name(title, fmt),
+                                    mime={
+                                        "svg": "image/svg+xml",
+                                        "png": "image/png",
+                                    }[fmt],
+                                    use_container_width=True,
+                                )
+                            except Exception as exc:  # noqa: BLE001
+                                col.download_button(
+                                    f"Download {label}",
+                                    data=f"Export to {label} is unavailable: {exc}".encode("utf8"),
+                                    file_name=_figure_download_name(title, "txt"),
+                                    mime="text/plain",
+                                    use_container_width=True,
+                                )
 else:
     st.info("Register a dataset first, then refresh this page.")

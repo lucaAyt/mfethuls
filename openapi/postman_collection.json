@@ -26,12 +26,17 @@
         "body": {
           "mode": "formdata",
           "formdata": [
-            { "key": "file", "type": "file", "src": "" },
-            { "key": "storage_mode", "value": "both", "type": "text" },
-            { "key": "cloud_provider", "value": "s3", "type": "text" }
+            { "key": "file", "type": "file", "src": "" }
           ]
         },
-        "url": "http://localhost:8000/ingest"
+        "url": {
+          "raw": "http://localhost:8000/ingest?storage_mode=local",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["ingest"],
+          "query": [{ "key": "storage_mode", "value": "local" }]
+        }
       }
     },
     {

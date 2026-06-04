@@ -79,6 +79,8 @@ class DuckDBQueryBackend:
         )
 
     def _ensure_registry(self) -> None:
+        if self.read_only:
+            return
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS dataset_registry (
@@ -112,6 +114,8 @@ class DuckDBQueryBackend:
         return safe or "dataset"
 
     def register_parquet(self, storage_path: str, table_name: Optional[str] = None, overwrite: bool = True) -> str:
+        if self.read_only:
+            raise RuntimeError("Cannot register parquet on a read-only DuckDB connection")
         inferred = table_name or os.path.splitext(os.path.basename(storage_path))[0]
         view_name = self._sanitize_table_name(inferred)
         if self._is_s3_uri(storage_path):
@@ -151,11 +155,13 @@ class DuckDBQueryBackend:
     def query(self, sql: str) -> pd.DataFrame:
         return self._conn.execute(sql).fetch_df()
 
-    def get_sqlalchemy_url(self) -> str:
-        if self.db_path == ":memory:":
-            return "duckdb:///:memory:"
-        path = self.db_path.replace("\\", "/")
-        return f"duckdb:///{path}"
-
     def close(self) -> None:
-        self._conn.close()
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+    def __enter__(self) -> "DuckDBQueryBackend":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()

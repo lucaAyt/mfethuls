@@ -44,107 +44,129 @@ def process_job(job_id: str) -> Optional[Dict[str, Any]]:
             cloud_provider,
         )
         query_backend = DuckDBQueryBackend()
-        db_url = get_postgres_db_url()
-        dataset_results: List[Dict[str, Any]] = []
-
-        total = max(len(experiment_names), 1)
-        for idx, experiment_name in enumerate(experiment_names, start=1):
-
-            try:
-                if not experiment_name:
-                    raise ValueError("missing experiment name")
-                exp = get_experiment(experiment_name)
-                logger.info(
-                    "job_id=%s row=%d/%d processing experiment_id=%s instrument=%s",
-                    job_id,
-                    idx,
-                    total,
-                    exp.experiment_id,
-                    exp.instrument_name,
-                )
-
-                result = ingest_experiment_dataset(
-                    exp.name,
-                    use_storage=True,
-                    refresh=False,
-                    storage_mode=storage_mode,
-                    cloud_provider=cloud_provider,
-                    db_url=db_url,
-                    query_backend=query_backend,
-                )
-                status = (result or {}).get("status", "skipped")
-                dataset_id = (result or {}).get("dataset_id")
-                storage_path = (result or {}).get("storage_path")
-                entry: Dict[str, Any] = {
-                    "experiment_id": exp.experiment_id,
-                    "status": status,
-                }
-                if dataset_id:
-                    entry["dataset_id"] = dataset_id
-                if storage_path:
-                    entry["storage_path"] = storage_path
-                dataset_results.append(entry)
-
-                if status == "registered":
-                    logger.info(
-                        "job_id=%s experiment_id=%s registered dataset_id=%s",
-                        job_id,
-                        exp.experiment_id,
-                        dataset_id,
-                    )
-                elif status == "persisted":
-                    logger.info(
-                        "job_id=%s experiment_id=%s persisted dataset_id=%s",
-                        job_id,
-                        exp.experiment_id,
-                        dataset_id,
-                    )
-                elif status == "skipped":
-                    logger.info("job_id=%s experiment_id=%s skipped", job_id, exp.experiment_id)
-                else:
-                    logger.warning(
-                        "job_id=%s experiment_id=%s ingestion status=%s",
-                        job_id,
-                        exp.experiment_id,
-                        status,
-                    )
-            except Exception:
-                logger.exception(
-                    "job_id=%s row=%d/%d failed experiment_id=%s",
-                    job_id,
-                    idx,
-                    total,
-                    experiment_name,
-                )
-                dataset_results.append(
-                    {
-                        "experiment_id": experiment_name,
-                        "status": "failed",
-                    }
-                )
-
-            progress = int((idx / total) * 90)
-            update_job(job_id, progress=progress)
-
-        registry_table = query_backend.register_parquet(
-            registry_path,
-            table_name=f"registry_{job_id}",
-            overwrite=True,
-        )
-
-        update_job(
-            job_id,
-            progress=100,
-            status="completed",
-            message="ingest completed",
-            datasets=dataset_results,
-            registry_table=registry_table,
-        )
-        logger.info("job_id=%s ingest completed registry_table=%s", job_id, registry_table)
-        return get_job(job_id)
+        try:
+            return _process_job_ingest(
+                job_id=job_id,
+                experiment_names=experiment_names,
+                registry_path=registry_path,
+                storage_mode=storage_mode,
+                cloud_provider=cloud_provider,
+                query_backend=query_backend,
+                db_url=get_postgres_db_url(),
+            )
+        finally:
+            query_backend.close()
     except Exception as exc:  # pragma: no cover - worker level catch
         logger.exception("job_id=%s ingest failed", job_id)
         return update_job(job_id, status="failed", message=f"ingest failed: {exc}")
+
+
+def _process_job_ingest(
+    *,
+    job_id: str,
+    experiment_names: List[str],
+    registry_path: str,
+    storage_mode: str,
+    cloud_provider: Optional[str],
+    query_backend: DuckDBQueryBackend,
+    db_url: Optional[str],
+) -> Dict[str, Any]:
+    dataset_results: List[Dict[str, Any]] = []
+
+    total = max(len(experiment_names), 1)
+    for idx, experiment_name in enumerate(experiment_names, start=1):
+        try:
+            if not experiment_name:
+                raise ValueError("missing experiment name")
+            exp = get_experiment(experiment_name)
+            logger.info(
+                "job_id=%s row=%d/%d processing experiment_id=%s instrument=%s",
+                job_id,
+                idx,
+                total,
+                exp.experiment_id,
+                exp.instrument_name,
+            )
+
+            result = ingest_experiment_dataset(
+                exp.name,
+                use_storage=True,
+                refresh=False,
+                storage_mode=storage_mode,
+                cloud_provider=cloud_provider,
+                db_url=db_url,
+                query_backend=query_backend,
+            )
+            status = (result or {}).get("status", "skipped")
+            dataset_id = (result or {}).get("dataset_id")
+            storage_path = (result or {}).get("storage_path")
+            entry: Dict[str, Any] = {
+                "experiment_id": exp.experiment_id,
+                "status": status,
+            }
+            if dataset_id:
+                entry["dataset_id"] = dataset_id
+            if storage_path:
+                entry["storage_path"] = storage_path
+            dataset_results.append(entry)
+
+            if status == "registered":
+                logger.info(
+                    "job_id=%s experiment_id=%s registered dataset_id=%s",
+                    job_id,
+                    exp.experiment_id,
+                    dataset_id,
+                )
+            elif status == "persisted":
+                logger.info(
+                    "job_id=%s experiment_id=%s persisted dataset_id=%s",
+                    job_id,
+                    exp.experiment_id,
+                    dataset_id,
+                )
+            elif status == "skipped":
+                logger.info("job_id=%s experiment_id=%s skipped", job_id, exp.experiment_id)
+            else:
+                logger.warning(
+                    "job_id=%s experiment_id=%s ingestion status=%s",
+                    job_id,
+                    exp.experiment_id,
+                    status,
+                )
+        except Exception:
+            logger.exception(
+                "job_id=%s row=%d/%d failed experiment_id=%s",
+                job_id,
+                idx,
+                total,
+                experiment_name,
+            )
+            dataset_results.append(
+                {
+                    "experiment_id": experiment_name,
+                    "status": "failed",
+                }
+            )
+
+        progress = int((idx / total) * 90)
+        update_job(job_id, progress=progress)
+
+    registry_table = query_backend.register_parquet(
+        registry_path,
+        table_name=f"registry_{job_id}",
+        overwrite=True,
+    )
+
+    update_job(
+        job_id,
+        progress=100,
+        status="completed",
+        message="ingest completed",
+        datasets=dataset_results,
+        registry_table=registry_table,
+    )
+    logger.info("job_id=%s ingest completed registry_table=%s", job_id, registry_table)
+    return get_job(job_id)
 
 
 def run_worker(poll_interval: float = 2.0, max_jobs: Optional[int] = None) -> None:

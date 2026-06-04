@@ -30,9 +30,10 @@ services:
       - ./:/app
       - "C:/Users/BertossL/OneDrive - Université de Fribourg/Documents:/data"
     environment:
+      MFETHULS_MODE: service
       PATH_TO_DATA: /data
       PATH_TO_REGISTRY: /data/experiments_template.csv
-      PATH_TO_LOCAL_STORAGE: /data/data_dump
+      PATH_TO_LOCAL_STORAGE: /data/mfethuls_storage
       MFETHULS_DUCKDB_PATH: /app/.mfethuls_storage/mfethuls.duckdb
       MFETHULS_POSTGRES_ENABLED: ${MFETHULS_POSTGRES_ENABLED}
       MFETHULS_POSTGRES_USER: ${MFETHULS_POSTGRES_USER}
@@ -59,9 +60,11 @@ services:
       - ./:/app
       - "C:/Users/BertossL/OneDrive - Université de Fribourg/Documents:/data"
     environment:
+      MFETHULS_MODE: service
       PATH_TO_DATA: /data
       PATH_TO_REGISTRY: /data/experiments_template.csv
-      PATH_TO_LOCAL_STORAGE: /data/data_dump
+      PATH_TO_LOCAL_STORAGE: /data/mfethuls_storage
+      MFETHULS_DUCKDB_PATH: /app/.mfethuls_storage/mfethuls.duckdb
       MFETHULS_POSTGRES_ENABLED: ${MFETHULS_POSTGRES_ENABLED}
       MFETHULS_POSTGRES_USER: ${MFETHULS_POSTGRES_USER}
       MFETHULS_POSTGRES_PASSWORD: ${MFETHULS_POSTGRES_PASSWORD}

@@ -4,21 +4,24 @@ from __future__ import annotations
 
 import io
 import os
-from typing import Optional
+from contextlib import contextmanager
+from typing import Iterator, Optional
 
 import pandas as pd
 from fastapi import HTTPException
 
 from ..storage import DuckDBQueryBackend
 
-_QUERY_BACKEND: DuckDBQueryBackend | None = None
 
+@contextmanager
+def duckdb_session(*, read_only: bool = True) -> Iterator[DuckDBQueryBackend]:
+    """Open a short-lived DuckDB connection (release file lock when done)."""
 
-def get_query_backend() -> DuckDBQueryBackend:
-    global _QUERY_BACKEND
-    if _QUERY_BACKEND is None:
-        _QUERY_BACKEND = DuckDBQueryBackend()
-    return _QUERY_BACKEND
+    backend = DuckDBQueryBackend(read_only=read_only)
+    try:
+        yield backend
+    finally:
+        backend.close()
 
 
 def get_api_storage_root() -> str:
@@ -27,7 +30,7 @@ def get_api_storage_root() -> str:
     return root
 
 
-def read_tabular_content(content_bytes: bytes) -> pd.DataFrame:
+def read_tabular_content_bytes(content_bytes: bytes) -> pd.DataFrame:
     """Read a CSV/XLSX payload into a DataFrame."""
 
     try:

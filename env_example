@@ -1,5 +1,6 @@
 # mfethuls Environment Configuration
-# 
+# Copy this file to .env in the project root and edit paths/credentials.
+#
 # Set MFETHULS_MODE to either "local" (default) or "service"
 # - local: notebook/streamlit tools, writes to local storage only, no DB
 # - service: API/worker, writes to shared DB and optional cloud storage
@@ -30,6 +31,10 @@ MFETHULS_DISABLE_STORAGE=0
 ##========== SERVICE MODE CONFIG (API/worker) ==========
 # These settings apply when MFETHULS_MODE=service
 # Service mode can write to Postgres and cloud storage
+#
+# Docker Compose sets MFETHULS_MODE=service on api/worker automatically.
+# For local API testing: MFETHULS_MODE=service
+# For notebooks/Streamlit: MFETHULS_MODE=local
 
 # Postgres metadata backend (service mode only)
 MFETHULS_POSTGRES_ENABLED=false
