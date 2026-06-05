@@ -83,7 +83,7 @@ class TGAXParser:
     def parse_raw_data(self, path):
         lines = []
         cols = []
-        with open(path) as f:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
             take = 0
             for line in f.readlines():
 

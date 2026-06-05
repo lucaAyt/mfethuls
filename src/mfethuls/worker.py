@@ -18,15 +18,15 @@ def process_job(job_id: str) -> Optional[Dict[str, Any]]:
         logger.warning("job_id=%s not found", job_id)
         return None
 
-    registry_path = job.get("registry_storage_path")
-    if not registry_path:
-        logger.warning("job_id=%s missing registry_storage_path", job_id)
-        return update_job(job_id, status="failed", message="missing registry_storage_path")
+    job_registry_path = job.get("job_registry_storage_path")
+    if not job_registry_path:
+        logger.warning("job_id=%s missing job_registry_storage_path", job_id)
+        return update_job(job_id, status="failed", message="missing job_registry_storage_path")
 
     try:
         logger.info("job_id=%s starting ingest", job_id)
         update_job(job_id, status="running", progress=5, message="reading registry")
-        df = load_experiment_registry(registry_path)
+        df = load_experiment_registry()
 
         # Get list of registered experiment names
         experiment_names = df["name"].dropna().tolist()
@@ -48,7 +48,7 @@ def process_job(job_id: str) -> Optional[Dict[str, Any]]:
             return _process_job_ingest(
                 job_id=job_id,
                 experiment_names=experiment_names,
-                registry_path=registry_path,
+                job_registry_path=job_registry_path,
                 storage_mode=storage_mode,
                 cloud_provider=cloud_provider,
                 query_backend=query_backend,
@@ -65,7 +65,7 @@ def _process_job_ingest(
     *,
     job_id: str,
     experiment_names: List[str],
-    registry_path: str,
+    job_registry_path: str,
     storage_mode: str,
     cloud_provider: Optional[str],
     query_backend: DuckDBQueryBackend,
@@ -152,7 +152,7 @@ def _process_job_ingest(
         update_job(job_id, progress=progress)
 
     registry_table = query_backend.register_parquet(
-        registry_path,
+        job_registry_path,
         table_name=f"registry_{job_id}",
         overwrite=True,
     )

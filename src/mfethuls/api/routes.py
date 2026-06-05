@@ -64,8 +64,12 @@ async def ingest(
     """Start ingestion job. This endpoint is control-plane only."""
 
     _ensure_service_mode()
+    registry_path = resolve_registry_path(os.environ.get("PATH_TO_REGISTRY")) # Must exist
 
-    df = await _read_registry_upload_async(file)
+    if file:
+        df = await _read_registry_upload_async(file)
+    else:
+        df = read_tabular_content(registry_path)
 
     data_root = os.environ.get("PATH_TO_DATA")
     validation = validate_registry_dataframe(
@@ -84,15 +88,15 @@ async def ingest(
         )
 
     job_id = uuid.uuid4().hex
-    registry_path = os.path.join(get_api_storage_root(), f"registry_{job_id}.parquet")
-    df.to_parquet(registry_path, index=False)
+    job_registry_path = os.path.join(get_api_storage_root(), f"job_registry_record_for_{job_id}.parquet")
+    df.to_parquet(job_registry_path, index=False)
 
-    create_job(job_id, registry_path, storage_mode, cloud_provider)
+    create_job(job_id, job_registry_path, storage_mode, cloud_provider)
 
     payload = {
         "job_id": job_id,
         "status": "queued",
-        "registry_storage_path": registry_path,
+        "job_registry_storage_path": job_registry_path,
     }
     return JSONResponse(content=payload, status_code=202, headers={"Location": f"/jobs/{job_id}"})
 

@@ -177,7 +177,7 @@ components:
           type: integer
         message:
           type: string
-        registry_storage_path:
+        job_registry_storage_path:
           type: string
         registry_table:
           type: string

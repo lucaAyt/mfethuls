@@ -18,7 +18,9 @@
       "aliases": {
         "temperature_C": [
           "Temperature [\u00b0C]",
+          "Temperature [C]",
           "Tr [\u00b0C]",
+          "Tr [C]",
           "Temperature",
           "Tr [mg]"
         ],

@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
     message TEXT,
     storage_mode TEXT,
     cloud_provider TEXT,
-    registry_storage_path TEXT,
+    job_registry_storage_path TEXT,
     registry_table TEXT,
     datasets JSONB,
     created_at TIMESTAMP NOT NULL DEFAULT now(),

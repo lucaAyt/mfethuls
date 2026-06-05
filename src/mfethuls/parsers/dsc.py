@@ -191,7 +191,7 @@ class DSCPerkinElmerParser:
 
             lines = []
             cols = []
-            with open(path) as f:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 take = False
                 for line in f.readlines():
 
@@ -305,7 +305,7 @@ class DSCMettlerToledoParser:
 
         lines = []
         cols = []
-        with open(path) as f:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
             take = False
             for line in f.readlines():
 

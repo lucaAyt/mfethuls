@@ -45,7 +45,7 @@ def _ensure_schema(engine) -> None:
                     message TEXT,
                     storage_mode TEXT,
                     cloud_provider TEXT,
-                    registry_storage_path TEXT,
+                    job_registry_storage_path TEXT,
                     registry_table TEXT,
                     datasets JSONB,
                     created_at TIMESTAMP NOT NULL DEFAULT now(),
@@ -54,7 +54,6 @@ def _ensure_schema(engine) -> None:
                 """
             )
         )
-
 
 def _row_to_dict(row) -> Dict[str, Any]:
     if row is None:
@@ -71,7 +70,7 @@ def _row_to_dict(row) -> Dict[str, Any]:
 
 def create_job(
     job_id: Optional[str],
-    registry_storage_path: str,
+    job_registry_storage_path: str,
     storage_mode: Optional[str],
     cloud_provider: Optional[str],
 ) -> str:
@@ -88,16 +87,16 @@ def create_job(
                     message,
                     storage_mode,
                     cloud_provider,
-                    registry_storage_path
+                    job_registry_storage_path
                 )
-                VALUES (:job_id, 'queued', 0, 'queued', :storage_mode, :cloud_provider, :registry_storage_path);
+                VALUES (:job_id, 'queued', 0, 'queued', :storage_mode, :cloud_provider, :job_registry_storage_path);
                 """
             ),
             {
                 "job_id": resolved_job_id,
                 "storage_mode": storage_mode,
                 "cloud_provider": cloud_provider,
-                "registry_storage_path": registry_storage_path,
+                "job_registry_storage_path": job_registry_storage_path,
             },
         )
     return resolved_job_id
@@ -134,7 +133,7 @@ def get_job(job_id: str) -> Optional[Dict[str, Any]]:
             text(
                 """
                 SELECT job_id, status, progress, message, storage_mode, cloud_provider,
-                       registry_storage_path, registry_table, datasets, created_at, updated_at
+                       job_registry_storage_path, registry_table, datasets, created_at, updated_at
                 FROM ingest_jobs
                 WHERE job_id = :job_id;
                 """
@@ -165,7 +164,7 @@ def claim_next_job() -> Optional[Dict[str, Any]]:
                 SET status = 'running', updated_at = now()
                 WHERE job_id IN (SELECT job_id FROM next_job)
                 RETURNING job_id, status, progress, message, storage_mode, cloud_provider,
-                          registry_storage_path, registry_table, datasets, created_at, updated_at;
+                          job_registry_storage_path, registry_table, datasets, created_at, updated_at;
                 """
             )
         )
@@ -179,7 +178,7 @@ def list_jobs(status: Optional[str] = None, limit: int = 20) -> List[Dict[str, A
     engine = _get_engine()
     sql = """
         SELECT job_id, status, progress, message, storage_mode, cloud_provider,
-               registry_storage_path, registry_table, datasets, created_at, updated_at
+               job_registry_storage_path, registry_table, datasets, created_at, updated_at
         FROM ingest_jobs
     """
     params: Dict[str, Any] = {"limit": limit}

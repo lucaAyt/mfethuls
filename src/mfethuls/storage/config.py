@@ -32,11 +32,13 @@ def _get_storage_root() -> str:
     return root
 
 
+# Need to check that file exists to decide 
+# whether to initialise or connect
 def _get_duckdb_path() -> str:
     path = os.environ.get("MFETHULS_DUCKDB_PATH")
-    if path:
-        return os.path.abspath(path)
-    return os.path.join(_get_storage_root(), "mfethuls.duckdb")
+    if not path:
+        return os.path.join(_get_storage_root(), "mfethuls.duckdb")
+    return path
 
 
 def _normalize_prefix(prefix: Optional[str]) -> str:
