@@ -126,7 +126,47 @@ async def list_datasets() -> List[Dict[str, Any]]:
             for row in backend.list_registered()
         ]
 
+@router.get("/experiments/{table_name}")
+async def get_experiment_data(table_name: str, 
+                              limit: int = Query(default=100, ge=1), 
+                              offset: int = Query(default=0, ge=0)
+) -> Dict[str, Any]:
+    _ensure_service_mode()
+    safe_table = table_name.replace('"', '""')
 
+    with duckdb_session(read_only=True) as backend:
+        registered = {row["table_name"] for row in backend.list_registered()}
+        if safe_table not in registered:
+            raise HTTPException(status_code=400, detail=f"Dataset {safe_table} not found")
+
+        query_id = uuid.uuid4().hex
+        started = pd.Timestamp.utcnow()
+        paginated_sql = f'SELECT * FROM "{safe_table}" LIMIT ? OFFSET ?'
+        try:
+            frame = backend.query(paginated_sql, [limit, offset])
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Query failed: {exc}") from exc
+
+    execution_ms = int((pd.Timestamp.utcnow() - started).total_seconds() * 1000)
+
+    return {
+        "query_id": query_id,
+        "status": "completed",
+        "columns": [{"name": name, "type": str(dtype)} for name, dtype in frame.dtypes.items()],
+        "rows": frame.values.tolist(),
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "returned_rows": len(frame.index),
+        },
+        "execution_ms": execution_ms,
+    }
+
+
+# TODO: Move this to a "parameterised" JSON approach. 
+# We dont want to allow arbitrary SQL in the API for security reasons, 
+# but we can allow users to define parameterised queries in a config and then call them with parameters via the API. 
+# This is just for testing currently.
 @router.post("/queries")
 async def post_query(payload: QueryRequest) -> Dict[str, Any]:
     _ensure_service_mode()

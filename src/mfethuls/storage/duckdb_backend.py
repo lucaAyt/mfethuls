@@ -152,8 +152,10 @@ class DuckDBQueryBackend:
             for row in rows
         ]
 
-    def query(self, sql: str) -> pd.DataFrame:
-        return self._conn.execute(sql).fetch_df()
+    def query(self, sql: str, params: Optional[List[Any]] = None) -> pd.DataFrame:
+        if params is None:
+            params = []
+        return self._conn.execute(sql, params).fetch_df()
 
     def close(self) -> None:
         if self._conn is not None:
