@@ -77,5 +77,25 @@ services:
       postgres:
         condition: service_healthy
 
+  metabase:
+    build:
+      context: .
+      dockerfile: Dockerfile.metabase
+      args:
+        - METABASE_VERSION=0.58.9
+        - METABASE_DUCKDB_DRIVER_VERSION=1.4.3.1
+    container_name: metabase
+    hostname: metabase
+    volumes:
+      # Mount your local shared data folder into the container's data directory
+      - ./:/home/metabase/data
+      - "C:/Users/BertossL/OneDrive - Université de Fribourg/Documents:/data"
+    # Optional environment variables if you want to override default settings
+    environment:
+      - MB_PLUGINS_DIR=/home/metabase/plugins/
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
 volumes:
   mfethuls_pg_data:

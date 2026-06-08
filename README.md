@@ -78,10 +78,3 @@ API entrypoint:
 ```python
 from mfethuls.api import app
 ```
-
-## 📃 License
-
-MIT
-
-## Notes
-This package is still under development and is in no way a production ready service.
