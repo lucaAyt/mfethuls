@@ -126,10 +126,10 @@ async def list_datasets() -> List[Dict[str, Any]]:
             for row in backend.list_registered()
         ]
 
-@router.get("/experiments/{table_name}")
-async def get_experiment_data(table_name: str, 
-                              limit: int = Query(default=100, ge=1), 
-                              offset: int = Query(default=0, ge=0)
+@router.get("/dataset/{table_name}")
+async def get_dataset_data(table_name: str, 
+                           limit: int = Query(default=100, ge=1), 
+                           offset: int = Query(default=0, ge=0)
 ) -> Dict[str, Any]:
     _ensure_service_mode()
     safe_table = table_name.replace('"', '""')
