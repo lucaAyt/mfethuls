@@ -1,6 +1,8 @@
 # mfethuls architecture
 
-mfethuls bridges laboratory instrument exports and analysis-ready datasets: a **registry** (spreadsheet) describes experiments; an **ETL pipeline** parses and normalizes data; **storage and query layers** expose Parquet, metadata, and SQL.
+mfethuls bridges laboratory instrument exports and analysis-ready datasets: a **registry** (spreadsheet) describes experiments; an **ETL pipeline** parses and normalizes raw data; **storage and query layers** expose Parquet, metadata, and SQL to users and BI tools.
+
+---
 
 ## System context
 
@@ -13,9 +15,9 @@ flowchart TB
   end
 
   subgraph inputs [Inputs]
-    REG[Registry CSV/XLSX]
-    RAW[Raw instrument files]
-    CFG[instrument_params.json + schemas]
+    REG[Registry CSV/XLSX\nshared OneDrive / local]
+    RAW[Raw instrument files\nDSC, TGA, FTIR, SEC ...]
+    CFG[instrument_params.json\n+ schema JSON files]
   end
 
   subgraph mfethuls [mfethuls]
@@ -27,7 +29,7 @@ flowchart TB
 
   subgraph outputs [Outputs]
     PQ[Parquet datasets]
-    META[Metadata JSON + Postgres]
+    META[Metadata — Postgres + .json sidecars]
     DDB[(DuckDB catalog)]
   end
 
@@ -47,17 +49,19 @@ flowchart TB
   DS --> DDB
 ```
 
-| Role | Owns |
-|------|------|
-| Experimentalist | Registry rows, descriptions, measurement profiles |
+| Role | Responsibilities |
+|------|-----------------|
+| Experimentalist | Registry rows, descriptions, measurement profiles, raw data files |
 | Maintainer | Parsers, schema JSON, instrument config |
-| Data scientist | Queries, notebooks, downstream BI |
+| Data scientist | Queries, notebooks, downstream BI, comparison sets |
+
+---
 
 ## Deployment modes
 
 ```mermaid
 flowchart LR
-  subgraph local [MFETHULS_MODE=local]
+  subgraph local ["Local mode (MFETHULS_MODE=local)"]
     NB[Notebooks / CLI]
     ST[Streamlit explorer]
     LP[Local Parquet]
@@ -67,167 +71,276 @@ flowchart LR
     LP --> LD
   end
 
-  subgraph service [MFETHULS_MODE=service]
-    API[FastAPI]
+  subgraph service ["Service mode (MFETHULS_MODE=service)"]
+    USER[User / Client]
+    AUTH[Auth middleware\nBearer token]
+    API[FastAPI :8000]
     WK[Worker]
-    PG[(Postgres jobs + metadata)]
+    PG[(Postgres\njobs + metadata)]
+    LD2[(DuckDB file)]
+    LP2[Parquet local/cloud]
+    MB[Metabase :3000]
+    QS[Quack server :8080]
+
+    USER -->|Authorization: Bearer| AUTH
+    AUTH --> API
     API --> PG
     WK --> PG
-    API --> LD2[(DuckDB file)]
-    WK --> LD2
-    WK --> LP2[Parquet local/cloud]
+    API -->|read-only\nper request| LD2
+    WK -->|brief write\nend of job| LD2
+    WK --> LP2
+    MB --> QS
+    QS -->|read-only\nper request| LD2
   end
 ```
 
-- **Local:** no Postgres required; ingest writes Parquet and registers DuckDB views on disk.
-- **Service:** API queues jobs in Postgres; worker runs the same ingest pipeline; API queries DuckDB **read-only per request**; worker **closes DuckDB after each job** so both can share one database file.
+**Local mode:** no Postgres required; ingest writes Parquet and registers DuckDB views on disk. Single-process — no lock contention.
+
+**Service mode:** API queues jobs in Postgres; worker runs the ingest pipeline; API holds DuckDB read-only for milliseconds per request; worker holds a write lock only at the end of each job (batch view registration). Metabase connects through the Quack gateway in read-only mode.
+
+---
 
 ## End-to-end ingest pipeline
 
 ```mermaid
 sequenceDiagram
   participant User
-  participant API as FastAPI
+  participant API as FastAPI + Auth
   participant PG as Postgres
   participant Worker
   participant ETL as ETL core
-  participant Store as Storage
+  participant Store as Storage (Parquet + Postgres)
+  participant DDB as DuckDB
 
   User->>API: POST /registry/preview
   API->>API: validate_registry_dataframe
   API-->>User: rows + errors/warnings + summary
 
-  User->>API: POST /ingest
-  API->>API: validate (strict unless allow_invalid)
-  API->>PG: create_job
-  API-->>User: 202 job_id
+  User->>API: POST /ingest (Bearer token)
+  API->>API: validate registry (strict unless allow_invalid)
+  API->>PG: create_job (queued)
+  API-->>User: 202 {job_id}
 
-  Worker->>PG: claim job
-  Worker->>Worker: load_experiment_registry
-  loop Each experiment name
-    Worker->>ETL: ingest_experiment_dataset
-    ETL->>Store: Parquet + metadata.json
-    ETL->>Store: register DuckDB view
-    ETL->>PG: upsert dataset metadata optional
+  loop Poll until done
+    User->>API: GET /jobs/{job_id}
+    API-->>User: {status, progress, datasets}
   end
-  Worker->>Store: register registry parquet view
-  Worker->>Worker: close DuckDB
-  Worker->>PG: job completed
 
-  User->>API: GET /jobs/job_id
-  API-->>User: progress + per-experiment status
+  Worker->>PG: claim_next_job (FOR UPDATE SKIP LOCKED)
+  Worker->>Worker: clear_experiment_registry()
+  Worker->>Worker: load_experiment_registry(PATH_TO_REGISTRY)
 
-  User->>API: GET /datasets or POST /queries
-  API->>Store: duckdb_session read_only
-  API-->>User: views or SQL result
+  loop Each experiment — no DuckDB connection held
+    Worker->>ETL: ingest_experiment_dataset(query_backend=None)
+    ETL->>Store: write Parquet file
+    ETL->>Store: write .metadata.json sidecar
+    ETL->>PG: upsert dataset metadata (optional)
+  end
+
+  Note over Worker,DDB: Brief write window — milliseconds
+  Worker->>DDB: open write connection
+  Worker->>DDB: batch register_parquet() for all experiments
+  Worker->>DDB: close write connection
+
+  Worker->>PG: update job → completed
+
+  User->>API: GET /datasets
+  API->>DDB: duckdb_session(read_only=True)
+  API-->>User: list of registered datasets
+
+  User->>API: GET /dataset/{name}?limit=100
+  API->>DDB: duckdb_session(read_only=True)
+  API-->>User: paginated rows + column types
 ```
 
-## ETL core (single experiment)
+**Key design decision:** the worker holds no DuckDB connection while parsing experiments. Only after all Parquet files are written does it open a write connection to batch-register views — keeping the exclusive write lock window to milliseconds rather than minutes.
+
+---
+
+## Authentication
+
+```mermaid
+flowchart LR
+  REQ[Incoming request] --> HLT{Path = /health?}
+  HLT -->|yes| PASS[Route handler — no auth]
+  HLT -->|no| MW[verify_token dependency]
+  MW -->|MFETHULS_API_KEY not set| ERR500[500 RuntimeError — misconfigured]
+  MW -->|missing / wrong token| ERR401[401 Unauthorized]
+  MW -->|valid Bearer token| ROUTE[Route handler]
+```
+
+All routes registered through the main router require a valid `Authorization: Bearer <token>` header. The token is compared against `MFETHULS_API_KEY` at request time. `GET /health` is registered directly on `app` and is always public — this allows Docker and load-balancer health checks to work without credentials.
+
+**Best practice:** generate a long random token and store it in your `.env`. Never commit the token to version control.
+
+```shell
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+---
+
+## ETL core — single experiment
 
 ```mermaid
 flowchart TD
   A[Experiment from registry] --> B[RegistryValidator]
-  B -->|fail| X[Error before parse]
+  B -->|structural error| X[skip — logged as warning]
   B -->|ok| C[Resolve paths under PATH_TO_DATA]
-  C --> D[Parser type + model]
-  D --> E[Raw DataFrames from files]
-  E --> F[apply_dataframe_schema]
-  F --> G[Dataset data + metadata]
+  C --> D[Select parser by instrument + model]
+  D --> E[collect_dataframe_from_paths\nper-file error isolation]
+  E --> F[apply_dataframe_schema\nalias mapping + dtype coercion]
+  F --> G[Dataset: data + metadata]
   G --> H{Characterizer?}
-  H -->|DSC| I[Optional profiling]
+  H -->|DSC| I[Optional peak profiling]
   H -->|other| J[Skip]
   I --> K[StorageManager]
   J --> K
   K --> L[Local / S3 / Azure Parquet]
   K --> M[.metadata.json sidecar]
-  K --> N[Postgres datasets row]
-  K --> O[DuckDB register_parquet]
+  K --> N[Postgres datasets row\noptional]
 ```
-
-**Key modules:**
 
 | Step | Module |
 |------|--------|
-| Registry load | `experiments.py` — `experiment_from_registry_record`, `load_experiment_registry` |
-| Validation | `registry_validator.py` — `validate_registry_dataframe`, `RegistryValidator.validate_experiment` |
-| Orchestration | `config/loader.py` — `ingest_experiment_dataset`, `load_experiment_dataset` |
-| Parse | `factory.py`, `parsers/*` |
+| Registry load | `experiments.py` — `load_experiment_registry`, `experiment_from_registry_record` |
+| Validation | `registry_validator.py` — `validate_registry_dataframe`, `RegistryValidator` |
+| Orchestration | `config/loader.py` — `ingest_experiment_dataset` |
+| Parse | `factory.py`, `parsers/` |
 | Normalize | `schema_normalization.py`, `config/schemas/*.json` |
 | Persist | `storage/manager.py`, `storage/backends.py`, `storage/metadata.py` |
 | Query catalog | `storage/duckdb_backend.py` |
 
-## Registry validation (preview = worker pre-checks)
+---
+
+## Registry validation (preview = same checks as pre-ingest)
 
 ```mermaid
 flowchart TD
   ROW[Spreadsheet row] --> EFR[experiment_from_registry_record]
-  EFR -->|structural errors| INV[valid=false]
-  EFR -->|Experiment built| VE[RegistryValidator.validate_experiment]
-  VE -->|instrument parser schema profile| INV2[valid=false]
-  VE -->|ok| WARN{Optional warnings}
-  WARN --> DATA[PATH_TO_DATA/exp_id folder missing?]
-  WARN --> INST[missing instrument_name?]
+  EFR -->|missing name / bad experiment_id| INV[valid=false, errors]
+  EFR -->|Experiment built| VE[RegistryValidator.validate_experiment_details]
+  VE -->|instrument not in config| INV2[valid=false, errors]
+  VE -->|parser not registered| INV3[valid=false, errors]
+  VE -->|profile rule violated| INV4[valid=false, errors]
+  VE -->|ok| WARN{Warnings only}
+  WARN --> DATA[PATH_TO_DATA folder missing?]
+  WARN --> INST[instrument_name absent?]
   DATA --> OK[valid=true]
   INST --> OK
 ```
+
+`POST /registry/preview` and `POST /ingest` run the same validation. The difference is that preview always returns results; ingest blocks submission when `allow_invalid=false` (default) and any row is invalid.
+
+---
 
 ## Storage layout
 
 ```mermaid
 flowchart LR
   subgraph files [Filesystem / object store]
-    ROOT[PATH_TO_LOCAL_STORAGE or bucket]
+    ROOT[PATH_TO_LOCAL_STORAGE\nor S3/Azure bucket]
     ROOT --> I1[instrument_name/]
     I1 --> E1[experiment_id/]
-    E1 --> P1["*.parquet"]
-    E1 --> M1["*.metadata.json"]
+    E1 --> P1["experiment_id_sample_run.parquet"]
+    E1 --> M1["experiment_id_sample_run.metadata.json"]
   end
 
-  subgraph duckdb [DuckDB file MFETHULS_DUCKDB_PATH]
-    REGT[dataset_registry table]
-    V1[view: dataset table names]
+  subgraph duckdb [DuckDB — MFETHULS_DUCKDB_PATH]
+    REGT[dataset_registry table\ntable_name, storage_path, registered_at]
+    V1[VIEW per dataset\nSELECT * FROM read_parquet path]
     REGT --> V1
   end
 
-  subgraph postgres [Postgres service mode]
-    JOBS[ingest_jobs]
-    DATASETS[datasets metadata]
+  subgraph postgres [Postgres — service mode]
+    JOBS[ingest_jobs\nstatus, progress, datasets JSONB]
+    DATASETS[datasets\nmetadata, provenance, schema version]
   end
 
   P1 --> V1
-  P1 --> DATASETS
+  P1 -.->|optional| DATASETS
 ```
+
+**Parquet files are the source of truth.** DuckDB views are derived from them and can be rebuilt at any time by re-registering. The `dataset_registry` table inside DuckDB is the only mutable state that is hard to reconstruct — everything else (Parquet, Postgres metadata) survives a DuckDB file deletion.
+
+---
+
+## DuckDB concurrency model
+
+```mermaid
+sequenceDiagram
+  participant API
+  participant Worker
+  participant DDB as DuckDB file
+
+  Note over API,DDB: Normal operation — reads and writes do not overlap
+
+  API->>DDB: open read-only (milliseconds)
+  API->>DDB: SELECT from dataset_registry / view
+  API->>DDB: close
+
+  Worker->>Worker: parse all experiments, write Parquet
+  Note over Worker,DDB: Write lock held only here ↓
+  Worker->>DDB: open write (milliseconds)
+  Worker->>DDB: batch INSERT into dataset_registry + CREATE VIEW
+  Worker->>DDB: close
+  Note over Worker,DDB: Write lock released ↑
+
+  API->>DDB: open read-only (next request — no contention)
+```
+
+DuckDB uses an OS-level exclusive file lock for write connections. A read connection while a write connection is open will fail. The worker is designed so the write lock is held only during the final batch registration step — after all Parquet files are written — making the window milliseconds rather than minutes.
+
+---
 
 ## User interfaces
 
 | Interface | Mode | Purpose |
 |-----------|------|---------|
-| `mfethuls` CLI / notebooks | local | Load, compare, plot experiments |
-| `apps/streamlit_app.py` | local | Ingest sidebar, browse DuckDB, ad-hoc plots |
-| FastAPI (`mfethuls/api`) | service | Preview, ingest jobs, list datasets, SQL |
-| Worker (`mfethuls/worker.py`) | service | Background ingest |
-| External BI | either | Connect to DuckDB file, Postgres `datasets`, or Parquet paths |
+| Notebooks / CLI | local | Load, compare, plot experiments via Python API |
+| `apps/streamlit_app.py` | local | Ingest sidebar, dataset browser, ad-hoc plots |
+| FastAPI (`api/`) | service | Preview, ingest, job management, dataset access |
+| Worker (`worker.py`) | service | Background ingest processor |
+| Metabase via Quack gateway | service | BI dashboards over DuckDB views |
 
-## Package map
+---
+
+## Package layout
 
 ```
 src/mfethuls/
-  experiments.py      # Registry model + load
-  registry_validator.py
-  factory.py            # Paths + parse_experiment
-  parsers/              # Instrument parsers
-  schema_normalization.py
-  dataset.py            # Dataset contract
-  config/loader.py      # Ingest orchestration
-  storage/              # Parquet, Postgres, DuckDB, jobs
-  api/                  # FastAPI routes
-  worker.py             # Job processor
-  plotting/             # Optional viz (viz extra)
+  experiments.py          # Registry model, load_experiment_registry, clear_experiment_registry
+  registry_validator.py   # Pre-parse validation + profile matching
+  factory.py              # Path resolution + parse_experiment
+  schema_normalization.py # Column aliasing + dtype coercion
+  dataset.py              # Dataset dataclass
+  comparison.py           # ComparisonSet for multi-experiment analysis
+  config/
+    loader.py             # Ingest orchestration — ingest_experiment_dataset
+    instrument_params.json
+    schemas/              # Per-instrument JSON schema files (10 instruments)
+  parsers/                # Instrument-specific file readers (13 parser types)
+  storage/
+    backends.py           # Local, S3, Azure Parquet backends
+    duckdb_backend.py     # DuckDB catalog — register, query, remove datasets
+    metadata.py           # PostgresMetadataBackend
+    job_store.py          # Postgres job queue (FIFO, FOR UPDATE SKIP LOCKED)
+    manager.py            # StorageManager composition layer
+  api/
+    app.py                # FastAPI wiring + auth dependency
+    auth.py               # verify_token bearer token dependency
+    routes.py             # Route handlers
+  worker.py               # Background job processor + timeout
+  quack_server.py         # HTTP gateway for Metabase → DuckDB
+  plotting/               # Optional viz (viz extra)
 ```
+
+---
 
 ## Related docs
 
-- [ROADMAP.md](../ROADMAP.md) — product priorities
-- [SCHEMA_CONTRACT.md](../SCHEMA_CONTRACT.md) — canonical columns
-- [ingest_preview_contract.md](ingest_preview_contract.md) — API payloads
-- [database_integration.md](database_integration.md) — Postgres + Parquet design notes
+- [tutorial.md](tutorial.md) — step-by-step local and service mode tutorials
+- [registry_reference.md](registry_reference.md) — registry spreadsheet format and column reference
+- [api_reference.md](api_reference.md) — complete endpoint reference with examples
+- [ingest_preview_contract.md](ingest_preview_contract.md) — preview and ingest payload details
+- [database_integration.md](database_integration.md) — Postgres + Parquet + DuckDB design notes
+- [SCHEMA_CONTRACT.md](../SCHEMA_CONTRACT.md) — canonical column names and normalization rules

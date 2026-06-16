@@ -16,6 +16,7 @@ from .backends import (
 )
 from .config import _get_duckdb_path, get_postgres_db_url
 from .duckdb_backend import DuckDBQueryBackend, duckdb
+from .duckdb_backend import duckdb_session
 from .manager import StorageManager
 from .metadata import PostgresMetadataBackend, create_engine
 from .notebook import get_dataset, list_datasets
@@ -34,6 +35,7 @@ __all__ = [
     "get_postgres_db_url",
     "DuckDBQueryBackend",
     "duckdb",
+    "duckdb_session",
     "StorageManager",
     "PostgresMetadataBackend",
     "create_engine",

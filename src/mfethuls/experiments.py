@@ -110,6 +110,15 @@ def register_experiment(exp: Experiment) -> None:
     _EXPERIMENT_REGISTRY[exp.name] = exp
 
 
+def clear_experiment_registry() -> None:
+    """Clear all entries from the in-memory registry.
+
+    Called by the worker before each job so that experiments removed from the
+    shared registry between runs are not carried forward as stale entries.
+    """
+    _EXPERIMENT_REGISTRY.clear()
+
+
 @dataclass
 class RegistryRowResult:
     """Outcome of parsing a single registry spreadsheet row."""

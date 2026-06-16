@@ -1,80 +1,200 @@
 # mfethuls
 
-## 🚀 About
+A Python framework for parsing, normalizing, and managing data from laboratory instruments. Raw instrument exports (DSC, TGA, FTIR, UV-Vis, SEC, NMR, Rheometer, DMA, SAXS, MS) are parsed against a shared experiment registry, normalized to a canonical schema, and stored as queryable Parquet datasets — accessible via REST API, Metabase dashboards, notebooks, or a local Streamlit explorer.
 
-A scalable, extensible Python framework for parsing, characterizing, and handling data from laboratory instruments.
+---
 
-## 📌 Roadmap
+## Install
 
-The pinned top-level objectives live in [ROADMAP.md](ROADMAP.md).
-The normalization and canonical schema rules live in [SCHEMA_CONTRACT.md](SCHEMA_CONTRACT.md).
-System architecture and data-flow diagrams: [docs/architecture.md](docs/architecture.md).
+Work inside a virtual environment:
 
-## 🔧 Install
-It is recommended to build from within a virtual environment:<br> 
-https://docs.python.org/3/library/venv.html
-
-The package is pip installable (ssh recommended):
 ```shell
-# ssh
+python -m venv .venv && source .venv/bin/activate   # Linux/macOS
+python -m venv .venv && .venv\Scripts\activate       # Windows
+```
+
+Install from GitHub (SSH recommended):
+
+```shell
 pip install git+ssh://git@github.com/lucaAyt/mfethuls.git
 ```
-```shell
-# https
-pip install git+https://git@github.com/lucaAyt/mfethuls.git
-```
-To setup ssh keys see the following:<br>
-https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent
 
-For development installation, the following is recommended:
+For development, clone and install as editable:
+
 ```shell
-# For development purposes it is best to clone and then pip install as an editable.
 git clone ssh://git@github.com/lucaAyt/mfethuls.git
 cd mfethuls
 pip install -e .
 ```
 
-For API and worker containers, use the slimmer runtime extras:
-```shell
-pip install -e '.[service]'
-```
+**Extras** — install only what you need:
 
-Add plotting or notebook tooling only when needed locally:
-```shell
-pip install -e '.[viz]'
-pip install -e '.[notebook]'
-```
-
-## 🚁 Usage
-
-
-- For usage you will need to edit the `env_example` file after installation and save as `.env` in the same location.
-- Consult the notebook ``notebooks\tutorial_basic_usecase`` for an example.
-- For developers, please work on a suitable branch and send a pull request.
-
-### Service mode (Docker API + worker)
-
-1. Copy `env_example` to `.env` and set `MFETHULS_POSTGRES_ENABLED=true` with credentials matching `docker-compose.yml`.
-2. Run `docker compose up --build`.
-3. Smoke-check the API:
+| Extra | Installs | When to use |
+|-------|----------|-------------|
+| `service` | FastAPI, Uvicorn, SQLAlchemy, Psycopg2 | API + worker containers |
+| `cloud` | boto3, azure-storage-blob | S3 / Azure Blob storage |
+| `viz` | Matplotlib, Plotly, Kaleido | Plotting |
+| `notebook` | Jupyter, IPython | Interactive notebooks |
 
 ```shell
-curl http://localhost:8000/health
-curl -X POST http://localhost:8000/registry/preview -F "file=@path/to/experiments_template.csv"
-curl -X POST http://localhost:8000/ingest -F "file=@path/to/experiments_template.csv"
-curl http://localhost:8000/jobs/<job_id>
-curl http://localhost:8000/datasets
+pip install -e '.[service]'          # API + worker
+pip install -e '.[service,cloud]'    # API + worker + cloud storage
+pip install -e '.[viz,notebook]'     # Local analysis
 ```
 
-Ingest requires Postgres (`MFETHULS_POSTGRES_ENABLED=true`). The API opens DuckDB read-only per request; the worker closes DuckDB after each job so both can share `MFETHULS_DUCKDB_PATH`.
+---
 
-## 📁 Package layout (dev)
+## Configuration
 
-- `mfethuls/api`: FastAPI app wiring (`app.py`), route handlers (`routes.py`), schemas, and helpers.
-- `mfethuls/storage`: storage backends, metadata persistence, DuckDB query backend, and storage manager.
-- `mfethuls/plotting`: optional plotting helpers used by the CLI and notebooks when the `viz` extra is installed.
+Copy `env_example` to `.env` and edit before running anything:
 
-API entrypoint:
+```shell
+cp env_example .env
+```
+
+Key variables:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `MFETHULS_MODE` | yes | `local` or `service` |
+| `PATH_TO_DATA` | yes | Root folder containing raw instrument exports |
+| `PATH_TO_REGISTRY` | yes | Path to the shared experiments CSV/XLSX |
+| `PATH_TO_LOCAL_STORAGE` | yes | Where Parquet files are written |
+| `MFETHULS_DUCKDB_PATH` | no | DuckDB catalog file path (default: inside storage root) |
+| `MFETHULS_API_KEY` | service | Bearer token for API authentication — **required in service mode** |
+| `MFETHULS_POSTGRES_ENABLED` | service | `true` to enable Postgres job queue + metadata |
+| `MFETHULS_POSTGRES_USER` | service | Postgres credentials |
+| `MFETHULS_POSTGRES_PASSWORD` | service | |
+| `MFETHULS_POSTGRES_DB` | service | |
+| `MFETHULS_POSTGRES_HOST` | service | |
+| `MFETHULS_JOB_TIMEOUT_SECONDS` | no | Max seconds per ingest job (default: 1800) |
+
+---
+
+## Local mode (notebooks, CLI, Streamlit)
+
+Local mode requires no Postgres and no Docker. Everything runs in a single Python process.
+
+### Python API
+
 ```python
-from mfethuls.api import app
+import mfethuls
+
+# Load experiments from the shared registry
+experiments = mfethuls.load_experiments(["exp_001", "exp_002"])
+
+# Combine into a comparison set and get a tidy DataFrame
+comparison = mfethuls.compare(experiments)
+df = comparison.to_dataframe()
 ```
+
+### Streamlit explorer
+
+```shell
+streamlit run apps/streamlit_app.py
+```
+
+Provides a registry loader, ingest sidebar, dataset browser, and ad-hoc plotting.
+
+### Notebooks
+
+See `notebooks/` for worked examples. The `tutorial_basic_usecase` notebook covers the end-to-end local workflow.
+
+---
+
+## Service mode (Docker API + worker)
+
+Service mode runs the full stack: FastAPI, background worker, Postgres job queue, DuckDB catalog, and Metabase dashboards.
+
+### Start
+
+```shell
+docker compose up --build
+```
+
+### Authentication
+
+All API endpoints (except `GET /health`) require a bearer token.
+
+Set `MFETHULS_API_KEY` in your `.env`:
+
+```
+MFETHULS_API_KEY=your-secret-token
+```
+
+Include the header in every request:
+
+```shell
+-H "Authorization: Bearer your-secret-token"
+```
+
+### Workflow
+
+**1. Validate your registry before ingesting:**
+
+```shell
+curl -s http://localhost:8000/registry/preview \
+  -H "Authorization: Bearer your-secret-token" \
+  -F "file=@path/to/experiments_template.csv" | jq '.summary'
+```
+
+**2. Start an ingest job:**
+
+```shell
+curl -s -X POST http://localhost:8000/ingest \
+  -H "Authorization: Bearer your-secret-token" \
+  -F "file=@path/to/experiments_template.csv"
+```
+
+Returns `{"job_id": "...", "status": "queued"}`.
+
+**3. Poll job status:**
+
+```shell
+curl -s http://localhost:8000/jobs/<job_id> \
+  -H "Authorization: Bearer your-secret-token" | jq '{status, progress}'
+```
+
+**4. List all jobs:**
+
+```shell
+curl -s "http://localhost:8000/jobs?status=completed&limit=10" \
+  -H "Authorization: Bearer your-secret-token"
+```
+
+**5. Browse datasets:**
+
+```shell
+curl -s http://localhost:8000/datasets \
+  -H "Authorization: Bearer your-secret-token"
+```
+
+**6. Fetch dataset rows (paginated):**
+
+```shell
+curl -s "http://localhost:8000/dataset/<table_name>?limit=100&offset=0" \
+  -H "Authorization: Bearer your-secret-token"
+```
+
+**7. Delete a dataset from the catalog:**
+
+```shell
+curl -s -X DELETE http://localhost:8000/dataset/<table_name> \
+  -H "Authorization: Bearer your-secret-token"
+```
+
+Note: `DELETE` removes the dataset from the DuckDB catalog and query layer. Parquet files on disk or object storage are not deleted and can be re-registered.
+
+---
+
+## Docs
+
+| Document | Contents |
+|----------|----------|
+| [docs/tutorial.md](docs/tutorial.md) | Step-by-step tutorials for local mode and service mode |
+| [docs/registry_reference.md](docs/registry_reference.md) | Registry spreadsheet format, column reference, example CSV, measurement profiles |
+| [docs/architecture.md](docs/architecture.md) | System context, deployment modes, data-flow diagrams |
+| [docs/api_reference.md](docs/api_reference.md) | Full API endpoint reference with request/response examples |
+| [docs/ingest_preview_contract.md](docs/ingest_preview_contract.md) | Detailed preview and ingest payload contracts |
+| [docs/database_integration.md](docs/database_integration.md) | Postgres + Parquet + DuckDB design notes |
+| [SCHEMA_CONTRACT.md](SCHEMA_CONTRACT.md) | Canonical column names, units, and normalization rules |

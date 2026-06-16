@@ -13,15 +13,22 @@ FIXTURE_CSV = FIXTURE_DIR / "registry_minimal.csv"
 FIXTURE_INVALID = FIXTURE_DIR / "registry_invalid_instrument.csv"
 
 
+API_KEY = "test-api-key"
+
+
 @pytest.fixture
-def client():
-    return TestClient(app)
+def client(monkeypatch):
+    monkeypatch.setenv("MFETHULS_API_KEY", API_KEY)
+    return TestClient(app, headers={"Authorization": f"Bearer {API_KEY}"})
 
 
-def test_health_requires_service_mode(client, local_mode):
-    response = client.get("/health")
-    assert response.status_code == 400
-    assert "service mode" in response.json()["detail"].lower()
+def test_health_is_public(client, local_mode):
+    """Health endpoint is exempt from auth and service-mode checks."""
+    # Use a plain client with no auth header to verify it's truly public.
+    plain = TestClient(app)
+    response = plain.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
 
 
 def test_health_ok_in_service_mode(client, service_mode):

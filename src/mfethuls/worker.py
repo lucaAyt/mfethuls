@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import concurrent.futures
 import logging
+import os
 import time
 from typing import Any, Dict, List, Optional
 
 from .config.loader import ingest_experiment_dataset
-from .experiments import get_experiment, load_experiment_registry
+from .experiments import clear_experiment_registry, get_experiment, load_experiment_registry
 from .storage.job_store import claim_next_job, get_job, update_job
 from .storage import DuckDBQueryBackend, get_postgres_db_url
 
 logger = logging.getLogger(__name__)
+
+_JOB_TIMEOUT_SECONDS = int(os.environ.get("MFETHULS_JOB_TIMEOUT_SECONDS", "1800"))
 
 
 def process_job(job_id: str) -> Optional[Dict[str, Any]]:
@@ -26,6 +30,7 @@ def process_job(job_id: str) -> Optional[Dict[str, Any]]:
     try:
         logger.info("job_id=%s starting ingest", job_id)
         update_job(job_id, status="running", progress=5, message="reading registry")
+        clear_experiment_registry()
         df = load_experiment_registry()
 
         # Get list of registered experiment names
@@ -43,19 +48,14 @@ def process_job(job_id: str) -> Optional[Dict[str, Any]]:
             storage_mode,
             cloud_provider,
         )
-        query_backend = DuckDBQueryBackend()
-        try:
-            return _process_job_ingest(
-                job_id=job_id,
-                experiment_names=experiment_names,
-                job_registry_path=job_registry_path,
-                storage_mode=storage_mode,
-                cloud_provider=cloud_provider,
-                query_backend=query_backend,
-                db_url=get_postgres_db_url(),
-            )
-        finally:
-            query_backend.close()
+        return _process_job_ingest(
+            job_id=job_id,
+            experiment_names=experiment_names,
+            job_registry_path=job_registry_path,
+            storage_mode=storage_mode,
+            cloud_provider=cloud_provider,
+            db_url=get_postgres_db_url(),
+        )
     except Exception as exc:  # pragma: no cover - worker level catch
         logger.exception("job_id=%s ingest failed", job_id)
         return update_job(job_id, status="failed", message=f"ingest failed: {exc}")
@@ -68,10 +68,13 @@ def _process_job_ingest(
     job_registry_path: str,
     storage_mode: str,
     cloud_provider: Optional[str],
-    query_backend: DuckDBQueryBackend,
     db_url: Optional[str],
 ) -> Dict[str, Any]:
     dataset_results: List[Dict[str, Any]] = []
+    # Collect Parquet paths during parsing; DuckDB registration happens in one
+    # brief write window at the end so we don't hold an exclusive lock while
+    # parsing (which can take minutes for large registries).
+    parquet_paths: List[tuple] = []  # (storage_path, experiment_id)
 
     total = max(len(experiment_names), 1)
     for idx, experiment_name in enumerate(experiment_names, start=1):
@@ -88,6 +91,9 @@ def _process_job_ingest(
                 exp.instrument_name,
             )
 
+            # No query_backend here — Parquet files are written, Postgres metadata
+            # is persisted, but DuckDB view registration is deferred to the batch
+            # step below so the write lock is held for milliseconds, not minutes.
             result = ingest_experiment_dataset(
                 exp.name,
                 use_storage=True,
@@ -95,44 +101,26 @@ def _process_job_ingest(
                 storage_mode=storage_mode,
                 cloud_provider=cloud_provider,
                 db_url=db_url,
-                query_backend=query_backend,
+                query_backend=None,
             )
             status = (result or {}).get("status", "skipped")
-            dataset_id = (result or {}).get("dataset_id")
             storage_path = (result or {}).get("storage_path")
             entry: Dict[str, Any] = {
                 "experiment_id": exp.experiment_id,
                 "status": status,
             }
-            if dataset_id:
-                entry["dataset_id"] = dataset_id
             if storage_path:
                 entry["storage_path"] = storage_path
+                parquet_paths.append((storage_path, exp.experiment_id))
+
             dataset_results.append(entry)
 
-            if status == "registered":
-                logger.info(
-                    "job_id=%s experiment_id=%s registered dataset_id=%s",
-                    job_id,
-                    exp.experiment_id,
-                    dataset_id,
-                )
-            elif status == "persisted":
-                logger.info(
-                    "job_id=%s experiment_id=%s persisted dataset_id=%s",
-                    job_id,
-                    exp.experiment_id,
-                    dataset_id,
-                )
+            if status in ("registered", "persisted"):
+                logger.info("job_id=%s experiment_id=%s status=%s", job_id, exp.experiment_id, status)
             elif status == "skipped":
                 logger.info("job_id=%s experiment_id=%s skipped", job_id, exp.experiment_id)
             else:
-                logger.warning(
-                    "job_id=%s experiment_id=%s ingestion status=%s",
-                    job_id,
-                    exp.experiment_id,
-                    status,
-                )
+                logger.warning("job_id=%s experiment_id=%s ingestion status=%s", job_id, exp.experiment_id, status)
         except Exception:
             logger.exception(
                 "job_id=%s row=%d/%d failed experiment_id=%s",
@@ -141,21 +129,34 @@ def _process_job_ingest(
                 total,
                 experiment_name,
             )
-            dataset_results.append(
-                {
-                    "experiment_id": experiment_name,
-                    "status": "failed",
-                }
-            )
+            dataset_results.append({"experiment_id": experiment_name, "status": "failed"})
 
         progress = int((idx / total) * 90)
         update_job(job_id, progress=progress)
 
-    registry_table = query_backend.register_parquet(
-        job_registry_path,
-        table_name=f"registry_{job_id}",
-        overwrite=True,
-    )
+    # Brief write window: open DuckDB once, batch-register all Parquet files,
+    # then close immediately. API and Quack readers are blocked only during this.
+    registry_table = None
+    try:
+        with DuckDBQueryBackend() as qb:
+            for storage_path, experiment_id in parquet_paths:
+                try:
+                    dataset_id = qb.register_parquet(storage_path)
+                    for entry in dataset_results:
+                        if entry.get("storage_path") == storage_path:
+                            entry["dataset_id"] = dataset_id
+                    logger.info("job_id=%s experiment_id=%s registered dataset_id=%s", job_id, experiment_id, dataset_id)
+                except Exception:
+                    logger.warning("job_id=%s failed to register %s in DuckDB", job_id, storage_path)
+
+            registry_table = qb.register_parquet(
+                job_registry_path,
+                table_name=f"registry_{job_id}",
+                overwrite=True,
+                persist_view=False,
+            )
+    except Exception:
+        logger.exception("job_id=%s DuckDB batch registration failed", job_id)
 
     update_job(
         job_id,
@@ -179,7 +180,19 @@ def run_worker(poll_interval: float = 2.0, max_jobs: Optional[int] = None) -> No
 
         job_id = job.get("job_id")
         if job_id:
-            process_job(job_id)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(process_job, job_id)
+                try:
+                    future.result(timeout=_JOB_TIMEOUT_SECONDS)
+                except concurrent.futures.TimeoutError:
+                    logger.error(
+                        "job_id=%s timed out after %ds", job_id, _JOB_TIMEOUT_SECONDS
+                    )
+                    update_job(
+                        job_id,
+                        status="failed",
+                        message=f"job timed out after {_JOB_TIMEOUT_SECONDS}s",
+                    )
             processed += 1
 
         if max_jobs is not None and processed >= max_jobs:

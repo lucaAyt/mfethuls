@@ -9,7 +9,7 @@ import streamlit as st
 from mfethuls.config.loader import ingest_experiment_dataset
 from mfethuls.config.mode import is_service_mode
 from mfethuls.experiments import load_experiment_registry
-from mfethuls.storage import DuckDBQueryBackend, _get_duckdb_path
+from mfethuls.storage import DuckDBQueryBackend, _get_duckdb_path, duckdb_session
 
 # Streamlit is a local-only tool (notebooks/interactive exploration).
 if is_service_mode():
@@ -21,31 +21,19 @@ st.set_page_config(page_title="mfethuls Explorer", layout="wide")
 st.title("mfethuls Explorer")
 st.caption("Explore registered datasets.")
 
-
-def _get_backend() -> DuckDBQueryBackend:
-    db_path = _get_duckdb_path()
-    return DuckDBQueryBackend(db_path=db_path)
-
-
 @st.cache_data(show_spinner=False)
 def _load_registry_cached(db_path: str) -> pd.DataFrame:
-    backend = DuckDBQueryBackend(db_path=db_path)
-    try:
+    with duckdb_session(db_path=db_path, read_only=True) as backend:
         rows = backend.list_registered()
         return pd.DataFrame(rows)
-    finally:
-        backend.close()
 
 
 @st.cache_data(show_spinner=False)
 def _query_table_cached(db_path: str, table_name: str, limit: int) -> pd.DataFrame:
-    backend = DuckDBQueryBackend(db_path=db_path)
-    try:
+    with duckdb_session(db_path=db_path, read_only=True) as backend:
         safe_table = table_name.replace('"', '""')
-        query = f"SELECT * FROM \"{safe_table}\" LIMIT {int(limit)}"
-        return backend.query(query)
-    finally:
-        backend.close()
+        paginated_sql = f'SELECT * FROM "{safe_table}" LIMIT ?'
+        return backend.query(paginated_sql, [int(limit)])
 
 
 def _figure_bytes(fig, fmt: str) -> bytes:
@@ -93,8 +81,8 @@ def _get_instrument_label(storage_path: str) -> str:
     return "(unknown)"
 
 
-backend = _get_backend()
-registry = _load_registry_cached(backend.db_path)
+db_path = _get_duckdb_path()
+registry = _load_registry_cached(db_path)
 
 with st.sidebar.expander("Ingest", expanded=False):
     st.caption("Local ingestion: parses raw files and writes to local storage only.")
@@ -132,22 +120,23 @@ with st.sidebar.expander("Ingest", expanded=False):
         results: list[tuple[str, dict]] = []
         failures: list[str] = []
         with st.spinner("Ingesting experiments..."):
-            for idx, experiment_name in enumerate(selected_experiments, start=1):
-                try:
-                    result = ingest_experiment_dataset(
-                        experiment_name,
-                        refresh=refresh_ingest,
-                        storage_mode="local",
-                        cloud_provider=None,
-                        db_url=None,
-                        query_backend=backend,
-                    )
-                    results.append((experiment_name, result or {}))
-                except Exception as exc:  # noqa: BLE001
-                    failures.append(experiment_name)
-                    st.error(f"{experiment_name}: {exc}")
-                if progress is not None:
-                    progress.progress(idx / total)
+            with DuckDBQueryBackend(db_path=db_path, read_only=False) as ingest_backend:
+                for idx, experiment_name in enumerate(selected_experiments, start=1):
+                    try:
+                        result = ingest_experiment_dataset(
+                            experiment_name,
+                            refresh=refresh_ingest,
+                            storage_mode="local",
+                            cloud_provider=None,
+                            db_url=None,
+                            query_backend=ingest_backend,
+                        )
+                        results.append((experiment_name, result or {}))
+                    except Exception as exc:  # noqa: BLE001
+                        failures.append(experiment_name)
+                        st.error(f"{experiment_name}: {exc}")
+                    if progress is not None:
+                        progress.progress(idx / total)
 
         status_counts: dict[str, int] = {}
         for _, result in results:
@@ -167,13 +156,19 @@ with st.sidebar.expander("Datasets", expanded=True):
     if registry.empty:
         st.warning("No datasets registered yet.")
         selected_tables: list[str] = []
+        # keep mapping of table -> storage path for display; queries use DuckDB
+        table_to_storage_path: dict[str, str] = {}
     else:
         instrument_rows = []
+        table_to_storage_path = {}
         for _, row in registry.iterrows():
             storage_path = str(row.get("storage_path", ""))
+            table_name = str(row.get("table_name") or "")
+            if table_name:
+                table_to_storage_path[table_name] = storage_path
             instrument_rows.append(
                 {
-                    "table_name": row.get("table_name"),
+                    "table_name": table_name,
                     "instrument": _get_instrument_label(storage_path),
                     "storage_path": storage_path,
                 }
@@ -201,7 +196,7 @@ if selected_tables:
     combined_frames: list[pd.DataFrame] = []
     for table_name in selected_tables:
         try:
-            frame = _query_table_cached(backend.db_path, table_name, int(limit))
+            frame = _query_table_cached(db_path, table_name, int(limit))
         except Exception as exc:  # noqa: BLE001
             st.error(f"Failed to query {table_name}: {exc}")
             continue
@@ -237,10 +232,9 @@ if selected_tables:
                 data = data[data[filter_col].astype(str).isin(selected_values)]
 
     with st.expander("Plot", expanded=True):
+        numeric_cols = data.select_dtypes(include="number").columns.tolist() if not data.empty else []
         if data.empty:
             st.info("No rows available for plotting.")
-        else:
-            numeric_cols = data.select_dtypes(include="number").columns.tolist()
         if len(numeric_cols) < 2:
             st.info("Need at least two numeric columns for a quick plot.")
         else:

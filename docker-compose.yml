@@ -31,6 +31,7 @@ services:
       - "C:/Users/BertossL/OneDrive - Université de Fribourg/Documents:/data"
     environment:
       MFETHULS_MODE: service
+      MFETHULS_API_KEY: ${MFETHULS_API_KEY}
       PATH_TO_DATA: /data
       PATH_TO_REGISTRY: /data/experiments_template.csv
       PATH_TO_LOCAL_STORAGE: /data/mfethuls_storage
@@ -86,6 +87,7 @@ services:
         - METABASE_DUCKDB_DRIVER_VERSION=1.4.3.1
     container_name: metabase
     hostname: metabase
+    user: "0"
     volumes:
       # Mount your local shared data folder into the container's data directory
       - ./:/home/metabase/data
@@ -93,9 +95,51 @@ services:
     # Optional environment variables if you want to override default settings
     environment:
       - MB_PLUGINS_DIR=/home/metabase/plugins/
+      - MB_RESULT_ROW_MAXIMUM=1000000
     ports:
       - "3000:3000"
     restart: unless-stopped
 
+  quack:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MFETHULS_EXTRAS: service
+    container_name: mfethuls-quack
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - "C:/Users/BertossL/OneDrive - Université de Fribourg/Documents:/data"
+    environment:
+      MFETHULS_MODE: service
+      MFETHULS_DUCKDB_PATH: /app/mfethuls.duckdb
+      PATH_TO_DATA: /data
+      PATH_TO_REGISTRY: /data/experiments_template.csv
+      MFETHULS_POSTGRES_ENABLED: ${MFETHULS_POSTGRES_ENABLED}
+      MFETHULS_POSTGRES_USER: ${MFETHULS_POSTGRES_USER}
+      MFETHULS_POSTGRES_PASSWORD: ${MFETHULS_POSTGRES_PASSWORD}
+      MFETHULS_POSTGRES_DB: ${MFETHULS_POSTGRES_DB}
+      MFETHULS_POSTGRES_HOST: ${MFETHULS_POSTGRES_HOST_SERVICE}
+      MFETHULS_POSTGRES_PORT: ${MFETHULS_POSTGRES_PORT}
+    entrypoint: ["python", "-m", "mfethuls.quack_server"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+  caddy:
+    image: caddy:2
+    container_name: mfethuls-caddy
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+    ports:
+      - "8081:8081"
+    depends_on:
+      quack:
+        condition: service_started
+
 volumes:
   mfethuls_pg_data:
+  mfethuls_duckdb:

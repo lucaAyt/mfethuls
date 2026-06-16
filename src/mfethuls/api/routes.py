@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from ..config.mode import is_service_mode
 from ..registry_validator import validate_registry_dataframe
 from ..experiments import resolve_registry_path, read_tabular_content
-from ..storage.job_store import create_job, get_job as get_job_record
+from ..storage.job_store import create_job, get_job as get_job_record, list_jobs as list_job_records
 from .schemas import QueryRequest
 from .utils import duckdb_session, get_api_storage_root, read_tabular_content_bytes
 
@@ -101,6 +101,15 @@ async def ingest(
     return JSONResponse(content=payload, status_code=202, headers={"Location": f"/jobs/{job_id}"})
 
 
+@router.get("/jobs")
+async def list_jobs(
+    status: Optional[str] = None,
+    limit: int = Query(default=20, ge=1, le=100),
+) -> List[Dict[str, Any]]:
+    _ensure_service_mode()
+    return list_job_records(status=status, limit=limit)
+
+
 @router.get("/jobs/{job_id}")
 async def get_job(job_id: str) -> Dict[str, Any]:
     _ensure_service_mode()
@@ -125,6 +134,20 @@ async def list_datasets() -> List[Dict[str, Any]]:
             }
             for row in backend.list_registered()
         ]
+
+@router.delete("/dataset/{table_name}")
+async def delete_dataset(table_name: str) -> Dict[str, Any]:
+    _ensure_service_mode()
+    safe_table = table_name.replace('"', '""')
+
+    with duckdb_session(read_only=False) as backend:
+        registered = {row["table_name"] for row in backend.list_registered()}
+        if safe_table not in registered:
+            raise HTTPException(status_code=404, detail=f"Dataset '{safe_table}' not found")
+        backend.remove_dataset(safe_table)
+
+    return {"deleted": safe_table}
+
 
 @router.get("/dataset/{table_name}")
 async def get_dataset_data(table_name: str, 
@@ -167,47 +190,41 @@ async def get_dataset_data(table_name: str,
 # We dont want to allow arbitrary SQL in the API for security reasons, 
 # but we can allow users to define parameterised queries in a config and then call them with parameters via the API. 
 # This is just for testing currently.
-@router.post("/queries")
-async def post_query(payload: QueryRequest) -> Dict[str, Any]:
-    _ensure_service_mode()
+# @router.post("/queries")
+# async def post_query(payload: QueryRequest) -> Dict[str, Any]:
+#     _ensure_service_mode()
 
-    with duckdb_session(read_only=True) as backend:
-        if payload.dataset_ids:
-            registered = {row["table_name"] for row in backend.list_registered()}
-            missing = [
-                dataset_id for dataset_id in payload.dataset_ids if dataset_id not in registered
-            ]
-            if missing:
-                raise HTTPException(status_code=404, detail={"missing_dataset_ids": missing})
+#     with duckdb_session(read_only=True) as backend:
+#         if payload.dataset_ids:
+#             registered = {row["table_name"] for row in backend.list_registered()}
+#             missing = [
+#                 dataset_id for dataset_id in payload.dataset_ids if dataset_id not in registered
+#             ]
+#             if missing:
+#                 raise HTTPException(status_code=404, detail={"missing_dataset_ids": missing})
 
-        query_id = uuid.uuid4().hex
-        started = pd.Timestamp.utcnow()
-        base_sql = payload.sql.strip().rstrip(";")
-        paginated_sql = (
-            f"SELECT * FROM ({base_sql}) AS q LIMIT {payload.limit} OFFSET {payload.offset}"
-        )
-        try:
-            frame = backend.query(paginated_sql)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Query failed: {exc}") from exc
+#         query_id = uuid.uuid4().hex
+#         started = pd.Timestamp.utcnow()
+#         base_sql = payload.sql.strip().rstrip(";")
+#         paginated_sql = (
+#             f"SELECT * FROM ({base_sql}) AS q LIMIT {payload.limit} OFFSET {payload.offset}"
+#         )
+#         try:
+#             frame = backend.query(paginated_sql)
+#         except Exception as exc:
+#             raise HTTPException(status_code=400, detail=f"Query failed: {exc}") from exc
 
-    execution_ms = int((pd.Timestamp.utcnow() - started).total_seconds() * 1000)
+#     execution_ms = int((pd.Timestamp.utcnow() - started).total_seconds() * 1000)
 
-    return {
-        "query_id": query_id,
-        "status": "completed",
-        "columns": [{"name": name, "type": str(dtype)} for name, dtype in frame.dtypes.items()],
-        "rows": frame.values.tolist(),
-        "pagination": {
-            "limit": payload.limit,
-            "offset": payload.offset,
-            "returned_rows": len(frame.index),
-        },
-        "execution_ms": execution_ms,
-    }
-
-
-@router.get("/health")
-async def health() -> Dict[str, str]:
-    _ensure_service_mode()
-    return {"status": "ok"}
+#     return {
+#         "query_id": query_id,
+#         "status": "completed",
+#         "columns": [{"name": name, "type": str(dtype)} for name, dtype in frame.dtypes.items()],
+#         "rows": frame.values.tolist(),
+#         "pagination": {
+#             "limit": payload.limit,
+#             "offset": payload.offset,
+#             "returned_rows": len(frame.index),
+#         },
+#         "execution_ms": execution_ms,
+#     }

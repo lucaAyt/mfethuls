@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Iterator
 
 import pandas as pd
 
 from .config import _get_duckdb_path, _get_duckdb_s3_config, _get_duckdb_s3_endpoint_host
+from contextlib import contextmanager
 
 try:
     import duckdb  # type: ignore
@@ -36,11 +37,25 @@ class DuckDBQueryBackend:
         self._conn = _get_duckdb().connect(self.db_path, read_only=read_only)
         self._s3_configured = False
         self._ensure_registry()
-        self._rehydrate_views()
+        # Avoid rehydrating views in read-only mode because the registry
+        # table may not exist and rehydration attempts will fail.
+        if not self.read_only:
+            self._rehydrate_views()
 
     @staticmethod
     def _is_s3_uri(storage_path: str) -> bool:
         return storage_path.strip().lower().startswith("s3://")
+
+    @staticmethod
+    def _is_materializable_storage_path(storage_path: str) -> bool:
+        if DuckDBQueryBackend._is_s3_uri(storage_path):
+            return True
+        normalized = os.path.abspath(storage_path)
+        return os.path.exists(normalized)
+
+    @staticmethod
+    def _sql_string(value: str) -> str:
+        return value.replace("'", "''")
 
     def _ensure_s3_configured(self) -> None:
         if self._s3_configured:
@@ -68,10 +83,10 @@ class DuckDBQueryBackend:
             CREATE OR REPLACE SECRET do_spaces_secret (
                 TYPE S3,
                 PROVIDER CONFIG,
-                KEY_ID '{config.get('access_key_id')}',
-                SECRET '{config.get('secret_access_key')}',
-                REGION '{config.get('region')}',
-                ENDPOINT '{endpoint_host}',
+                KEY_ID '{self._sql_string(config.get('access_key_id', ''))}',
+                SECRET '{self._sql_string(config.get('secret_access_key', ''))}',
+                REGION '{self._sql_string(config.get('region', ''))}',
+                ENDPOINT '{self._sql_string(endpoint_host)}',
                 URL_STYLE 'vhost',
                 USE_SSL TRUE
             );
@@ -99,12 +114,10 @@ class DuckDBQueryBackend:
             try:
                 if self._is_s3_uri(storage_path):
                     self._ensure_s3_configured()
-                relation = self._conn.from_parquet(storage_path)
-                try:
-                    self._conn.unregister(table_name)
-                except Exception:
-                    pass
-                self._conn.register(table_name, relation)
+                if self._is_materializable_storage_path(storage_path):
+                    self._conn.execute(
+                        f"CREATE OR REPLACE VIEW {table_name} AS SELECT * FROM read_parquet('{self._sql_string(storage_path)}');"
+                    )
             except Exception:
                 continue
 
@@ -113,20 +126,28 @@ class DuckDBQueryBackend:
         safe = re.sub(r"[^A-Za-z0-9_]+", "_", name).strip("_")
         return safe or "dataset"
 
-    def register_parquet(self, storage_path: str, table_name: Optional[str] = None, overwrite: bool = True) -> str:
+    def register_parquet(
+        self,
+        storage_path: str,
+        table_name: Optional[str] = None,
+        overwrite: bool = True,
+        persist_view: bool = True,
+    ) -> str:
         if self.read_only:
             raise RuntimeError("Cannot register parquet on a read-only DuckDB connection")
         inferred = table_name or os.path.splitext(os.path.basename(storage_path))[0]
         view_name = self._sanitize_table_name(inferred)
         if self._is_s3_uri(storage_path):
             self._ensure_s3_configured()
-        relation = self._conn.from_parquet(storage_path)
         if overwrite:
             try:
                 self._conn.unregister(view_name)
             except Exception:
                 pass
-        self._conn.register(view_name, relation)
+        if persist_view and self._is_materializable_storage_path(storage_path):
+            self._conn.execute(
+                f"CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM read_parquet('{self._sql_string(storage_path)}');"
+            )
         self._conn.execute(
             """
             INSERT INTO dataset_registry (table_name, storage_path)
@@ -152,6 +173,19 @@ class DuckDBQueryBackend:
             for row in rows
         ]
 
+    def remove_dataset(self, table_name: str) -> None:
+        if self.read_only:
+            raise RuntimeError("Cannot remove dataset on a read-only DuckDB connection")
+        safe = self._sql_string(table_name)
+        try:
+            self._conn.execute(f'DROP VIEW IF EXISTS "{safe}"')
+        except Exception:
+            pass
+        self._conn.execute(
+            "DELETE FROM dataset_registry WHERE table_name = ?",
+            [table_name],
+        )
+
     def query(self, sql: str, params: Optional[List[Any]] = None) -> pd.DataFrame:
         if params is None:
             params = []
@@ -167,3 +201,17 @@ class DuckDBQueryBackend:
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
+
+
+@contextmanager
+def duckdb_session(*, db_path: Optional[str] = None, read_only: bool = True) -> Iterator["DuckDBQueryBackend"]:
+    """Open a short-lived DuckDBQueryBackend and close it on exit.
+
+    Mirrors the pattern used by the API layer but stays inside the storage package
+    to avoid cross-package imports.
+    """
+    backend = DuckDBQueryBackend(db_path=db_path, read_only=read_only)
+    try:
+        yield backend
+    finally:
+        backend.close()
