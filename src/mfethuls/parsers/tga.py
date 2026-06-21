@@ -45,6 +45,7 @@ class TGAXParser:
             parse_raw=self.parse_raw_data,
             logger=logger,
             parser_label="TGA",
+            should_parse_raw=lambda path: str(path).casefold().endswith(self.file_extension.casefold()) or str(path).casefold().endswith('.csv'),
         )
 
         if experiment_id is None:
@@ -81,38 +82,57 @@ class TGAXParser:
 
     # TODO: Fix parser header, units are mismatched (Follow up with schema change).
     def parse_raw_data(self, path):
-        lines = []
-        cols = []
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            take = 0
-            for line in f.readlines():
-
-                if take == 1:
-                    curate_line = re.split('\s+', line.strip(), maxsplit=5)
-                    lines.append(curate_line)
-
-                if 'Index' in line:
-                    cols = re.split('\s+', line.strip(), maxsplit=5)
-                    take = 1
-
-                elif 'Results' in line:
-                    take = 0
-
-        if not cols or not lines:
-            return pd.DataFrame()
-
-        # Make up columns by combining 1st and 2nd lines
-        cols_row_2 = lines[0]
-        cols = [' '.join([col1.strip(), col2.strip()]).strip() for col1, col2 in zip(cols, cols_row_2)]
-
-        if len(lines) <= 1:
-            return pd.DataFrame(columns=cols)
-
-        df = pd.DataFrame(lines[1:], columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
-        df["name"] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
         
-        # Calculate mass percentage as not in original data
-        df["mass_pct"] = (df["Weight [mg]"] - df["Weight [mg]"].min()) \
-                        / (df["Weight [mg]"].max() - df["Weight [mg]"].min()) * 100
+        if not str(path).casefold().endswith('.csv'):
+
+            lines = []
+            cols = []
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                take = 0
+                for line in f.readlines():
+
+                    if take == 1:
+                        curate_line = re.split('\s+', line.strip(), maxsplit=5)
+                        lines.append(curate_line)
+
+                    if 'Index' in line:
+                        cols = re.split('\s+', line.strip(), maxsplit=5)
+                        take = 1
+
+                    elif 'Results' in line:
+                        take = 0
+
+            if not cols or not lines:
+                return pd.DataFrame()
+
+            # Make up columns by combining 1st and 2nd lines
+            cols_row_2 = lines[0]
+            cols = [' '.join([col1.strip(), col2.strip()]).strip() for col1, col2 in zip(cols, cols_row_2)]
+
+            if len(lines) <= 1:
+                return pd.DataFrame(columns=cols)
+
+            df = pd.DataFrame(lines[1:], columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
+            df["name"] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
+            
+            # Calculate mass percentage as not in original data
+            _calculate_mass_percentage(df, weight_column="Weight [mg]")
+        
+        else:
+            
+            filename = f'{os.path.basename(os.path.normpath(path)).rstrip(".csv")}'
+            df = pd.read_csv(path).assign(name=filename)
+            _calculate_mass_percentage(df)
+            logger.warning(f"Parsed CSV file:\n{df}")
 
         return df
+
+# TODO: Fix mass percentage calculation, currently assumes weight column is present and valid. 
+# Do after mapping schema is finalized.
+def _calculate_mass_percentage(df, weight_column="mass_mg"):
+    """Calculate mass percentage from weight data."""
+    if weight_column in df.columns:
+        min_weight = df[weight_column].min()
+        max_weight = df[weight_column].max()
+        if max_weight != min_weight:
+            df["mass_pct"] = (df[weight_column] - min_weight) / (max_weight - min_weight) * 100

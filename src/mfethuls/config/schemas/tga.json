@@ -22,7 +22,8 @@
           "Tr [\u00b0C]",
           "Tr [C]",
           "Temperature",
-          "Tr [mg]"
+          "Tr [mg]",
+          "Program Temperature"
         ],
         "mass_pct": [
           "Mass [%]",
@@ -36,7 +37,9 @@
         ],
         "mass_mg": [
           "Mass [mg]",
-          "Weight [mg]"
+          "Weight [mg]",
+          "Weight [mg]",
+          "Unsubtracted Weight"
         ],
         "mass_loss_pct": [
           "Mass Loss [%]",

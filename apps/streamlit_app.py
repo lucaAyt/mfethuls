@@ -66,19 +66,21 @@ def _load_experiment_registry_cached(path: str) -> pd.DataFrame:
     return load_experiment_registry(path)
 
 
-def _get_instrument_label(storage_path: str) -> str:
+def _read_metadata(storage_path: str) -> dict:
     meta_path = os.path.splitext(storage_path)[0] + ".metadata.json"
     if not os.path.exists(meta_path):
-        return "(unknown)"
+        return {}
     try:
         with open(meta_path, encoding="utf8") as handle:
-            metadata = json.load(handle)
+            return json.load(handle)
     except Exception:
-        return "(unknown)"
-    value = metadata.get("instrument_name")
-    if value is not None and str(value).strip():
-        return str(value)
-    return "(unknown)"
+        return {}
+
+
+def _storage_label(storage_path: str) -> str:
+    if storage_path.startswith(("s3://", "az://", "https://")):
+        return "☁️ cloud"
+    return "📁 local"
 
 
 db_path = _get_duckdb_path()
@@ -166,27 +168,29 @@ with st.sidebar.expander("Datasets", expanded=True):
             table_name = str(row.get("table_name") or "")
             if table_name:
                 table_to_storage_path[table_name] = storage_path
+            meta = _read_metadata(storage_path)
             instrument_rows.append(
                 {
-                    "table_name": table_name,
-                    "instrument": _get_instrument_label(storage_path),
+                    "id": table_name,
+                    "name": meta.get("name") or meta.get("experiment_name") or "",
+                    "instrument": meta.get("instrument_name") or "",
+                    "storage": _storage_label(storage_path),
                     "storage_path": storage_path,
                 }
             )
         st.caption("Registered views and instruments")
         df_rows = pd.DataFrame(instrument_rows)
-        cols = [c for c in ["table_name", "instrument", "storage_path"] if c in df_rows.columns]
-        # Reverse ordering so newest entries appear first
         try:
             df_rows = df_rows.iloc[::-1].reset_index(drop=True)
         except Exception:
             pass
-        # Show compact dataframe and provide a multiselect to choose views
-        st.dataframe(df_rows[cols], use_container_width=True)
+        show_paths = st.toggle("Show full paths", value=False)
+        display_cols = ["id", "name", "instrument", "storage_path" if show_paths else "storage"]
+        st.dataframe(df_rows[display_cols], use_container_width=True)
 
         selected_tables = st.multiselect(
             "Select registered views",
-            options=df_rows["table_name"].tolist(),
+            options=df_rows["id"].tolist(),
         )
 
 with st.sidebar.expander("Query", expanded=False):
@@ -246,6 +250,11 @@ if selected_tables:
             color_col = None if hue_choice == "(none)" else hue_choice
             use_log_x = st.checkbox("Log X", value=False)
             use_log_y = st.checkbox("Log Y", value=False)
+            selected_instruments = {
+                (_read_metadata(table_to_storage_path.get(t, "")).get("instrument_name") or "").lower()
+                for t in selected_tables
+            }
+            invert_x = any(i in {"nmr", "ftir"} for i in selected_instruments)
             discrete_palettes = {
                 "Plotly": px.colors.qualitative.Plotly,
                 "D3": px.colors.qualitative.D3,
@@ -380,7 +389,7 @@ if selected_tables:
                     save_plot_export_slot = st.container()
 
                 fig.update_yaxes(type="log" if use_log_y else "linear")
-                fig.update_xaxes(type="log" if use_log_x else "linear")
+                fig.update_xaxes(type="log" if use_log_x else "linear", autorange="reversed" if invert_x else True)
                 if use_custom_x_range and x_bounds and x_min is not None and x_max is not None:
                     fig.update_xaxes(range=[x_min, x_max])
                 if use_custom_y_range and y_bounds and y_min is not None and y_max is not None:

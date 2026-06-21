@@ -191,6 +191,7 @@ Note: `DELETE` removes the dataset from the DuckDB catalog and query layer. Parq
 
 | Document | Contents |
 |----------|----------|
+| [docs/deployment.md](docs/deployment.md) | DigitalOcean + Tailscale cloud deployment guide |
 | [docs/tutorial.md](docs/tutorial.md) | Step-by-step tutorials for local mode and service mode |
 | [docs/registry_reference.md](docs/registry_reference.md) | Registry spreadsheet format, column reference, example CSV, measurement profiles |
 | [docs/architecture.md](docs/architecture.md) | System context, deployment modes, data-flow diagrams |

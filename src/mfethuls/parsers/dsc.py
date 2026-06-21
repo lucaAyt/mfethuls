@@ -337,3 +337,121 @@ class DSCMettlerToledoParser:
         # naming conventions are set.
 
         return df
+    
+@register_parser('dsc', 'default')
+class DSCDefault:
+    def __init__(self, file_extension='.txt', parse_char_start='\tTime', parse_char_end='Shiiit', delimiter='\t'):
+        self.file_extension = file_extension
+        self.parse_char_start = parse_char_start
+        self.parse_char_end = parse_char_end
+        self.delimiter = delimiter
+
+    def parse(
+        self,
+        dict_paths,
+        *,
+        experiment_id: Optional[str] = None,
+        sample_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        instrument_type: Optional[str] = None,
+        instrument_model: Optional[str] = None,
+        instrument_name: Optional[str] = None,
+        experiment_name: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """Parse raw Perkin Elmer DSC data.
+
+        Returns a Dataset when experiment context is provided, otherwise a
+        plain DataFrame for backward compatibility.
+        """
+
+        df = collect_dataframe_from_paths(
+            dict_paths,
+            file_extension=self.file_extension,
+            parse_raw=self.parse_raw_data,
+            logger=logger,
+            parser_label="DSC(perkin_elmer)",
+            should_parse_raw=lambda path: str(path).casefold().endswith(self.file_extension.casefold()) or str(path).casefold().endswith('.csv'),
+        )
+
+        if experiment_id is None:
+            return df
+
+        df, schema_report = apply_dataframe_schema(
+            df,
+            instrument_type="dsc",
+            instrument_model=instrument_model or "perkin_elmer",
+        )
+
+        if "experiment_id" not in df.columns:
+            df["experiment_id"] = experiment_id
+        if sample_id is not None and "sample_id" not in df.columns:
+            df["sample_id"] = sample_id
+        if run_id is not None and "run_id" not in df.columns:
+            df["run_id"] = run_id
+
+        meta: Dict[str, Any] = {
+            "schema_version": schema_report.get("schema_version", "1.0"),
+            "experiment_id": experiment_id,
+            "sample_id": sample_id,
+            "run_id": run_id,
+            "instrument_type": instrument_type,
+            "instrument_model": instrument_model,
+            "instrument_name": instrument_name,
+            "experiment_name": experiment_name,
+            "schema_normalization": schema_report,
+        }
+        if metadata:
+            meta.update(metadata)
+
+        return Dataset(data=df, metadata=meta)
+
+    def parse_raw_data(self, path):
+
+        if not str(path).casefold().endswith('.csv'):
+
+            pattern_start = re.compile(self.parse_char_start)
+            pattern_end = re.compile(self.parse_char_end)
+
+            lines = []
+            cols = []
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                take = False
+                for line in f.readlines():
+
+                    if take:
+                        l = re.split(self.delimiter, line.strip())
+                        lines.append(l)
+
+                    if pattern_start.match(line):
+                        cols = re.split(self.delimiter, line.strip())
+                        take = True
+
+                    elif pattern_end.match(line):
+                        take = False
+
+            if not cols or not lines:
+                return pd.DataFrame()
+
+            # Make up columns by combining 1st and 2nd lines
+            cols_row_2 = [''] + lines[0]
+            cols = [' '.join([col1.strip(), col2.strip()]).strip() for col1, col2 in zip(cols, cols_row_2)]
+
+            if len(lines) <= 1:
+                return pd.DataFrame(columns=cols)
+
+            df = pd.DataFrame(lines[1:], columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
+            df.loc[:, 'name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
+
+            # TODO: map instrument-specific column names to a standard DSC
+            # schema (e.g. temperature_C, heat_flow_mW) once conventions are
+            # defined for this setup.
+
+        else:
+
+            filename = f'{os.path.basename(os.path.normpath(path)).rstrip(".csv")}'
+            df = pd.read_csv(path).assign(name=filename)
+            print("YESSSSSS")
+            print(df)
+
+        return df

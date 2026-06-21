@@ -17,6 +17,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   api:
     build:
@@ -28,14 +29,14 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-      - "C:/Users/BertossL/OneDrive - Université de Fribourg/Documents:/data"
+      - ${DATA_ROOT}:/data
     environment:
       MFETHULS_MODE: service
       MFETHULS_API_KEY: ${MFETHULS_API_KEY}
       PATH_TO_DATA: /data
-      PATH_TO_REGISTRY: /data/experiments_template.csv
+      PATH_TO_REGISTRY: ${PATH_TO_REGISTRY:-/data/experiments_template.csv}
       PATH_TO_LOCAL_STORAGE: /data/mfethuls_storage
-      MFETHULS_DUCKDB_PATH: /app/mfethuls.duckdb
+      MFETHULS_DUCKDB_PATH: /data/mfethuls.duckdb
       MFETHULS_POSTGRES_ENABLED: ${MFETHULS_POSTGRES_ENABLED}
       MFETHULS_POSTGRES_USER: ${MFETHULS_POSTGRES_USER}
       MFETHULS_POSTGRES_PASSWORD: ${MFETHULS_POSTGRES_PASSWORD}
@@ -48,6 +49,7 @@ services:
         condition: service_healthy
     ports:
       - "8000:8000"
+    restart: unless-stopped
 
   worker:
     build:
@@ -59,13 +61,13 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-      - "C:/Users/BertossL/OneDrive - Université de Fribourg/Documents:/data"
+      - ${DATA_ROOT}:/data
     environment:
       MFETHULS_MODE: service
       PATH_TO_DATA: /data
-      PATH_TO_REGISTRY: /data/experiments_template.csv
+      PATH_TO_REGISTRY: ${PATH_TO_REGISTRY:-/data/experiments_template.csv}
       PATH_TO_LOCAL_STORAGE: /data/mfethuls_storage
-      MFETHULS_DUCKDB_PATH: /app/mfethuls.duckdb
+      MFETHULS_DUCKDB_PATH: /data/mfethuls.duckdb
       MFETHULS_POSTGRES_ENABLED: ${MFETHULS_POSTGRES_ENABLED}
       MFETHULS_POSTGRES_USER: ${MFETHULS_POSTGRES_USER}
       MFETHULS_POSTGRES_PASSWORD: ${MFETHULS_POSTGRES_PASSWORD}
@@ -77,6 +79,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    restart: unless-stopped
 
   metabase:
     build:
@@ -89,10 +92,8 @@ services:
     hostname: metabase
     user: "0"
     volumes:
-      # Mount your local shared data folder into the container's data directory
       - ./:/home/metabase/data
-      - "C:/Users/BertossL/OneDrive - Université de Fribourg/Documents:/data"
-    # Optional environment variables if you want to override default settings
+      - ${DATA_ROOT}:/data
     environment:
       - MB_PLUGINS_DIR=/home/metabase/plugins/
       - MB_RESULT_ROW_MAXIMUM=1000000
@@ -110,12 +111,12 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-      - "C:/Users/BertossL/OneDrive - Université de Fribourg/Documents:/data"
+      - ${DATA_ROOT}:/data
     environment:
       MFETHULS_MODE: service
-      MFETHULS_DUCKDB_PATH: /app/mfethuls.duckdb
+      MFETHULS_DUCKDB_PATH: /data/mfethuls.duckdb
       PATH_TO_DATA: /data
-      PATH_TO_REGISTRY: /data/experiments_template.csv
+      PATH_TO_REGISTRY: ${PATH_TO_REGISTRY:-/data/experiments_template.csv}
       MFETHULS_POSTGRES_ENABLED: ${MFETHULS_POSTGRES_ENABLED}
       MFETHULS_POSTGRES_USER: ${MFETHULS_POSTGRES_USER}
       MFETHULS_POSTGRES_PASSWORD: ${MFETHULS_POSTGRES_PASSWORD}
@@ -128,6 +129,7 @@ services:
         condition: service_healthy
     ports:
       - "8080:8080"
+    restart: unless-stopped
 
   caddy:
     image: caddy:2
@@ -139,7 +141,7 @@ services:
     depends_on:
       quack:
         condition: service_started
+    restart: unless-stopped
 
 volumes:
   mfethuls_pg_data:
-  mfethuls_duckdb:

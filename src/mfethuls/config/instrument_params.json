@@ -29,6 +29,16 @@
       "sensitivity": 0.1
     }
   },
+    {
+    "type": "dsc",
+    "model": "default",
+    "name": "dsc_default",
+    "folder_name": "DSC",
+    "characterizer": {
+      "type": "dsc_profiling",
+      "sensitivity": 0.01
+    }
+  },
   {
     "type": "uv_vis",
     "model": "flame",

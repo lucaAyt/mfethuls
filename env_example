@@ -10,6 +10,21 @@
 # Set to "service" when running the API or worker
 MFETHULS_MODE=local
 
+##========== DOCKER COMPOSE DATA ROOT ==========
+# Root folder mounted as /data inside every container.
+# Local dev (Windows):  DATA_ROOT=C:/Users/you/OneDrive/Documents
+# Cloud (Linux):        DATA_ROOT=/mnt/mfethuls-data
+DATA_ROOT=/home/user/Documents
+
+# Registry file path inside the container (default: DATA_ROOT/experiments_template.csv)
+# Override if your registry lives elsewhere under DATA_ROOT.
+# PATH_TO_REGISTRY=/data/experiments_template.csv
+
+##========== API SECURITY ==========
+# Required in service mode. Generate with:
+#   python -c "import secrets; print(secrets.token_urlsafe(32))"
+MFETHULS_API_KEY=
+
 ##========== LOCAL MODE CONFIG (notebooks, streamlit) ==========
 # These settings apply when MFETHULS_MODE=local
 # Local mode uses only local storage and DuckDB, no Postgres/cloud

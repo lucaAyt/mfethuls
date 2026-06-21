@@ -71,6 +71,27 @@
           "t [s]"
         ]
       }
+    },
+    "default": {
+      "aliases": {
+        "temperature_C": [
+          "Program Temperature",
+          "Sample Temperature [C]",
+          "Sample Temperature [\u00b0C]",
+          "Temperature [C]",
+          "Temperature [\u00b0C]"
+        ],
+        "heat_flow_mW": [
+          "Value [mW]",
+          "Unsubtracted Heat Flow",
+          "Heat Flow [mW]",
+          "HeatFlow [mW]"
+        ],
+        "time_s": [
+          "Time [s]",
+          "Time"
+        ]
+      }
     }
   }
 }
