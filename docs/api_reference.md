@@ -57,9 +57,9 @@ Parse and validate a registry spreadsheet. Returns per-row results without start
       "row_number": 1,
       "values": {
         "name": "CL_dsc_001",
-        "experiment_id": "EXP001-240101",
         "instrument_name": "dsc_mettler_toledo",
-        "sample_id": "S001-240101"
+        "sample_id": "S001",
+        "run_id": "R001"
       },
       "valid": true,
       "errors": [],
@@ -69,14 +69,13 @@ Parse and validate a registry spreadsheet. Returns per-row results without start
       "row_number": 2,
       "values": {
         "name": "CL_tga_002",
-        "experiment_id": "BAD_ID",
-        "instrument_name": "tga"
+        "instrument_name": "tga_unknown"
       },
       "valid": false,
       "errors": [
         {
-          "field": "experiment_id",
-          "message": "Invalid experiment_id 'BAD_ID'. Expected format EXP###-###### (e.g. EXP001-240101)."
+          "field": "instrument_name",
+          "message": "Unknown instrument_name 'tga_unknown'. See instrument_params.json for valid names."
         }
       ],
       "warnings": []
@@ -87,15 +86,15 @@ Parse and validate a registry spreadsheet. Returns per-row results without start
 ```
 
 **What counts as invalid:**
-- Missing required fields (`name`, `experiment_id`, `instrument_name`)
-- `experiment_id` not matching `EXP###-######`
+- Missing required field `name` or `instrument_name`
+- Duplicate `name` values in the registry
 - `instrument_name` not in `instrument_params.json`
 - Registered parser not found for instrument
 - Profile rules violated (e.g. rheometer oscillatory sweep missing `measurement_profile`)
 
 **What counts as a warning:**
 - `instrument_name` absent (experiment is visible but cannot be analysed)
-- `PATH_TO_DATA` folder for the experiment is missing (data path check)
+- Raw data file not found under `PATH_TO_DATA` (data path check)
 
 ---
 
@@ -158,7 +157,12 @@ List ingest jobs, newest first.
     "storage_mode": "local",
     "cloud_provider": null,
     "datasets": [
-      {"experiment_id": "EXP001-240101", "status": "persisted", "storage_path": "...", "dataset_id": "EXP001_240101_S001_R001"}
+      {
+        "name": "CL_dsc_001",
+        "status": "persisted",
+        "storage_path": "...",
+        "table_name": "CL_dsc_001_S001_R001"
+      }
     ],
     "created_at": "2026-06-14T10:30:00",
     "updated_at": "2026-06-14T10:32:45"
@@ -210,15 +214,17 @@ List all datasets registered in the DuckDB catalog.
 ```json
 [
   {
-    "dataset_id": "EXP001_240101_S001_R001",
-    "name": "EXP001_240101_S001_R001",
+    "table_name": "CL_dsc_001_S001_R001",
+    "name": "CL_dsc_001",
     "storage_mode": "local",
     "queryable": true,
-    "storage_path": "/data/mfethuls_storage/dsc_mettler_toledo/EXP001-240101/EXP001_240101_S001_R001.parquet",
+    "storage_path": "/data/mfethuls_storage/dsc_mettler_toledo/<internal_id>/CL_dsc_001_S001_R001.parquet",
     "registered_at": "2026-06-14T10:32:45"
   }
 ]
 ```
+
+`table_name` is the DuckDB view name (based on `name + sample_id + run_id`) and is used in `GET /dataset/{table_name}` and `DELETE /dataset/{table_name}`.
 
 ---
 
@@ -226,7 +232,7 @@ List all datasets registered in the DuckDB catalog.
 
 Fetch rows from a registered dataset with pagination.
 
-**Path parameter:** `table_name` — the `dataset_id` / `name` from `GET /datasets`.
+**Path parameter:** `table_name` — the value from `GET /datasets` (e.g. `CL_dsc_001_S001_R001`).
 
 **Query parameters:**
 
@@ -269,7 +275,7 @@ Remove a dataset from the DuckDB catalog and drop its view.
 
 **Response 200:**
 ```json
-{"deleted": "EXP001_240101_S001_R001"}
+{"deleted": "CL_dsc_001_S001_R001"}
 ```
 
 **Response 404:** dataset not found in catalog.

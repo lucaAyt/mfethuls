@@ -185,30 +185,36 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 flowchart TD
   A[Experiment from registry] --> B[RegistryValidator]
   B -->|structural error| X[skip — logged as warning]
-  B -->|ok| C[Resolve paths under PATH_TO_DATA]
-  C --> D[Select parser by instrument + model]
-  D --> E[collect_dataframe_from_paths\nper-file error isolation]
-  E --> F[apply_dataframe_schema\nalias mapping + dtype coercion]
-  F --> G[Dataset: data + metadata]
-  G --> H{Characterizer?}
-  H -->|DSC| I[Optional peak profiling]
-  H -->|other| J[Skip]
-  I --> K[StorageManager]
-  J --> K
-  K --> L[Local / S3 / Azure Parquet]
-  K --> M[.metadata.json sidecar]
-  K --> N[Postgres datasets row\noptional]
+  B -->|ok| C[Assign experiment_id via manifest\nauto-generate hex UUID on first ingest]
+  C --> D[Find raw file via os.walk\nmatches raw_data_filename stem]
+  D --> E[Select parser by instrument + model]
+  E --> F[collect_dataframe_from_paths\nper-file error isolation]
+  F --> G[apply_dataframe_schema\nalias mapping + dtype coercion]
+  G --> H[Dataset: data + metadata]
+  H --> I{Characterizer?}
+  I -->|DSC| J[Optional peak profiling]
+  I -->|TGA| JT[Compute mass_pct from mass_mg]
+  I -->|other| K[Skip]
+  J --> L[StorageManager]
+  JT --> L
+  K --> L
+  L --> M[Local / S3 / Azure Parquet]
+  L --> N[.metadata.json sidecar]
+  L --> O[Postgres datasets row\noptional]
 ```
 
 | Step | Module |
 |------|--------|
 | Registry load | `experiments.py` — `load_experiment_registry`, `experiment_from_registry_record` |
 | Validation | `registry_validator.py` — `validate_registry_dataframe`, `RegistryValidator` |
+| ID assignment | `manifest.py` — `FileManifestBackend` / `PostgresManifestBackend` |
+| Path resolution | `manifest.py` — `find_data_files()` walks instrument folder by `raw_data_filename` stem |
 | Orchestration | `config/loader.py` — `ingest_experiment_dataset` |
 | Parse | `factory.py`, `parsers/` |
 | Normalize | `schema_normalization.py`, `config/schemas/*.json` |
+| Characterize | `characterizers/dsc.py` (peak profiling), `characterizers/tga.py` (mass_pct) |
 | Persist | `storage/manager.py`, `storage/backends.py`, `storage/metadata.py` |
-| Query catalog | `storage/duckdb_backend.py` |
+| Query catalog | `storage/duckdb_backend.py` — views named after `experiment.name` |
 
 ---
 
@@ -217,13 +223,13 @@ flowchart TD
 ```mermaid
 flowchart TD
   ROW[Spreadsheet row] --> EFR[experiment_from_registry_record]
-  EFR -->|missing name / bad experiment_id| INV[valid=false, errors]
+  EFR -->|missing name / duplicate name| INV[valid=false, errors]
   EFR -->|Experiment built| VE[RegistryValidator.validate_experiment_details]
   VE -->|instrument not in config| INV2[valid=false, errors]
   VE -->|parser not registered| INV3[valid=false, errors]
   VE -->|profile rule violated| INV4[valid=false, errors]
   VE -->|ok| WARN{Warnings only}
-  WARN --> DATA[PATH_TO_DATA folder missing?]
+  WARN --> DATA[raw data file not found under PATH_TO_DATA?]
   WARN --> INST[instrument_name absent?]
   DATA --> OK[valid=true]
   INST --> OK
@@ -240,14 +246,14 @@ flowchart LR
   subgraph files [Filesystem / object store]
     ROOT[PATH_TO_LOCAL_STORAGE\nor S3/Azure bucket]
     ROOT --> I1[instrument_name/]
-    I1 --> E1[experiment_id/]
-    E1 --> P1["experiment_id_sample_run.parquet"]
-    E1 --> M1["experiment_id_sample_run.metadata.json"]
+    I1 --> E1[internal_hex_id/\nauto-assigned, never user-facing]
+    E1 --> P1["name_sample_run.parquet"]
+    E1 --> M1["name_sample_run.metadata.json"]
   end
 
   subgraph duckdb [DuckDB — MFETHULS_DUCKDB_PATH]
-    REGT[dataset_registry table\ntable_name, storage_path, registered_at]
-    V1[VIEW per dataset\nSELECT * FROM read_parquet path]
+    REGT[dataset_registry table\ntable_name, storage_path, experiment_name, registered_at]
+    V1["VIEW named after experiment\ne.g. CL_dsc_001_S001_R001"]
     REGT --> V1
   end
 
@@ -310,17 +316,22 @@ DuckDB uses an OS-level exclusive file lock for write connections. A read connec
 src/mfethuls/
   experiments.py          # Registry model, load_experiment_registry, clear_experiment_registry
   registry_validator.py   # Pre-parse validation + profile matching
-  factory.py              # Path resolution + parse_experiment
+  manifest.py             # experiment_id assignment + find_data_files (os.walk matcher)
+  factory.py              # parse_experiment + instrument_data_path_constructor
   schema_normalization.py # Column aliasing + dtype coercion
   dataset.py              # Dataset dataclass
   comparison.py           # ComparisonSet for multi-experiment analysis
+  characterizers/
+    dsc.py                # DSC peak profiling
+    tga.py                # TGA mass_pct computation from mass_mg
   config/
     loader.py             # Ingest orchestration — ingest_experiment_dataset
     instrument_params.json
-    schemas/              # Per-instrument JSON schema files (10 instruments)
-  parsers/                # Instrument-specific file readers (13 parser types)
+    schemas/              # Per-instrument JSON schema files
+  parsers/                # Instrument-specific file readers
   storage/
     backends.py           # Local, S3, Azure Parquet backends
+    config.py             # _dataset_basename, _view_basename helpers
     duckdb_backend.py     # DuckDB catalog — register, query, remove datasets
     metadata.py           # PostgresMetadataBackend
     job_store.py          # Postgres job queue (FIFO, FOR UPDATE SKIP LOCKED)

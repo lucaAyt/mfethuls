@@ -12,6 +12,8 @@ Local mode runs entirely on your laptop — no Docker, no Postgres, no server. E
 
 ### 1. Install
 
+**Developer / Python users:**
+
 ```shell
 python -m venv .venv
 source .venv/bin/activate            # Linux/macOS
@@ -23,9 +25,13 @@ pip install git+ssh://git@github.com/lucaAyt/mfethuls.git
 Add optional extras if needed:
 
 ```shell
-pip install "mfethuls[viz]"          # Matplotlib / Plotly for plotting
+pip install "mfethuls[viz]"          # Matplotlib / Plotly / Streamlit
 pip install "mfethuls[notebook]"     # Jupyter support
 ```
+
+**Non-technical users (no Python required):**
+
+See [docs/local_user_setup.md](local_user_setup.md) for the `uv`-based launcher guide. You only need to install `uv` and double-click `launch.bat`.
 
 ### 2. Set environment variables
 
@@ -52,11 +58,13 @@ export $(cat .env | xargs)           # Linux/macOS
 Create `experiments_registry.csv` following the format in [registry_reference.md](registry_reference.md). A minimal starting template:
 
 ```csv
-name,experiment_id,instrument_name,sample_id,run_id,description
-CL_dsc_001,EXP001,dsc_mettler_toledo,S001,R001,
-CL_tga_001,EXP002,tga,S001,R001,
-CL_rheometer_freq,EXP003,rheometer,S002,R001,oscillatory frequency sweep
+name,instrument_name,sample_id,run_id,description
+CL_dsc_001,dsc_mettler_toledo,S001,R001,
+CL_tga_001,tga,S001,R001,
+CL_rheometer_freq,rheometer,S002,R001,oscillatory frequency sweep
 ```
+
+The `name` column is the only user-facing identifier — it must be unique. mfethuls assigns an internal ID automatically at ingest time. See [registry_reference.md](registry_reference.md) for the full column reference including `raw_data_filename`.
 
 ### 4. Validate the registry (optional but recommended)
 
@@ -116,17 +124,19 @@ After ingest the data is stored as Parquet. Load it directly into a DataFrame:
 ```python
 import pandas as pd
 
-df = pd.read_parquet("/path/to/parquet/output/DSC/EXP001/EXP001_S001_R001.parquet")
+# Path uses the internal experiment_id (auto-assigned hex, internal only)
+df = pd.read_parquet(result["storage_path"])
 print(df.head())
 print(df.dtypes)
 ```
 
-Or use the mfethuls storage backend to query by name:
+Or use the mfethuls storage backend to query by the human-readable view name:
 
 ```python
 from mfethuls.storage import load_dataset_from_storage
 
-df = load_dataset_from_storage("EXP001_S001_R001")
+# View name is built from experiment name + sample_id + run_id
+df = load_dataset_from_storage("CL_dsc_001_S001_R001")
 ```
 
 ### 7. Compare experiments
@@ -145,7 +155,13 @@ print(df.groupby("experiment_name")["temperature_C"].describe())
 
 ### 8. Streamlit explorer
 
-The Streamlit app provides a visual interface for local mode — load the registry, run ingests, browse datasets, and plot:
+The Streamlit app provides a visual interface for local mode — load the registry, run ingests, browse datasets, and plot.
+
+**Using the launcher (recommended for non-technical users):**
+
+Double-click `launch.bat` (Windows) or run `bash launch.sh` (macOS/Linux). See [docs/local_user_setup.md](local_user_setup.md) for first-run setup.
+
+**Using the CLI directly:**
 
 ```shell
 streamlit run apps/streamlit_app.py
@@ -155,7 +171,7 @@ Open `http://localhost:8501` in your browser.
 
 - **Sidebar → Registry**: load your CSV/XLSX and preview validation
 - **Sidebar → Ingest**: run ingest for selected experiments
-- **Datasets tab**: browse registered datasets, view schemas
+- **Datasets tab**: browse registered datasets by name, sample, and run
 - **Plot tab**: ad-hoc scatter/line plots across multiple experiments
 
 ---
@@ -250,9 +266,9 @@ curl -s http://localhost:8000/registry/preview \
 ```
 
 Fix any errors before proceeding. Common causes:
-- `experiment_id` not matching `EXP###` format
 - `instrument_name` not matching a known name from the table in [registry_reference.md](registry_reference.md)
 - Missing `name` column value
+- Duplicate `name` values within the registry
 
 ### 5. Start an ingest job
 
@@ -310,14 +326,14 @@ Check per-experiment results:
 ```shell
 curl -s http://localhost:8000/jobs/$JOB_ID \
   -H "Authorization: Bearer your-secret-token-here" \
-  | jq '.datasets[] | {experiment_id, status}'
+  | jq '.datasets[] | {name, status}'
 ```
 
 ```json
 [
-  {"experiment_id": "EXP001", "status": "persisted"},
-  {"experiment_id": "EXP002", "status": "persisted"},
-  {"experiment_id": "EXP003", "status": "skipped"}
+  {"name": "CL_dsc_001", "status": "persisted"},
+  {"name": "CL_tga_001", "status": "persisted"},
+  {"name": "CL_rheometer_freq", "status": "skipped"}
 ]
 ```
 
@@ -336,7 +352,7 @@ curl -s http://localhost:8000/datasets \
 Fetch rows from a specific dataset (paginated):
 
 ```shell
-curl -s "http://localhost:8000/dataset/EXP001_S001_R001?limit=50&offset=0" \
+curl -s "http://localhost:8000/dataset/CL_dsc_001_S001_R001?limit=50&offset=0" \
   -H "Authorization: Bearer your-secret-token-here" \
   | jq '{columns: [.columns[].name], row_count: .pagination.returned_rows}'
 ```
@@ -357,12 +373,12 @@ curl -s "http://localhost:8000/jobs?status=completed&limit=10" \
 If a dataset needs to be re-ingested after a parser fix, remove it from the catalog first:
 
 ```shell
-curl -s -X DELETE http://localhost:8000/dataset/EXP001_S001_R001 \
+curl -s -X DELETE http://localhost:8000/dataset/CL_dsc_001_S001_R001 \
   -H "Authorization: Bearer your-secret-token-here"
 ```
 
 ```json
-{"deleted": "EXP001_S001_R001"}
+{"deleted": "CL_dsc_001_S001_R001"}
 ```
 
 This removes the DuckDB view and catalog entry only. The Parquet file on disk is not deleted. Re-run an ingest to re-register it.
@@ -376,7 +392,7 @@ Metabase connects through the Quack gateway which provides read-only SQL access 
 3. Add a new database connection: **DuckDB** (via the Quack driver)
    - Host: `mfethuls-quack` (internal Docker hostname)
    - Port: `8080` (or as configured in `docker-compose.yml`)
-4. Browse tables — each ingested dataset appears as a table
+4. Browse tables — each ingested dataset appears as a table named after the experiment (e.g. `CL_dsc_001_S001_R001`)
 5. Create questions and dashboards using the normalised column names from [SCHEMA_CONTRACT.md](../SCHEMA_CONTRACT.md)
 
 ---
@@ -387,9 +403,9 @@ Metabase connects through the Quack gateway which provides read-only SQL access 
 
 The value must exactly match a name from `instrument_params.json`. Run `POST /registry/preview` to see the specific error. Valid names: `dsc`, `dsc_mettler_toledo`, `dsc_perkin_elmer`, `uv_vis`, `uv_insitu`, `rheometer`, `tga`, `nmr`, `ftir`, `sec`, `dma`, `saxs`, `ms`.
 
-**`experiment_id` format error**
+**Raw data file not found**
 
-The pattern is `EXP` followed by 3–6 digits with no separator: `EXP001`, not `EXP-001` or `Exp001`.
+The system walks `PATH_TO_DATA/<instrument_folder>/` to find a file whose stem matches `raw_data_filename` (or `name` if absent). Check that the file exists somewhere inside the instrument folder and that the stem matches exactly (case-sensitive on Linux).
 
 **Job stuck in `running` for a long time**
 
@@ -398,10 +414,6 @@ The default timeout is 30 minutes (`MFETHULS_JOB_TIMEOUT_SECONDS=1800`). For lar
 **401 Unauthorized on every request**
 
 Check that `MFETHULS_API_KEY` is set in your `.env` and that your request includes `Authorization: Bearer <that-same-value>`. The token is case-sensitive and must match exactly.
-
-**Data folder not found (warning)**
-
-The worker expects files at `PATH_TO_DATA/<instrument_folder>/<experiment_id>/`. Check that the experiment ID matches the folder name exactly (case-sensitive on Linux).
 
 **Parquet already exists / `registered` status**
 

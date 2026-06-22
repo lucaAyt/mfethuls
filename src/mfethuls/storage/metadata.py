@@ -33,12 +33,14 @@ class PostgresMetadataBackend(MetadataBackend):
             name TEXT,
             experiment_id TEXT UNIQUE,
             instrument_name TEXT,
+            raw_data_filename TEXT,
             instrument_type TEXT,
             sample_id TEXT,
             status TEXT,
             registry_measurement_profile TEXT,
             raw_registry_row JSONB,
-            registered_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+            registered_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+            UNIQUE (instrument_name, raw_data_filename)
         );
         """
 
@@ -51,6 +53,7 @@ class PostgresMetadataBackend(MetadataBackend):
             sample_id TEXT,
             run_id TEXT,
             experiment_name TEXT,
+            raw_data_filename TEXT,
 
             -- Instrument info (indexed for filtering)
             instrument_name TEXT NOT NULL,
@@ -93,12 +96,12 @@ class PostgresMetadataBackend(MetadataBackend):
     def persist_metadata(self, metadata: DatasetMetadata) -> Optional[int]:
         insert_sql = text(
             "INSERT INTO datasets ("
-            "experiment_id, sample_id, run_id, experiment_name, "
+            "experiment_id, sample_id, run_id, experiment_name, raw_data_filename, "
             "instrument_name, instrument_type, instrument_model, "
             "dataset_name, storage_path, local_storage_path, cloud_storage_path, storage_format, "
             "rows, cols, schema_version, measurement_profile, mfethuls_version, schema_normalization, provenance, created_at, updated_at"
             ") VALUES ("
-            ":experiment_id, :sample_id, :run_id, :experiment_name, "
+            ":experiment_id, :sample_id, :run_id, :experiment_name, :raw_data_filename, "
             ":instrument_name, :instrument_type, :instrument_model, "
             ":dataset_name, :storage_path, :local_storage_path, :cloud_storage_path, :storage_format, "
             ":rows, :cols, :schema_version, :measurement_profile, :mfethuls_version, :schema_normalization, :provenance, now(), now()"
@@ -106,6 +109,7 @@ class PostgresMetadataBackend(MetadataBackend):
             "sample_id = EXCLUDED.sample_id, "
             "run_id = EXCLUDED.run_id, "
             "experiment_name = EXCLUDED.experiment_name, "
+            "raw_data_filename = EXCLUDED.raw_data_filename, "
             "instrument_name = EXCLUDED.instrument_name, "
             "instrument_type = EXCLUDED.instrument_type, "
             "instrument_model = EXCLUDED.instrument_model, "
@@ -132,6 +136,7 @@ class PostgresMetadataBackend(MetadataBackend):
             "sample_id": metadata.get("sample_id"),
             "run_id": metadata.get("run_id"),
             "experiment_name": metadata.get("experiment_name"),
+            "raw_data_filename": metadata.get("raw_data_filename"),
             "instrument_name": metadata.get("instrument_name"),
             "instrument_type": metadata.get("instrument_type"),
             "instrument_model": metadata.get("instrument_model"),

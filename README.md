@@ -90,6 +90,10 @@ df = comparison.to_dataframe()
 
 ### Streamlit explorer
 
+**For non-technical users** — double-click `launch.bat` (Windows) or run `bash launch.sh` (macOS/Linux). A first-run wizard collects your data paths. Requires only [`uv`](https://docs.astral.sh/uv/getting-started/installation/) — see [docs/local_user_setup.md](docs/local_user_setup.md) for the full guide.
+
+**For developers:**
+
 ```shell
 streamlit run apps/streamlit_app.py
 ```
@@ -191,11 +195,12 @@ Note: `DELETE` removes the dataset from the DuckDB catalog and query layer. Parq
 
 | Document | Contents |
 |----------|----------|
-| [docs/deployment.md](docs/deployment.md) | DigitalOcean + Tailscale cloud deployment guide |
+| [docs/local_user_setup.md](docs/local_user_setup.md) | Non-technical user guide — run Streamlit locally with `uv` |
 | [docs/tutorial.md](docs/tutorial.md) | Step-by-step tutorials for local mode and service mode |
 | [docs/registry_reference.md](docs/registry_reference.md) | Registry spreadsheet format, column reference, example CSV, measurement profiles |
 | [docs/architecture.md](docs/architecture.md) | System context, deployment modes, data-flow diagrams |
 | [docs/api_reference.md](docs/api_reference.md) | Full API endpoint reference with request/response examples |
+| [docs/deployment.md](docs/deployment.md) | DigitalOcean + Tailscale cloud deployment guide |
 | [docs/ingest_preview_contract.md](docs/ingest_preview_contract.md) | Detailed preview and ingest payload contracts |
 | [docs/database_integration.md](docs/database_integration.md) | Postgres + Parquet + DuckDB design notes |
 | [SCHEMA_CONTRACT.md](SCHEMA_CONTRACT.md) | Canonical column names, units, and normalization rules |

@@ -51,7 +51,7 @@ This document defines the canonical data contract after parser normalization.
 ## Instrument Contracts
 
 1. DSC (schema 1.1): required columns temperature_C, heat_flow_mW.
-2. TGA (schema 1.0): required columns temperature_C, mass_pct.
+2. TGA (schema 1.0): required columns temperature_C, mass_mg. The characterizer computes mass_pct via min-max normalization of mass_mg.
 3. FTIR (schema 1.0): required column wavenumber_cm_inv. Signal can be absorbance_a_u or transmittance_pct.
 4. UV/Vis (schema 1.0): required column wavelength_nm. Signal can be absorbance_a_u or transmittance_pct.
 5. SAXS (schema 1.0): required columns q_inv_nm, intensity_a_u.

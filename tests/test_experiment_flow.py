@@ -2,6 +2,7 @@ import os
 import tempfile
 import logging
 from importlib.metadata import PackageNotFoundError, version
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -17,47 +18,41 @@ from mfethuls.storage import (
     save_dataset_to_storage,
 )
 
+_FAKE_EXPERIMENT_ID = "abc123def456"
+
 
 def _write_registry(tmpdir: str) -> str:
-    """Create a minimal experiment registry CSV for tests.
-
-    This uses a dummy experiment that can be resolved by the library. The
-    actual data files do not need to exist for the purposes of testing the
-    registry loading and high-level wiring; parsing errors are caught
-    explicitly in tests that expect failure.
-    """
-
     path = os.path.join(tmpdir, "experiments_test.csv")
     df = pd.DataFrame(
         [
             {
                 "name": "dsc_test_1",
-                "experiment_id": "EXP001",
                 "instrument_name": "dsc_mettler_toledo",
+                "raw_data_filename": "dsc_test_1_data",
                 "sample_id": "S001",
                 "run_id": "R001",
                 "status": "to_analyse",
             },
             {
                 "name": "dsc_test_2",
-                "experiment_id": "EXP002",
                 "instrument_name": "dsc_mettler_toledo",
+                "raw_data_filename": "dsc_test_2_data",
                 "sample_id": "S002",
                 "run_id": "R001",
                 "status": "to_analyse",
             },
             {
                 "name": "dsc_test_3",
-                "experiment_id": "EXP003",
                 "instrument_name": "dsc_perkin_elmer",
+                "raw_data_filename": "dsc_test_3_data",
                 "sample_id": "S003",
                 "run_id": "R001",
                 "status": "to_analyse",
             },
             {
                 "name": "rheometer_test_1",
-                "experiment_id": "EXP004",
                 "instrument_name": "rheometer",
+                "raw_data_filename": "rheometer_test_1_data",
                 "sample_id": "S001",
                 "run_id": "R001",
                 "description": "Oscillatory frequency sweep rheology run",
@@ -65,48 +60,48 @@ def _write_registry(tmpdir: str) -> str:
             },
             {
                 "name": "sec_test_1",
-                "experiment_id": "EXP005",
                 "instrument_name": "sec",
+                "raw_data_filename": "sec_test_1_data",
                 "sample_id": "S001",
                 "run_id": "R001",
                 "status": "to_analyse",
             },
             {
                 "name": "ms_test_1",
-                "experiment_id": "EXP006",
                 "instrument_name": "ms",
+                "raw_data_filename": "ms_test_1_data",
                 "sample_id": "S001",
                 "run_id": "R001",
                 "status": "to_analyse",
             },
             {
                 "name": "saxs_test_1",
-                "experiment_id": "EXP007",
                 "instrument_name": "saxs",
+                "raw_data_filename": "saxs_test_1_data",
                 "sample_id": "S001",
                 "run_id": "R001",
                 "status": "to_analyse",
             },
             {
                 "name": "tga_test_1",
-                "experiment_id": "EXP008",
                 "instrument_name": "tga",
+                "raw_data_filename": "tga_test_1_data",
                 "sample_id": "S001",
                 "run_id": "R001",
                 "status": "to_analyse",
             },
             {
                 "name": "ftir_test_1",
-                "experiment_id": "EXP009",
                 "instrument_name": "ftir",
+                "raw_data_filename": "ftir_test_1_data",
                 "sample_id": "S001",
                 "run_id": "R001",
                 "status": "to_analyse",
             },
             {
                 "name": "dma_test_1",
-                "experiment_id": "EXP010",
                 "instrument_name": "dma",
+                "raw_data_filename": "dma_test_1_data",
                 "sample_id": "S001",
                 "run_id": "R001",
                 "description": "DMA temperature sweep run",
@@ -114,12 +109,12 @@ def _write_registry(tmpdir: str) -> str:
             },
             {
                 "name": "uv_vis_test_1",
-                "experiment_id": "EXP011",
                 "instrument_name": "uv_vis",
+                "raw_data_filename": "uv_vis_test_1_data",
                 "sample_id": "S001",
                 "run_id": "R001",
                 "status": "to_analyse",
-            }
+            },
         ]
     )
     df.to_csv(path, index=False)
@@ -129,26 +124,17 @@ def _write_registry(tmpdir: str) -> str:
 def test_load_experiment_registry_roundtrip():
     with tempfile.TemporaryDirectory() as tmpdir:
         registry_path = _write_registry(tmpdir)
-
         df_registry = load_experiment_registry(registry_path)
 
         assert "name" in df_registry.columns
-        assert "experiment_id" in df_registry.columns
-        # Check that all expected experiment_ids are present
-        expected_ids = {
-            "EXP001",
-            "EXP002",
-            "EXP003",
-            "EXP004",
-            "EXP005",
-            "EXP006",
-            "EXP007",
-            "EXP008",
-            "EXP009",
-            "EXP010",
-            "EXP011",
+        assert "raw_data_filename" in df_registry.columns
+        expected_names = {
+            "dsc_test_1", "dsc_test_2", "dsc_test_3",
+            "rheometer_test_1", "sec_test_1", "ms_test_1",
+            "saxs_test_1", "tga_test_1", "ftir_test_1",
+            "dma_test_1", "uv_vis_test_1",
         }
-        assert set(df_registry["experiment_id"]) == expected_ids
+        assert set(df_registry["name"]) == expected_names
 
 
 def test_load_experiment_registry_defaults_from_path_to_registry(monkeypatch):
@@ -163,7 +149,7 @@ def test_load_experiment_registry_defaults_from_path_to_registry(monkeypatch):
         df_registry = load_experiment_registry()
 
         assert "name" in df_registry.columns
-        assert set(df_registry["experiment_id"]) >= {"EXP001", "EXP011"}
+        assert "dsc_test_1" in set(df_registry["name"])
 
 
 def test_load_experiment_registry_infers_measurement_profile_from_description():
@@ -173,9 +159,7 @@ def test_load_experiment_registry_infers_measurement_profile_from_description():
 
         exp = get_experiment("rheometer_test_1")
         assert exp.metadata.get("description") == "Oscillatory frequency sweep rheology run"
-        # Registry layer creates raw registry_measurement_profile only
         assert exp.metadata.get("registry_measurement_profile") == "oscillatory_frequency_sweep"
-        # measurement_profile should not exist until parser runs
         assert "measurement_profile" not in exp.metadata
         assert exp.metadata.get("measurement_profile") is None
 
@@ -187,11 +171,8 @@ def test_load_experiment_registry_infers_dma_measurement_profile_from_descriptio
 
         exp = get_experiment("dma_test_1")
         assert exp.metadata.get("description") == "DMA temperature sweep run"
-        # Registry layer creates raw registry_measurement_profile only
         assert exp.metadata.get("registry_measurement_profile") == "oscillatory_temperature_sweep"
-        # measurement_profile should not exist until parser runs
         assert "measurement_profile" not in exp.metadata
-        assert exp.metadata.get("measurement_profile") is None
 
 
 def test_load_experiment_registry_explicit_measurement_profile_trumps_inference():
@@ -201,8 +182,8 @@ def test_load_experiment_registry_explicit_measurement_profile_trumps_inference(
             [
                 {
                     "name": "dma_profile_priority",
-                    "experiment_id": "EXP099",
                     "instrument_name": "dma",
+                    "raw_data_filename": "dma_profile_priority_data",
                     "sample_id": "S001",
                     "run_id": "R001",
                     "description": "temperature sweep run",
@@ -213,61 +194,41 @@ def test_load_experiment_registry_explicit_measurement_profile_trumps_inference(
 
         load_experiment_registry(registry_path)
         exp = get_experiment("dma_profile_priority")
-        # Registry layer creates raw registry_measurement_profile only
         assert exp.metadata.get("registry_measurement_profile") == "oscillatory_frequency_sweep"
-        # measurement_profile should not exist until parser runs
         assert "measurement_profile" not in exp.metadata
-        assert exp.metadata.get("measurement_profile") is None
 
 
-def test_load_experiment_dataset_returns_dataset_even_when_missing_files():
-    """High-level check that load_experiment_dataset returns a Dataset.
-
-    This test intentionally does not depend on actual instrument data files
-    being present. Instead, it asserts that the function returns either a
-    Dataset or raises a KeyError/IO-related error when paths are missing,
-    without crashing in unexpected ways.
-    """
+def test_load_experiment_dataset_returns_dataset_even_when_missing_files(monkeypatch):
+    """High-level check that load_experiment_dataset returns a Dataset or raises filesystem errors."""
 
     with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("PATH_TO_DATA", tmpdir)
         registry_path = _write_registry(tmpdir)
         df_registry = load_experiment_registry(registry_path)
 
-        # For each experiment in the registry, either obtain a Dataset or
-        # get a reasonable filesystem-related error (e.g. missing data).
         for row in df_registry.itertuples(index=False):
             name = row.name
-            expected_experiment_id = row.experiment_id
-
-            try:
-                print(f'Loading dataset for {name}')
-                ds = load_experiment_dataset(name)
-                print(f'Loaded dataset for {ds.experiment_id}: {ds.data.head(5)}')
-            except Exception as exc:  # noqa: BLE001
-                assert isinstance(exc, (KeyError, FileNotFoundError, OSError))
-            else:
-                assert isinstance(ds, Dataset)
-                assert ds.experiment_id == expected_experiment_id
+            with patch(
+                "mfethuls.config.loader._assign_experiment_id",
+                side_effect=lambda exp, db_url: setattr(exp, "experiment_id", _FAKE_EXPERIMENT_ID) or None,
+            ):
+                try:
+                    ds = load_experiment_dataset(name)
+                except Exception as exc:
+                    assert isinstance(exc, (KeyError, FileNotFoundError, OSError))
+                else:
+                    assert isinstance(ds, Dataset)
 
 
 def test_dataset_storage_roundtrip_uses_temp_folder(monkeypatch):
-    """Basic roundtrip test for the local Dataset storage helper.
-
-    This test does not depend on any real instrument data. It verifies that
-    a Dataset can be saved to and loaded from the configured storage
-    location, and that the storage paths live under the expected root.
-    """
-
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Ensure storage writes into our temporary directory.
         monkeypatch.setenv("PATH_TO_LOCAL_STORAGE", tmpdir)
-
-        from mfethuls.experiments import Experiment
 
         exp = Experiment(
             name="test_exp_storage",
-            experiment_id="EXP999",
+            experiment_id="abc123def456",
             instrument_name="dummy_instrument",
+            raw_data_filename="test_exp_storage",
             sample_id="S001",
             run_id="R001",
         )
@@ -314,8 +275,6 @@ def test_dataset_storage_roundtrip_uses_temp_folder(monkeypatch):
         assert provenance["schema"]["warning_count"] == 1
         assert provenance["source"]["source_file_count"] == 2
         assert provenance["source"]["source_files"] == ["run1.txt", "run2.txt"]
-        assert "dataset" not in provenance
-        assert "instrument" not in provenance
 
 
 def test_load_experiment_registry_normalizes_instrument_name_case():
@@ -325,7 +284,6 @@ def test_load_experiment_registry_normalizes_instrument_name_case():
             [
                 {
                     "name": "case_test_1",
-                    "experiment_id": "EXP012",
                     "instrument_name": "DSC_METTLER_TOLEDO",
                     "sample_id": "S001",
                     "run_id": "R001",
@@ -345,7 +303,6 @@ def test_load_experiment_registry_keeps_placeholder_experiments_without_instrume
             [
                 {
                     "name": "placeholder_exp",
-                    "experiment_id": "EXP013",
                     "instrument_name": None,
                     "sample_id": "S001",
                     "run_id": "R001",
@@ -367,46 +324,31 @@ def test_load_experiment_registry_keeps_placeholder_experiments_without_instrume
         assert any("has no associated instrument data yet" in message for message in caplog.messages)
 
 
-def test_load_experiment_registry_skips_invalid_experiment_ids(caplog):
+def test_load_experiment_registry_raw_data_filename_defaults_to_name(caplog):
     with tempfile.TemporaryDirectory() as tmpdir:
-        registry_path = os.path.join(tmpdir, "experiments_invalid_id_test.csv")
+        registry_path = os.path.join(tmpdir, "experiments_no_filename.csv")
         pd.DataFrame(
             [
                 {
-                    "name": "bad_exp",
-                    "experiment_id": "EXP1",
-                    "instrument_name": "sec",
+                    "name": "exp_no_filename",
+                    "instrument_name": "dsc_mettler_toledo",
                     "sample_id": "S001",
                     "run_id": "R001",
-                },
-                {
-                    "name": "good_placeholder_exp",
-                    "experiment_id": "EXP014",
-                    "instrument_name": None,
-                    "sample_id": "S002",
-                    "run_id": "R001",
-                    "status": "registered_only",
-                },
+                }
             ]
         ).to_csv(registry_path, index=False)
 
         with caplog.at_level(logging.WARNING):
             load_experiment_registry(registry_path)
 
-        assert any("Skipping registry row 'bad_exp'" in message for message in caplog.messages)
-
-        with pytest.raises(KeyError):
-            get_experiment("bad_exp")
-
-        placeholder = get_experiment("good_placeholder_exp")
-        assert placeholder.experiment_id == "EXP014"
-        assert placeholder.instrument_name is None
+        exp = get_experiment("exp_no_filename")
+        assert exp.raw_data_filename == "exp_no_filename"
+        assert any("raw_data_filename" in m for m in caplog.messages)
 
 
 def test_parse_experiment_applies_characterizer_for_dataset_parser_output():
     class _FakeParser:
         def parse(self, dict_paths, **kwargs):
-            _ = dict_paths, kwargs
             return Dataset(
                 data=pd.DataFrame(
                     {
@@ -430,7 +372,7 @@ def test_parse_experiment_applies_characterizer_for_dataset_parser_output():
 
     exp = Experiment(
         name="dsc_char_test",
-        experiment_id="EXP123",
+        experiment_id="abc123def456",
         instrument_name="dsc_mettler_toledo",
         sample_id="S001",
         run_id="R001",

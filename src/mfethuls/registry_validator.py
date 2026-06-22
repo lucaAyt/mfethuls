@@ -24,9 +24,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_EXP_RE = re.compile(r"^EXP[0-9]{3,6}$")
 _S_RE = re.compile(r"^S[0-9]{3,6}$")
 _R_RE = re.compile(r"^R[0-9]{3,6}$")
+_SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9_\-\.]+$")
 
 
 def _load_instrument_config() -> List[Dict[str, Any]]:
@@ -243,6 +243,7 @@ class RegistryValidator:
                     ("data_path", "No data_root provided; cannot validate data paths.")
                 )
             else:
+                from mfethuls.manifest import find_data_files
                 entry = _get_instrument_entry(experiment.instrument_name)
                 folder_name = entry.get("folder_name") if entry else None
                 if not folder_name:
@@ -252,24 +253,17 @@ class RegistryValidator:
                             f"Instrument '{experiment.instrument_name}' has no folder_name configured.",
                         )
                     )
-                    exp_dir = os.path.join(data_root, experiment.experiment_id)
                 else:
-                    exp_dir = os.path.join(data_root, folder_name, experiment.experiment_id)
-                if not os.path.isdir(exp_dir):
-                    warnings.append(("data_path", f"No data folder at {exp_dir}"))
+                    instrument_path = os.path.join(data_root, folder_name)
+                    raw_filename = experiment.raw_data_filename or experiment.name
+                    try:
+                        find_data_files(instrument_path, raw_filename)
+                    except FileNotFoundError as exc:
+                        warnings.append(("data_path", str(exc)))
+                    except ValueError as exc:
+                        warnings.append(("data_path", str(exc)))
 
         return [], warnings
-
-    @staticmethod
-    def validate_experiment_id(experiment_id: str) -> str:
-        """Validate and return a canonical experiment id (e.g. EXP001)."""
-
-        if not isinstance(experiment_id, str) or not _EXP_RE.fullmatch(experiment_id):
-            raise ValueError(
-                f"Invalid experiment_id: {experiment_id!r}. "
-                "Expected pattern EXP### (e.g. EXP001)."
-            )
-        return experiment_id
 
     @staticmethod
     def validate_sample_id(sample_id: Optional[str]) -> Optional[str]:
@@ -296,21 +290,6 @@ class RegistryValidator:
                 "Expected pattern R### (e.g. R001)."
             )
         return run_id
-
-    @staticmethod
-    def next_code(prefix: str, existing: Iterable[str]) -> str:
-        """Generate the next sequential code with the given prefix."""
-
-        prefix = str(prefix)
-        numbers: List[int] = []
-        for code in existing:
-            if isinstance(code, str) and code.startswith(prefix):
-                suffix = code[len(prefix) :]
-                if suffix.isdigit():
-                    numbers.append(int(suffix))
-        n = max(numbers) + 1 if numbers else 1
-        width = max(3, len(str(n)))
-        return f"{prefix}{n:0{width}d}"
 
     def _validate_measurement_profile(
         self,
@@ -410,6 +389,64 @@ class RegistryValidator:
 
         return len(all_errors) == 0, all_errors
 
+def _check_name_uniqueness(df: pd.DataFrame) -> List[str]:
+    """Return error messages for duplicate 'name' values in the registry."""
+    duplicates = df["name"].dropna()[df["name"].dropna().duplicated()].unique().tolist()
+    if duplicates:
+        return [f"Duplicate experiment name(s): {sorted(duplicates)}. Each name must be unique."]
+    return []
+
+
+def _check_raw_data_filename_uniqueness(df: pd.DataFrame) -> List[str]:
+    """Return error messages for duplicate raw_data_filename per instrument_name."""
+    if "raw_data_filename" not in df.columns:
+        return _check_name_uniqueness_as_filename(df)
+
+    errors: List[str] = []
+    check = df[["raw_data_filename", "instrument_name"]].dropna(subset=["instrument_name"])
+    dupes = check[check.duplicated(subset=["raw_data_filename", "instrument_name"], keep=False)]
+    if not dupes.empty:
+        for _, group in dupes.groupby(["raw_data_filename", "instrument_name"]):
+            fname = group["raw_data_filename"].iloc[0]
+            instr = group["instrument_name"].iloc[0]
+            errors.append(
+                f"raw_data_filename {fname!r} is declared more than once for instrument "
+                f"{instr!r}. Each file must map to exactly one experiment."
+            )
+    return errors
+
+
+def _check_name_uniqueness_as_filename(df: pd.DataFrame) -> List[str]:
+    """When raw_data_filename is absent, names serve as filenames — check uniqueness per instrument."""
+    errors: List[str] = []
+    check = df[["name", "instrument_name"]].dropna(subset=["instrument_name"])
+    dupes = check[check.duplicated(subset=["name", "instrument_name"], keep=False)]
+    if not dupes.empty:
+        for _, group in dupes.groupby(["name", "instrument_name"]):
+            name = group["name"].iloc[0]
+            instr = group["instrument_name"].iloc[0]
+            errors.append(
+                f"name {name!r} is used more than once for instrument {instr!r}. "
+                "Add a raw_data_filename column or use unique names per instrument."
+            )
+    return errors
+
+
+def _check_raw_data_filename_filesystem_safe(df: pd.DataFrame) -> List[str]:
+    """Return error messages for raw_data_filename values with unsafe characters."""
+    if "raw_data_filename" not in df.columns:
+        return []
+    errors: List[str] = []
+    for val in df["raw_data_filename"].dropna().unique():
+        val_str = str(val)
+        if not _SAFE_FILENAME_RE.fullmatch(val_str):
+            errors.append(
+                f"raw_data_filename {val_str!r} contains characters outside [A-Za-z0-9_\\-.]. "
+                "Use only alphanumeric characters, underscores, hyphens, and dots."
+            )
+    return errors
+
+
 def validate_registry_dataframe(
     df: pd.DataFrame,
     *,
@@ -428,9 +465,18 @@ def validate_registry_dataframe(
     rows_out: List[Dict[str, Any]] = []
     valid_count = 0
 
+    # DataFrame-level uniqueness and safety checks — reported on row 0 as global errors
+    global_errors: List[str] = []
+    if "name" in df.columns:
+        global_errors.extend(_check_name_uniqueness(df))
+    global_errors.extend(_check_raw_data_filename_uniqueness(df))
+    global_errors.extend(_check_raw_data_filename_filesystem_safe(df))
+
     for idx, rec in enumerate(df.to_dict(orient="records"), start=1):
         row_result = experiment_from_registry_record(rec)
         errors = [{"field": "registry", "message": message} for message in row_result.errors]
+        if idx == 1:
+            errors = [{"field": "registry_global", "message": m} for m in global_errors] + errors
         warnings = [{"field": "registry", "message": message} for message in row_result.warnings]
 
         experiment = row_result.experiment

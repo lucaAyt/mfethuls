@@ -10,7 +10,6 @@ def test_unknown_instrument_invalid():
         [
             {
                 "name": "bad",
-                "experiment_id": "EXP001",
                 "instrument_name": "nonexistent_instrument_xyz",
             }
         ]
@@ -25,8 +24,8 @@ def test_known_instrument_valid():
         [
             {
                 "name": "ok",
-                "experiment_id": "EXP001",
                 "instrument_name": "dsc_mettler_toledo",
+                "raw_data_filename": "my_sample_run",
                 "sample_id": "S001",
             }
         ]

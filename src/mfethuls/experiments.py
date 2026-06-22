@@ -62,19 +62,26 @@ class Experiment:
     """Represents a single experiment definition.
 
     This is an abstract description, not the raw data itself. It ties together
-    a human-friendly name (e.g. "CL_uv"), strict identifiers (EXP###, S###,
-    R###) and the instrument configuration name used in mfethuls.
+    a human-friendly name (e.g. "CL_uv"), the instrument configuration name,
+    and optional identifiers (S###, R###).
+
+    ``experiment_id`` is a system-assigned UUID (12-char hex) set at first
+    ingest via the manifest backend — it is never user-provided.
+
+    ``raw_data_filename`` is the stem of the raw data file as the experimentalist
+    named it at the instrument (e.g. "chitosan_jan15"). Defaults to ``name``
+    when not declared in the registry.
     """
 
     name: str
-    experiment_id: str
     instrument_name: Optional[str]
+    experiment_id: Optional[str] = None
+    raw_data_filename: Optional[str] = None
     sample_id: Optional[str] = None
     run_id: Optional[str] = "R001"
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.experiment_id = RegistryValidator.validate_experiment_id(self.experiment_id)
         self.sample_id = RegistryValidator.validate_sample_id(self.sample_id)
         self.run_id = RegistryValidator.validate_run_id(self.run_id)
         if self.instrument_name is None:
@@ -139,12 +146,7 @@ def experiment_from_registry_record(rec: dict) -> RegistryRowResult:
         errors.append("missing required field: name")
         return RegistryRowResult(experiment=None, errors=errors, warnings=warnings)
 
-    experiment_id = rec.get("experiment_id")
-    try:
-        validated_experiment_id = RegistryValidator.validate_experiment_id(experiment_id)
-    except ValueError as exc:
-        errors.append(str(exc))
-        return RegistryRowResult(experiment=None, errors=errors, warnings=warnings)
+    raw_data_filename = _normalize_optional_str(rec.get("raw_data_filename")) or name
 
     description = _normalize_optional_str(rec.get("description"))
     explicit_measurement_profile = _normalize_optional_str(rec.get("measurement_profile"))
@@ -163,16 +165,17 @@ def experiment_from_registry_record(rec: dict) -> RegistryRowResult:
         )
 
     metadata: Dict[str, Any] = {}
+    _known_keys = {
+        "name",
+        "raw_data_filename",
+        "instrument_name",
+        "sample_id",
+        "run_id",
+        "description",
+        "measurement_profile",
+    }
     for key, value in rec.items():
-        if key in {
-            "name",
-            "experiment_id",
-            "instrument_name",
-            "sample_id",
-            "run_id",
-            "description",
-            "measurement_profile",
-        }:
+        if key in _known_keys:
             continue
         metadata[key] = value
 
@@ -183,8 +186,8 @@ def experiment_from_registry_record(rec: dict) -> RegistryRowResult:
 
     exp = Experiment(
         name=name,
-        experiment_id=validated_experiment_id,
         instrument_name=instrument_name,
+        raw_data_filename=raw_data_filename,
         sample_id=sample_id,
         run_id=run_id,
         metadata=metadata,
@@ -227,13 +230,15 @@ def load_experiment_registry(
 
     The file is expected to contain at least the following columns:
 
-    - ``name``: human-friendly experiment name (used as lookup key)
-    - ``experiment_id``: strict id (e.g. EXP001)
+    - ``name``: human-friendly experiment name (used as lookup key, must be unique)
     - ``instrument_name``: must match an instrument ``name`` from the
       instrument configuration JSON.
 
     Optional columns (if present) are interpreted as follows:
 
+    - ``raw_data_filename``: stem of the raw data file as named at the
+        instrument (e.g. "chitosan_jan15"). Defaults to ``name`` when absent.
+        Must be unique per ``instrument_name``.
     - ``description``: free-text description used to infer a measurement
         profile (raw registry value) when explicit measurement_profile absent
     - ``measurement_profile``: raw registry measurement profile name (e.g.
@@ -252,11 +257,17 @@ def load_experiment_registry(
     path = resolve_registry_path(path)
     df = read_tabular_content(path)
 
-    required_cols = {"name", "experiment_id", "instrument_name"}
+    required_cols = {"name", "instrument_name"}
     missing = required_cols.difference(df.columns)
     if missing:
         raise ValueError(
             f"Experiment registry at {path!r} is missing required columns: {sorted(missing)}"
+        )
+
+    if "raw_data_filename" not in df.columns:
+        logger.warning(
+            "Registry at %r has no 'raw_data_filename' column — defaulting to 'name' for each row.",
+            path,
         )
 
     validator = RegistryValidator()

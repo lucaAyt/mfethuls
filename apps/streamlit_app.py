@@ -23,6 +23,8 @@ st.caption("Explore registered datasets.")
 
 @st.cache_data(show_spinner=False)
 def _load_registry_cached(db_path: str) -> pd.DataFrame:
+    if not os.path.exists(db_path):
+        return pd.DataFrame()
     with duckdb_session(db_path=db_path, read_only=True) as backend:
         rows = backend.list_registered()
         return pd.DataFrame(rows)
@@ -171,8 +173,10 @@ with st.sidebar.expander("Datasets", expanded=True):
             meta = _read_metadata(storage_path)
             instrument_rows.append(
                 {
-                    "id": table_name,
+                    "table_name": table_name,
                     "name": meta.get("name") or meta.get("experiment_name") or "",
+                    "sample_id": meta.get("sample_id") or "",
+                    "run_id": meta.get("run_id") or "",
                     "instrument": meta.get("instrument_name") or "",
                     "storage": _storage_label(storage_path),
                     "storage_path": storage_path,
@@ -185,12 +189,12 @@ with st.sidebar.expander("Datasets", expanded=True):
         except Exception:
             pass
         show_paths = st.toggle("Show full paths", value=False)
-        display_cols = ["id", "name", "instrument", "storage_path" if show_paths else "storage"]
+        display_cols = ["name", "sample_id", "run_id", "instrument", "storage_path" if show_paths else "storage"]
         st.dataframe(df_rows[display_cols], use_container_width=True)
 
         selected_tables = st.multiselect(
             "Select registered views",
-            options=df_rows["id"].tolist(),
+            options=df_rows["table_name"].tolist(),
         )
 
 with st.sidebar.expander("Query", expanded=False):

@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from mfethuls.parsers import get_parser
 from mfethuls.instruments.generic import GenericInstrument
 from mfethuls.characterizers.dsc import DSCProfiling
+from mfethuls.characterizers.tga import TGACharacterizer
 from mfethuls.dataset import Dataset
 from mfethuls.experiments import Experiment
 from mfethuls.registry_validator import RegistryValidator, RegistryValidationError
@@ -22,35 +23,36 @@ def get_data_root_path(folder_name=None, instrument_type=None):
     return os.path.join(data_root, os.environ.get(env_key, instrument_type))
 
 
-# Constructs paths from .env and user requirements
 def instrument_data_path_constructor(path, *args):
-    # Load paths into dictionary
-    dict_paths = {}
+    """Build a dict mapping raw_data_filename → list of file paths.
 
-    # Folders/Files interested in for analysis
+    Walks ``path`` (the instrument root folder) and locates files whose stem
+    matches each entry in ``args``.  All non-parquet files co-located in the
+    same directory as the matched file are collected, so multi-file experiments
+    work transparently.
+
+    Returns ``{raw_data_filename: [sorted_file_paths], ...}``.
+    """
+    from mfethuls.manifest import find_data_files
+
     args = args[0] if len(args) == 1 and isinstance(args[0], list) else [*args]
-    if not args:
-        print('No files to lookup given therefore look all files in root')
-        dict_paths[os.path.basename(os.path.normpath(path))] = [os.path.join(path, f) for f in os.listdir(path) \
-                                                                if os.path.isfile(os.path.join(path, f))]
-    else:
-        # Create dictionary of folders in accordance with args and folders present
-        dict_paths = {}
-        for root, dirs, files in os.walk(path):
-            name = [os.path.normpath(root).split(os.path.sep)[-1] for name in args if name in root]
-            if name:
-                is_parquet = check_parquet(files)
-                dict_paths[name[0]] = [os.path.join(root, f) for f in sorted(files)] if not is_parquet else \
-                    [os.path.join(root, f) for f in sorted(files) if '.parquet' in f]
 
-    if not [*sum([*dict_paths.values()], [])] and not os.path.exists(path):
-        raise KeyError(f'path: {path} does not exist')
+    if not args:
+        if not os.path.exists(path):
+            raise KeyError(f'path: {path} does not exist')
+        files = sorted(
+            os.path.join(path, f) for f in os.listdir(path)
+            if os.path.isfile(os.path.join(path, f)) and not f.endswith(".parquet")
+        )
+        key = os.path.basename(os.path.normpath(path))
+        return {key: files}
+
+    dict_paths: dict[str, list[str]] = {}
+    for raw_filename in args:
+        _parent_dir, files = find_data_files(path, raw_filename)
+        dict_paths[raw_filename] = files
 
     return dict_paths
-
-
-def check_parquet(files):
-    return True if '.parquet' in ''.join(files) else False
 
 
 def create_instrument(type_, name, model, characterizer=None, data_root_path=None):
@@ -61,6 +63,8 @@ def create_instrument(type_, name, model, characterizer=None, data_root_path=Non
 def create_characterizer(type_, config):
     if type_ == 'dsc' and config.get('type') == 'dsc_profiling':
         return DSCProfiling(config.get('sensitivity', 0.1))
+    if type_ == 'tga':
+        return TGACharacterizer()
 
 
 def _apply_characterizer(dataset: Dataset, instrument) -> Dataset:
@@ -115,7 +119,7 @@ def parse_experiment(
             f"Registry validation failed for experiment '{experiment.name}':\n{error_msg}"
         )
 
-    experiment_id = RegistryValidator.validate_experiment_id(experiment.experiment_id)
+    experiment_id = experiment.experiment_id
     sample_id = RegistryValidator.validate_sample_id(experiment.sample_id)
     run_id = RegistryValidator.validate_run_id(experiment.run_id)
 

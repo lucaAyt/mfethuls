@@ -148,3 +148,12 @@ def _dataset_basename(experiment) -> str:
     if experiment.run_id:
         parts.append(experiment.run_id)
     return "_".join(parts)
+
+
+def _view_basename(experiment) -> str:
+    parts = [experiment.name]
+    if experiment.sample_id:
+        parts.append(experiment.sample_id)
+    if experiment.run_id:
+        parts.append(experiment.run_id)
+    return "_".join(parts)

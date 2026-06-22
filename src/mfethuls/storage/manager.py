@@ -7,7 +7,7 @@ from typing import Optional, Tuple
 from ..dataset import Dataset
 from ..experiments import Experiment
 from .backends import AzureBlobParquetStorage, CombinedStorageBackend, LocalParquetStorage, S3ParquetStorage
-from .config import _dataset_basename, _get_package_version
+from .config import _dataset_basename, _view_basename, _get_package_version
 from .provenance import _build_provenance_metadata
 from .types import DataStorageBackend, DatasetMetadata, MetadataBackend
 from .duckdb_backend import DuckDBQueryBackend
@@ -50,6 +50,7 @@ def _prepare_registration_metadata(
         sample_id=experiment.sample_id,
         run_id=experiment.run_id,
         experiment_name=experiment.name,
+        raw_data_filename=experiment.raw_data_filename,
         instrument_name=experiment.instrument_name,
         instrument_type=metadata.get("instrument_type"),
         instrument_model=metadata.get("instrument_model"),
@@ -120,6 +121,8 @@ class StorageManager:
         if self.query_backend is not None:
             self.query_backend.register_parquet(
                 parquet_path,
-                table_name=_dataset_basename(experiment),
+                table_name=_view_basename(experiment),
+                experiment_name=experiment.name,
+                raw_data_filename=experiment.raw_data_filename,
             )
         return parquet_path, meta_path, dataset_id

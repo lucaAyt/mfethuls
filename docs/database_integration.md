@@ -17,23 +17,27 @@ Schema sketch (Postgres)
 
 ```sql
 -- experiments table (one registry row)
+-- experiment_id is auto-assigned (12-char hex), never user-provided
 CREATE TABLE experiments (
   id SERIAL PRIMARY KEY,
-  name TEXT,
-  experiment_id TEXT UNIQUE,
+  name TEXT,                               -- user-facing, unique registry key
+  experiment_id TEXT UNIQUE,              -- internal hex UUID, auto-generated
   instrument_name TEXT,
   instrument_type TEXT,
   sample_id TEXT,
+  raw_data_filename TEXT,                 -- stem of raw export file; defaults to name
   status TEXT,
   registry_measurement_profile TEXT,
   raw_registry_row JSONB,
-  registered_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  registered_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  UNIQUE (instrument_name, raw_data_filename)
 );
 
 -- datasets table (one parsed dataset)
 CREATE TABLE datasets (
   id SERIAL PRIMARY KEY,
   experiment_id TEXT REFERENCES experiments(experiment_id),
+  experiment_name TEXT,                   -- human-readable mirror of experiments.name
   dataset_name TEXT,
   storage_path TEXT,
   storage_format TEXT DEFAULT 'parquet',
@@ -61,8 +65,8 @@ CREATE INDEX idx_experiments_raw_row_gin ON experiments USING GIN (raw_registry_
 ```
 
 Storage layout
-- Dev: `storage_root/<instrument_type>/<experiment_id>/<dataset_name>.parquet`
-- Prod (S3): `s3://bucket/mfethuls/<instrument_type>/<year=YYYY>/<experiment_id>/<dataset_name>.parquet`
+- Dev: `storage_root/<instrument_type>/<experiment_id_hex>/<name_sample_run>.parquet`
+- Prod (S3): `s3://bucket/mfethuls/<instrument_type>/<year=YYYY>/<experiment_id_hex>/<name_sample_run>.parquet`
 
 Provenance & metadata contracts
 - Always persist both `registry_measurement_profile` (raw) and `measurement_profile` (canonical) on the `datasets` row

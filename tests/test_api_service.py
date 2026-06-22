@@ -51,7 +51,7 @@ def test_registry_preview_parses_csv(client, service_mode):
     row = body["rows"][0]
     assert row["row_number"] == 1
     assert row["valid"] is True
-    assert row["values"]["experiment_id"] == "EXP999"
+    assert row["values"]["name"] == "api_smoke_test"
 
 
 def test_registry_preview_invalid_instrument(client, service_mode):

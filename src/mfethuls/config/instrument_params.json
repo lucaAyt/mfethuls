@@ -61,7 +61,8 @@
     "type": "tga",
     "model": "tgaX",
     "name": "tga",
-    "folder_name": "TGA"
+    "folder_name": "TGA",
+    "characterizer": {"type": "tga"}
   },
   {
     "type": "nmr",

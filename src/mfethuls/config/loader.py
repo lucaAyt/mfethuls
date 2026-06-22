@@ -23,7 +23,9 @@ from mfethuls.storage import (
     S3ParquetStorage,
     StorageManager,
 )
+from mfethuls.storage.config import _view_basename
 from mfethuls.config.mode import is_service_mode
+from mfethuls.manifest import get_manifest_backend
 
 if TYPE_CHECKING:
     from mfethuls.storage import DuckDBQueryBackend
@@ -108,7 +110,12 @@ def ensure_registered(exp, data_backend, query_backend: "DuckDBQueryBackend | No
         return None
 
     parquet_path, _ = data_backend.dataset_paths(exp)
-    return query_backend.register_parquet(parquet_path)
+    return query_backend.register_parquet(
+        parquet_path,
+        table_name=_view_basename(exp),
+        experiment_name=exp.name,
+        raw_data_filename=exp.raw_data_filename,
+    )
 
 
 def persist_dataset(
@@ -141,6 +148,19 @@ def persist_dataset(
     return parquet_path, meta_path, dataset_id
 
 
+def _assign_experiment_id(exp, db_url: Optional[str]) -> None:
+    """Assign experiment_id from the manifest backend (creates on first ingest)."""
+    data_root = os.environ.get("PATH_TO_DATA")
+    resolved_db_url = _resolve_metadata_db_url(db_url)
+    backend = get_manifest_backend(data_root=data_root, db_url=resolved_db_url)
+    raw_filename = exp.raw_data_filename or exp.name
+    exp.experiment_id = backend.get_or_create_experiment_id(
+        instrument_name=exp.instrument_name,
+        raw_data_filename=raw_filename,
+        experiment_name=exp.name,
+    )
+
+
 def ingest_experiment_dataset(
     experiment_name,
     use_storage: bool = True,
@@ -164,6 +184,8 @@ def ingest_experiment_dataset(
     if not effective_use_storage:
         return {"status": "skipped"}
 
+    _assign_experiment_id(exp, db_url)
+
     data_backend = _build_data_backend(storage_mode, cloud_provider)
     cache_backend = data_backend
     if (storage_mode or "").strip().lower() == "both":
@@ -180,17 +202,21 @@ def ingest_experiment_dataset(
                 "storage_path": parquet_path,
             }
 
+    raw_filename = exp.raw_data_filename or exp.name
     filters = {"name": [exp.instrument_name]}
-    bundle = prepare_instruments(filters=filters, experiments=[exp.experiment_id])
+    bundle = prepare_instruments(filters=filters, experiments=[raw_filename])
 
     try:
         instrument = bundle.instruments[exp.instrument_name]
-        dict_data_paths = bundle.data_paths[exp.instrument_name]
+        raw_dict = bundle.data_paths[exp.instrument_name]
     except KeyError as exc:
         raise KeyError(
             f"Instrument {exp.instrument_name!r} for experiment {experiment_name!r} "
             f"is not present in the current instrument configuration."
         ) from exc
+
+    # Remap from {raw_data_filename: files} → {experiment_id: files} for parsers
+    dict_data_paths = {exp.experiment_id: raw_dict.get(raw_filename, [])}
 
     dataset = _parse_experiment(exp, dict_data_paths, instrument)
     parquet_path, _, dataset_id = persist_dataset(
@@ -243,6 +269,8 @@ def load_experiment_dataset(
         )
         return None
 
+    _assign_experiment_id(exp, db_url)
+
     # Allow a global switch to disable storage via environment for debugging.
     disable_storage_env = os.environ.get("MFETHULS_DISABLE_STORAGE", "").lower()
     effective_use_storage = use_storage and disable_storage_env not in {"1", "true", "yes"}
@@ -262,18 +290,20 @@ def load_experiment_dataset(
             ensure_registered(exp, data_backend, query_backend)
             return cached_dataset
 
-    # Restrict to the instrument associated with this experiment.
+    raw_filename = exp.raw_data_filename or exp.name
     filters = {"name": [exp.instrument_name]}
-    bundle = prepare_instruments(filters=filters, experiments=[exp.experiment_id])
+    bundle = prepare_instruments(filters=filters, experiments=[raw_filename])
 
     try:
         instrument = bundle.instruments[exp.instrument_name]
-        dict_data_paths = bundle.data_paths[exp.instrument_name]
+        raw_dict = bundle.data_paths[exp.instrument_name]
     except KeyError as exc:
         raise KeyError(
             f"Instrument {exp.instrument_name!r} for experiment {experiment_name!r} "
             f"is not present in the current instrument configuration."
         ) from exc
+
+    dict_data_paths = {exp.experiment_id: raw_dict.get(raw_filename, [])}
 
     # Delegate parsing + Dataset construction to the factory helper.
     dataset = _parse_experiment(exp, dict_data_paths, instrument)

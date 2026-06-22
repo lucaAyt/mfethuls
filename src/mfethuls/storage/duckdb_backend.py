@@ -101,6 +101,8 @@ class DuckDBQueryBackend:
             CREATE TABLE IF NOT EXISTS dataset_registry (
                 table_name TEXT PRIMARY KEY,
                 storage_path TEXT NOT NULL,
+                experiment_name TEXT,
+                raw_data_filename TEXT,
                 registered_at TIMESTAMP DEFAULT now()
             );
             """
@@ -116,7 +118,7 @@ class DuckDBQueryBackend:
                     self._ensure_s3_configured()
                 if self._is_materializable_storage_path(storage_path):
                     self._conn.execute(
-                        f"CREATE OR REPLACE VIEW {table_name} AS SELECT * FROM read_parquet('{self._sql_string(storage_path)}');"
+                        f'CREATE OR REPLACE VIEW "{self._sql_string(table_name)}" AS SELECT * FROM read_parquet(\'{self._sql_string(storage_path)}\');'
                     )
             except Exception:
                 continue
@@ -132,6 +134,8 @@ class DuckDBQueryBackend:
         table_name: Optional[str] = None,
         overwrite: bool = True,
         persist_view: bool = True,
+        experiment_name: Optional[str] = None,
+        raw_data_filename: Optional[str] = None,
     ) -> str:
         if self.read_only:
             raise RuntimeError("Cannot register parquet on a read-only DuckDB connection")
@@ -146,29 +150,36 @@ class DuckDBQueryBackend:
                 pass
         if persist_view and self._is_materializable_storage_path(storage_path):
             self._conn.execute(
-                f"CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM read_parquet('{self._sql_string(storage_path)}');"
+                f'CREATE OR REPLACE VIEW "{self._sql_string(view_name)}" AS SELECT * FROM read_parquet(\'{self._sql_string(storage_path)}\');'
             )
         self._conn.execute(
             """
-            INSERT INTO dataset_registry (table_name, storage_path)
-            VALUES (?, ?)
+            INSERT INTO dataset_registry (table_name, storage_path, experiment_name, raw_data_filename)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(table_name)
-            DO UPDATE SET storage_path = excluded.storage_path, registered_at = now();
+            DO UPDATE SET
+                storage_path = excluded.storage_path,
+                experiment_name = excluded.experiment_name,
+                raw_data_filename = excluded.raw_data_filename,
+                registered_at = now();
             """,
-            [view_name, storage_path],
+            [view_name, storage_path, experiment_name, raw_data_filename],
         )
         return view_name
 
     def list_registered(self) -> List[Dict[str, Any]]:
         res = self._conn.execute(
-            "SELECT table_name, storage_path, registered_at FROM dataset_registry ORDER BY registered_at DESC;"
+            "SELECT table_name, storage_path, experiment_name, raw_data_filename, registered_at "
+            "FROM dataset_registry ORDER BY registered_at DESC;"
         )
         rows = res.fetchall()
         return [
             {
                 "table_name": row[0],
                 "storage_path": row[1],
-                "registered_at": row[2],
+                "experiment_name": row[2],
+                "raw_data_filename": row[3],
+                "registered_at": row[4],
             }
             for row in rows
         ]

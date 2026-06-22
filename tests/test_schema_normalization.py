@@ -32,7 +32,7 @@ def test_apply_dataframe_schema_renames_and_casts_tga_columns():
     df = pd.DataFrame(
         {
             "Temperature [°C]": [25.0, 30.0],
-            "Mass [%]": [100.0, 99.5],
+            "Mass [mg]": [10.0, 9.5],
             "Time [s]": [0.0, 10.0],
         }
     )
@@ -47,10 +47,10 @@ def test_apply_dataframe_schema_renames_and_casts_tga_columns():
     assert report["schema_version"] == "1.0"
     assert report["missing_required_columns"] == []
     assert "temperature_C" in normalized.columns
-    assert "mass_pct" in normalized.columns
+    assert "mass_mg" in normalized.columns
     assert "time_s" in normalized.columns
     assert "Temperature [°C]" not in normalized.columns
-    assert "Mass [%]" not in normalized.columns
+    assert "Mass [mg]" not in normalized.columns
 
 
 def test_apply_dataframe_schema_renames_and_casts_ftir_columns():

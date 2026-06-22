@@ -136,3 +136,14 @@ def _calculate_mass_percentage(df, weight_column="mass_mg"):
         max_weight = df[weight_column].max()
         if max_weight != min_weight:
             df["mass_pct"] = (df[weight_column] - min_weight) / (max_weight - min_weight) * 100
+        
+
+def _check_mass_pct_column(df):
+    """Check if mass percentage column exists and is valid."""
+    if "mass_pct" not in df.columns:
+        logger.warning("Mass percentage column 'mass_pct' is missing.")
+        return False
+    if df["mass_pct"].isnull().any():
+        logger.warning("Mass percentage column 'mass_pct' contains NaN values.")
+        return False
+    return True

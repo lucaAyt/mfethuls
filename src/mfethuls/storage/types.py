@@ -38,6 +38,7 @@ class DatasetMetadata(TypedDict, total=False):
     sample_id: Optional[str]
     run_id: Optional[str]
     experiment_name: str
+    raw_data_filename: Optional[str]
 
     instrument_name: str
     instrument_type: Optional[str]
