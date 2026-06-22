@@ -33,64 +33,86 @@ def generate_experiment_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
+def _collect_files(directory: str) -> list[str]:
+    return sorted(
+        os.path.join(directory, f)
+        for f in os.listdir(directory)
+        if os.path.isfile(os.path.join(directory, f))
+        and not f.endswith(".parquet")
+        and f != MANIFEST_FILENAME
+    )
+
+
 def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[str, list[str]]:
-    """Walk an instrument folder and return all files co-located with raw_data_filename.
+    """Walk an instrument folder and return all files for raw_data_filename.
 
-    The ``raw_data_filename`` is matched against file stems (filename without
-    extension).  Once the anchor file is located, *all* non-parquet files in
-    its parent directory are returned so that multi-file experiments are
-    handled transparently.
+    Two searches run in a single os.walk:
 
-    Args:
-        instrument_data_path: Root folder for the instrument (e.g. ``/data/DSC``).
-        raw_data_filename: Stem (or full name) of the target data file as
-            declared in the registry ``raw_data_filename`` column.
+    1. **File-stem match** — finds a file whose stem equals ``raw_data_filename``
+       and collects all co-located non-parquet files (original behaviour).
+    2. **Directory-name match** — finds a directory named ``raw_data_filename``
+       and collects all files immediately inside it. This handles
+       folder-per-experiment instruments (e.g. UV/Vis in-situ, NMR) where the
+       experiment data lives in a named subfolder with no single anchor file.
+
+    Both searches may contribute to the result (combined, deduplicated). Each
+    search raises ``ValueError`` if the same name is found in more than one
+    location. ``FileNotFoundError`` is raised when neither search finds anything.
 
     Returns:
-        ``(parent_dir, sorted_file_paths)`` where ``parent_dir`` is the
-        directory that contains the matched files.
-
-    Raises:
-        FileNotFoundError: No file matching ``raw_data_filename`` found.
-        ValueError: Matching files found in more than one sub-directory
-            (ambiguous — user must rename one).
+        ``(parent_dir, sorted_file_paths)`` — the same contract as before.
     """
     target_stem = Path(raw_data_filename).stem
 
-    matched_dirs: dict[str, list[str]] = {}
+    file_matched_dirs: dict[str, None] = {}
+    dir_matched_folders: list[str] = []
 
-    for root, _dirs, files in os.walk(instrument_data_path):
+    for root, dirs, files in os.walk(instrument_data_path):
         for fname in files:
             fpath = Path(fname)
             if fpath.suffix.lower() == ".parquet":
                 continue
             if fpath.stem == target_stem or fpath.name == raw_data_filename:
-                matched_dirs.setdefault(root, [])
+                file_matched_dirs[root] = None
                 break
+        for dirname in dirs:
+            if dirname == raw_data_filename:
+                dir_matched_folders.append(os.path.join(root, dirname))
 
-    if not matched_dirs:
-        raise FileNotFoundError(
-            f"No file with stem {raw_data_filename!r} found under {instrument_data_path!r}. "
-            "Check that PATH_TO_DATA is set correctly and the file exists."
-        )
-
-    if len(matched_dirs) > 1:
-        locations = "\n  ".join(sorted(matched_dirs))
+    if len(file_matched_dirs) > 1:
+        locations = "\n  ".join(sorted(file_matched_dirs))
         raise ValueError(
             f"raw_data_filename {raw_data_filename!r} matched files in multiple directories:\n"
             f"  {locations}\n"
             "Rename one of the files to remove ambiguity."
         )
+    if len(dir_matched_folders) > 1:
+        raise ValueError(
+            f"raw_data_filename {raw_data_filename!r} matches directories in multiple locations:\n"
+            + "\n".join(f"  {p}" for p in dir_matched_folders)
+            + "\nRename one to remove ambiguity."
+        )
 
-    parent_dir = next(iter(matched_dirs))
-    all_files = sorted(
-        os.path.join(parent_dir, f)
-        for f in os.listdir(parent_dir)
-        if os.path.isfile(os.path.join(parent_dir, f))
-        and not f.endswith(".parquet")
-        and not f == MANIFEST_FILENAME
-    )
-    return parent_dir, all_files
+    combined: set[str] = set()
+    primary_dir: str | None = None
+
+    if file_matched_dirs:
+        parent_dir = next(iter(file_matched_dirs))
+        combined.update(_collect_files(parent_dir))
+        primary_dir = parent_dir
+
+    if dir_matched_folders:
+        folder = dir_matched_folders[0]
+        combined.update(_collect_files(folder))
+        primary_dir = primary_dir or folder
+
+    if not combined:
+        raise FileNotFoundError(
+            f"No file or directory named {raw_data_filename!r} found under {instrument_data_path!r}. "
+            "Check that PATH_TO_DATA is set correctly and the data exists."
+        )
+
+    return primary_dir, sorted(combined)
 
 
 # ── Abstract backend ──────────────────────────────────────────────────────────

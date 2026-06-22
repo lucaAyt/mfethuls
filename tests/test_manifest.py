@@ -196,3 +196,59 @@ def test_find_data_files_excludes_parquet_files():
         parent, files = find_data_files(tmpdir, "mydata")
         assert not any(f.endswith(".parquet") for f in files)
         assert any("mydata.txt" in f for f in files)
+
+
+# ── Directory-name fallback tests ─────────────────────────────────────────────
+
+def test_find_data_files_matches_directory_name():
+    """A folder named after raw_data_filename returns all files inside it."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        exp_folder = os.path.join(tmpdir, "kinetics_jan15")
+        os.makedirs(exp_folder)
+        for fname in ["t001.txt", "t002.txt", "t003.txt"]:
+            open(os.path.join(exp_folder, fname), "w").close()
+
+        parent, files = find_data_files(tmpdir, "kinetics_jan15")
+        assert len(files) == 3
+        assert all(os.path.dirname(f) == exp_folder for f in files)
+        assert parent == exp_folder
+
+
+def test_find_data_files_combines_file_and_directory():
+    """When a matching file AND a matching folder both exist, results are combined."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Anchor file co-located in tmpdir
+        open(os.path.join(tmpdir, "sample_A.txt"), "w").close()
+        # Subfolder with individual measurements
+        folder = os.path.join(tmpdir, "sample_A")
+        os.makedirs(folder)
+        open(os.path.join(folder, "meas_001.csv"), "w").close()
+        open(os.path.join(folder, "meas_002.csv"), "w").close()
+
+        _parent, files = find_data_files(tmpdir, "sample_A")
+        basenames = {os.path.basename(f) for f in files}
+        assert "sample_A.txt" in basenames
+        assert "meas_001.csv" in basenames
+        assert "meas_002.csv" in basenames
+
+
+def test_find_data_files_raises_on_ambiguous_directory():
+    """Same directory name in two different locations raises ValueError."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for parent in ["batch1", "batch2"]:
+            folder = os.path.join(tmpdir, parent, "kinetics_jan15")
+            os.makedirs(folder)
+            open(os.path.join(folder, "data.txt"), "w").close()
+
+        with pytest.raises(ValueError, match="multiple locations"):
+            find_data_files(tmpdir, "kinetics_jan15")
+
+
+def test_find_data_files_raises_when_nothing_found():
+    """Unrelated files and directories raise FileNotFoundError."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.makedirs(os.path.join(tmpdir, "other_folder"))
+        open(os.path.join(tmpdir, "other_file.txt"), "w").close()
+
+        with pytest.raises(FileNotFoundError):
+            find_data_files(tmpdir, "kinetics_jan15")

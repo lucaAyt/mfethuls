@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 
 from mfethuls.dataset import Dataset
-from mfethuls.parsers.ingestion import collect_dataframe_from_paths
 from mfethuls.parsers.registry import register_parser
 from mfethuls.schema_normalization import apply_dataframe_schema
 
@@ -14,13 +13,8 @@ from mfethuls.schema_normalization import apply_dataframe_schema
 logger = logging.getLogger(__name__)
 
 
-# TODO: Parser should not use file extension as nmrglue requires folder. .xml is a workaround for now. 
-# Consider an option where if no file extension is given the parser attempt to read the dirname.
 @register_parser('nmr', 'bruker_nmr')
 class BrukerNMRParser:
-    def __init__(self, file_extension='.xml'):
-        self.file_extension = file_extension
-
     def parse(
         self,
         dict_paths,
@@ -36,17 +30,26 @@ class BrukerNMRParser:
     ):
         """Parse Bruker NMR data.
 
+        Derives the experiment folder from the provided file paths (each file
+        is a member of the Bruker dataset directory). parse_raw_data is called
+        once per unique folder so nmrglue reads the spectrum exactly once.
+
         Returns a Dataset when experiment context is provided, otherwise a
         plain DataFrame for backward compatibility.
         """
+        experiment_folders: set[str] = set()
+        for paths in dict_paths.values():
+            for p in paths:
+                experiment_folders.add(os.path.dirname(p) if not os.path.isdir(p) else p)
 
-        df = collect_dataframe_from_paths(
-            dict_paths,
-            file_extension=self.file_extension,
-            parse_raw=self.parse_raw_data,
-            logger=logger,
-            parser_label="NMR",
-            should_parse_raw=lambda path: os.path.isdir(path) or str(path).casefold().endswith(self.file_extension.casefold()),
+        frames = []
+        for folder in sorted(experiment_folders):
+            parsed = self.parse_raw_data(folder)
+            if not parsed.empty:
+                frames.append(parsed)
+
+        df = (
+            pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
         ).dropna(how='all', axis=1)
 
         # Note: this parser currently produces a somewhat non-standard
