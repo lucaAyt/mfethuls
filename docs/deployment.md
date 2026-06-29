@@ -46,65 +46,28 @@ SSH in:
 ssh root@<droplet-public-ip>
 ```
 
-### Install Docker
+Clone the repo first so you have the setup script:
 
 ```shell
-apt update && apt upgrade -y
-apt install -y ca-certificates curl gnupg
-
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-chmod a+r /etc/apt/keyrings/docker.gpg
-
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-  https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
-  > /etc/apt/sources.list.d/docker.list
-
-apt update
-apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+apt-get install -y git
+cd /opt && git clone git@github.com:lucaAyt/mfethuls.git && cd mfethuls
 ```
 
-Verify:
+Then run the bootstrap script (installs Docker, Tailscale, mounts the block volume, creates data directories):
+
 ```shell
-docker run hello-world
+bash scripts/vm_setup.sh
 ```
 
-### Mount the Block Volume
-
-DigitalOcean automatically attaches the volume. Format and mount it:
+Next, join the tailnet:
 
 ```shell
-# Check the device name (usually /dev/sda or /dev/disk/by-id/scsi-...)
-lsblk
-
-# Format (only needed once — skip if re-using an existing volume)
-mkfs.ext4 /dev/sda
-
-# Create mount point and mount
-mkdir -p /mnt/mfethuls-data
-mount /dev/sda /mnt/mfethuls-data
-
-# Persist across reboots
-echo '/dev/sda /mnt/mfethuls-data ext4 defaults,nofail 0 2' >> /etc/fstab
-```
-
-Create the expected sub-directories:
-
-```shell
-mkdir -p /mnt/mfethuls-data/raw
-mkdir -p /mnt/mfethuls-data/mfethuls_storage
-```
-
-### Install Tailscale
-
-```shell
-curl -fsSL https://tailscale.com/install.sh | sh
 tailscale up
 ```
 
 This prints a URL — open it in a browser, log in with the lab Tailscale account, and authorise the machine. The Droplet will appear in the Tailscale dashboard with a stable `100.x.x.x` address. **Note this address** — it is how the team will reach the server.
 
-After joining the tailnet, you can close port 22 to the public internet in the DigitalOcean firewall and SSH via the Tailscale IP instead:
+After joining the tailnet you can SSH via the Tailscale IP and close port 22 to the public internet in the DigitalOcean firewall:
 
 ```shell
 ssh root@100.x.x.x
@@ -114,17 +77,10 @@ ssh root@100.x.x.x
 
 ## Step 4 — Deploy the application
 
-### Clone the repo
-
-```shell
-cd /opt
-git clone git@github.com:lucaAyt/mfethuls.git
-cd mfethuls
-```
-
 ### Create `.env`
 
 ```shell
+cd /opt/mfethuls
 cp env_example .env
 nano .env
 ```
@@ -145,6 +101,21 @@ MFETHULS_POSTGRES_HOST=localhost
 MFETHULS_POSTGRES_HOST_SERVICE=postgres
 MFETHULS_POSTGRES_PORT=5432
 ```
+
+#### DO Spaces (Parquet output — recommended)
+
+If you have a DigitalOcean Spaces bucket, fill in the S3 block to store parsed Parquet files in the cloud rather than on the Droplet's block volume. This is already supported by the worker and requires no code changes:
+
+```
+MFETHULS_S3_BUCKET=mfethulsdev
+MFETHULS_S3_REGION=fra1
+MFETHULS_S3_ENDPOINT=digitaloceanspaces.com
+MFETHULS_S3_ACCESS_KEY=<from DO console → Spaces → Manage Keys>
+MFETHULS_S3_SECRET_KEY=<from DO console>
+MFETHULS_S3_PREFIX=data
+```
+
+Leave these blank to store Parquet files on the block volume instead.
 
 ### Start the stack
 
