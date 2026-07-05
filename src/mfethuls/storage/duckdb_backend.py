@@ -34,6 +34,11 @@ class DuckDBQueryBackend:
         resolved = db_path or _get_duckdb_path()
         self.db_path = resolved if resolved == ":memory:" else os.path.abspath(resolved)
         self.read_only = read_only
+        # DuckDB cannot create a new database file in read-only mode. On a fresh
+        # deployment the file won't exist yet, so we create it first.
+        if read_only and self.db_path != ":memory:" and not os.path.exists(self.db_path):
+            init = _get_duckdb().connect(self.db_path, read_only=False)
+            init.close()
         self._conn = _get_duckdb().connect(self.db_path, read_only=read_only)
         self._s3_configured = False
         self._ensure_registry()
