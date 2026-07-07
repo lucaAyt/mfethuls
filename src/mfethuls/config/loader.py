@@ -184,6 +184,14 @@ def ingest_experiment_dataset(
     if not effective_use_storage:
         return {"status": "skipped"}
 
+    # Ensure Postgres schema exists before any operation that touches the DB.
+    # PostgresManifestBackend (used by _assign_experiment_id) writes to the
+    # experiments table, which is created by PostgresMetadataBackend._ensure_tables().
+    # On a fresh deployment the table won't exist until we initialise it here.
+    resolved_db_url = _resolve_metadata_db_url(db_url)
+    if resolved_db_url:
+        PostgresMetadataBackend(resolved_db_url)
+
     _assign_experiment_id(exp, db_url)
 
     data_backend = _build_data_backend(storage_mode, cloud_provider)
