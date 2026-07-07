@@ -78,13 +78,24 @@ async def ingest(
         data_root=data_root,
     )
     if not allow_invalid and validation["summary"]["invalid"] > 0:
+        import math
+
+        def _sanitise(obj):
+            if isinstance(obj, float) and math.isnan(obj):
+                return None
+            if isinstance(obj, dict):
+                return {k: _sanitise(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_sanitise(v) for v in obj]
+            return obj
+
         raise HTTPException(
             status_code=422,
-            detail={
+            detail=_sanitise({
                 "message": "Registry contains invalid rows",
                 "summary": validation["summary"],
                 "invalid_rows": [row for row in validation["rows"] if not row["valid"]],
-            },
+            }),
         )
 
     job_id = uuid.uuid4().hex
