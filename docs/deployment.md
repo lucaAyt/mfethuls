@@ -169,13 +169,22 @@ rsync -avz --progress \
   root@100.x.x.x:/mnt/mfethuls-data/raw/
 ```
 
-Once data is on the server, submit an ingest via the API (uploading your registry CSV):
+Also sync the registry CSV to the server:
+
+```shell
+rsync -avz --progress \
+  "/mnt/c/Users/BertossL/OneDrive - Université de Fribourg/Documents/experiments_template.csv" \
+  root@100.x.x.x:/mnt/mfethuls_data/
+```
+
+Once data and registry are on the server, trigger ingest:
 
 ```shell
 curl -s -X POST http://100.x.x.x:8000/ingest \
-  -H "Authorization: Bearer <your-api-key>" \
-  -F "file=@/path/to/experiments_registry.csv"
+  -H "Authorization: Bearer <your-api-key>"
 ```
+
+The server reads the registry from `PATH_TO_REGISTRY` — no file upload needed.
 
 ---
 
@@ -207,7 +216,7 @@ Postgres data and DuckDB (both on the block volume) survive rebuilds.
 | Item | Status | Plan |
 |------|--------|------|
 | Data sync from OneDrive | Manual `rsync` | Phase 1b: `rclone` sync on demand |
-| Registry sync | Upload via API at ingest time | Stays as-is — works well |
+| Registry sync | Manual `rsync` alongside raw data | Phase 1b: `rclone` sync on demand |
 | TLS for team access | Plain HTTP over Tailscale | Acceptable: Tailscale encrypts all traffic end-to-end (WireGuard). Add `tailscale serve` for HTTPS if needed. |
 | Automated backups | None | Add DigitalOcean volume snapshot policy (1-click in console) |
 
