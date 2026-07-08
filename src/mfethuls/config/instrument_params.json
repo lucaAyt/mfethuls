@@ -43,13 +43,13 @@
     "type": "uv_vis",
     "model": "flame",
     "name": "uv_insitu",
-    "folder_name": "UV_VIS"
+    "folder_name": "UV_Vis"
   },
   {
     "type": "uv_vis",
     "model": "Shimadzu",
     "name": "uv_vis",
-    "folder_name": "UV_VIS"
+    "folder_name": "UV_Vis"
   },
   {
     "type": "rheometer",
