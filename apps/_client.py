@@ -93,8 +93,16 @@ def _read_metadata_json(storage_path: str) -> Dict[str, Any]:
 def _enrich_from_postgres(datasets: List[Dict[str, Any]]) -> bool:
     """Enrich dataset dicts in-place using the Postgres metadata table.
 
-    Returns True if Postgres was reachable, False otherwise (caller should
-    fall back to .metadata.json).
+    Joins on experiment_name — consistent across both Postgres (experiment_name
+    column) and DuckDB dataset_registry (experiment_name column set by worker).
+    Note: dataset_name in Postgres uses _dataset_basename (hex-id based) while
+    DuckDB table_name uses _view_basename (human name based) — they never match,
+    so dataset_name is intentionally not used as the join key.
+
+    Only writes fields for datasets that have a Postgres match; unmatched
+    datasets are left untouched so the .metadata.json fallback can fill them.
+
+    Returns True if Postgres was reachable, False otherwise.
     """
     try:
         from mfethuls.storage import get_postgres_db_url
@@ -104,9 +112,16 @@ def _enrich_from_postgres(datasets: List[Dict[str, Any]]) -> bool:
             return False
         backend = PostgresMetadataBackend(pg_url)
         pg_rows = backend.list_datasets(limit=2000)
-        pg_by_name: Dict[str, Dict[str, Any]] = {r["dataset_name"]: r for r in pg_rows if r.get("dataset_name")}
+        # Index by experiment_name — present in both Postgres and DuckDB registry.
+        pg_by_exp: Dict[str, Dict[str, Any]] = {}
+        for r in pg_rows:
+            exp_name = r.get("experiment_name")
+            if exp_name and exp_name not in pg_by_exp:
+                pg_by_exp[exp_name] = r
         for d in datasets:
-            pg = pg_by_name.get(d["name"], {})
+            pg = pg_by_exp.get(d.get("experiment_name") or "")
+            if not pg:
+                continue  # no match — leave blank so .metadata.json can fill in
             d["instrument_name"] = pg.get("instrument_name") or ""
             d["instrument_type"] = pg.get("instrument_type") or ""
             d["instrument_model"] = pg.get("instrument_model") or ""
@@ -120,16 +135,22 @@ def _enrich_from_postgres(datasets: List[Dict[str, Any]]) -> bool:
 
 
 def _enrich_from_metadata_json(datasets: List[Dict[str, Any]]) -> None:
-    """Enrich dataset dicts in-place by reading .metadata.json sidecars."""
+    """Fill empty enrichment fields from .metadata.json sidecars.
+
+    Uses `or`-based assignment so it only replaces empty strings, never
+    overwriting values already populated by Postgres enrichment.
+    """
     for d in datasets:
         meta = _read_metadata_json(d.get("storage_path", ""))
-        d.setdefault("instrument_name", meta.get("instrument_name") or "")
-        d.setdefault("instrument_type", meta.get("instrument_type") or "")
-        d.setdefault("instrument_model", meta.get("instrument_model") or "")
-        d.setdefault("sample_id", meta.get("sample_id") or "")
-        d.setdefault("run_id", meta.get("run_id") or "")
-        d.setdefault("experiment_name", meta.get("experiment_name") or d.get("experiment_name") or "")
-        d.setdefault("raw_data_filename", meta.get("raw_data_filename") or "")
+        if not meta:
+            continue
+        d["instrument_name"] = d.get("instrument_name") or meta.get("instrument_name") or ""
+        d["instrument_type"] = d.get("instrument_type") or meta.get("instrument_type") or ""
+        d["instrument_model"] = d.get("instrument_model") or meta.get("instrument_model") or ""
+        d["sample_id"] = d.get("sample_id") or meta.get("sample_id") or ""
+        d["run_id"] = d.get("run_id") or meta.get("run_id") or ""
+        d["experiment_name"] = d.get("experiment_name") or meta.get("experiment_name") or ""
+        d["raw_data_filename"] = d.get("raw_data_filename") or meta.get("raw_data_filename") or ""
 
 
 # ---------------------------------------------------------------------------
@@ -172,9 +193,9 @@ def list_datasets() -> List[Dict[str, Any]]:
         datasets = [_normalise_dataset(r) for r in rows]
 
     # Enrich with instrument/sample/run info.
-    # Postgres is tried first (service mode); .metadata.json sidecar is the fallback.
-    if not _enrich_from_postgres(datasets):
-        _enrich_from_metadata_json(datasets)
+    # Postgres fills matched rows; .metadata.json fills whatever Postgres left blank.
+    _enrich_from_postgres(datasets)
+    _enrich_from_metadata_json(datasets)
 
     return datasets
 
