@@ -86,7 +86,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        MFETHULS_EXTRAS: "viz"
+        MFETHULS_EXTRAS: "viz,postgres"
     container_name: mfethuls-streamlit
     working_dir: /app
     volumes:
