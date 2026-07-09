@@ -3,12 +3,15 @@
 Read path  → DuckDB / Parquet directly when the file is accessible on disk.
              This applies in both local mode AND the Streamlit container (shared
              DATA_ROOT volume), avoiding a HTTP + double-serialisation round trip.
+             Metadata enrichment uses Postgres (service mode) or .metadata.json
+             sidecars (local mode) — same naming conventions in both.
 Write/management path → REST API (ingest trigger, job status, dataset delete).
              These operations require server-side coordination and go through FastAPI.
 """
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Dict, List, Optional
 
@@ -23,7 +26,7 @@ def mode() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Service-mode helpers
+# Service-mode HTTP helpers
 # ---------------------------------------------------------------------------
 
 def api_url() -> str:
@@ -70,21 +73,87 @@ def health_check() -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
+# Metadata enrichment helpers
+# ---------------------------------------------------------------------------
+
+def _read_metadata_json(storage_path: str) -> Dict[str, Any]:
+    """Read the .metadata.json sidecar next to a Parquet file."""
+    if not storage_path or storage_path.startswith(("s3://", "az://", "https://")):
+        return {}
+    meta_path = os.path.splitext(storage_path)[0] + ".metadata.json"
+    if not os.path.exists(meta_path):
+        return {}
+    try:
+        with open(meta_path, encoding="utf8") as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
+
+
+def _enrich_from_postgres(datasets: List[Dict[str, Any]]) -> bool:
+    """Enrich dataset dicts in-place using the Postgres metadata table.
+
+    Returns True if Postgres was reachable, False otherwise (caller should
+    fall back to .metadata.json).
+    """
+    try:
+        from mfethuls.storage import get_postgres_db_url
+        from mfethuls.storage.metadata import PostgresMetadataBackend
+        pg_url = get_postgres_db_url()
+        if not pg_url:
+            return False
+        backend = PostgresMetadataBackend(pg_url)
+        pg_rows = backend.list_datasets(limit=2000)
+        pg_by_name: Dict[str, Dict[str, Any]] = {r["dataset_name"]: r for r in pg_rows if r.get("dataset_name")}
+        for d in datasets:
+            pg = pg_by_name.get(d["name"], {})
+            d["instrument_name"] = pg.get("instrument_name") or ""
+            d["instrument_type"] = pg.get("instrument_type") or ""
+            d["instrument_model"] = pg.get("instrument_model") or ""
+            d["sample_id"] = pg.get("sample_id") or ""
+            d["run_id"] = pg.get("run_id") or ""
+            d["experiment_name"] = pg.get("experiment_name") or d.get("experiment_name") or ""
+            d["raw_data_filename"] = pg.get("raw_data_filename") or d.get("raw_data_filename") or ""
+        return True
+    except Exception:
+        return False
+
+
+def _enrich_from_metadata_json(datasets: List[Dict[str, Any]]) -> None:
+    """Enrich dataset dicts in-place by reading .metadata.json sidecars."""
+    for d in datasets:
+        meta = _read_metadata_json(d.get("storage_path", ""))
+        d.setdefault("instrument_name", meta.get("instrument_name") or "")
+        d.setdefault("instrument_type", meta.get("instrument_type") or "")
+        d.setdefault("instrument_model", meta.get("instrument_model") or "")
+        d.setdefault("sample_id", meta.get("sample_id") or "")
+        d.setdefault("run_id", meta.get("run_id") or "")
+        d.setdefault("experiment_name", meta.get("experiment_name") or d.get("experiment_name") or "")
+        d.setdefault("raw_data_filename", meta.get("raw_data_filename") or "")
+
+
+# ---------------------------------------------------------------------------
 # Datasets
 # ---------------------------------------------------------------------------
 
 def _normalise_dataset(row: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalise a dataset row from either local DuckDB or the API."""
     return {
         "name": row.get("name") or row.get("table_name") or "",
         "storage_path": row.get("storage_path") or "",
         "experiment_name": row.get("experiment_name") or "",
+        "raw_data_filename": row.get("raw_data_filename") or "",
         "registered_at": str(row.get("registered_at") or ""),
+        # enriched fields — populated by _enrich_* below
+        "instrument_name": "",
+        "instrument_type": "",
+        "instrument_model": "",
+        "sample_id": "",
+        "run_id": "",
     }
 
 
 def _local_db_path() -> str | None:
-    """Return the DuckDB path if the file exists on the local/mounted filesystem."""
+    """Return the DuckDB path if the file is accessible on disk."""
     from mfethuls.storage import _get_duckdb_path
     path = _get_duckdb_path()
     return path if os.path.exists(path) else None
@@ -92,21 +161,27 @@ def _local_db_path() -> str | None:
 
 @st.cache_data(show_spinner=False, ttl=30)
 def list_datasets() -> List[Dict[str, Any]]:
-    # Direct read when DuckDB is accessible — local mode and Streamlit container (shared volume).
+    # Load base list from DuckDB (direct) or API (fallback).
     db_path = _local_db_path()
     if db_path:
         from mfethuls.storage import duckdb_session
         with duckdb_session(db_path=db_path, read_only=True) as backend:
-            return [_normalise_dataset(r) for r in backend.list_registered()]
+            datasets = [_normalise_dataset(r) for r in backend.list_registered()]
+    else:
+        rows = _get("/datasets")
+        datasets = [_normalise_dataset(r) for r in rows]
 
-    # Fallback: remote deployment where only the API is reachable.
-    rows = _get("/datasets")
-    return [_normalise_dataset(r) for r in rows]
+    # Enrich with instrument/sample/run info.
+    # Postgres is tried first (service mode); .metadata.json sidecar is the fallback.
+    if not _enrich_from_postgres(datasets):
+        _enrich_from_metadata_json(datasets)
+
+    return datasets
 
 
 @st.cache_data(show_spinner=False, ttl=30)
 def query_dataset(name: str, limit: int = 5000, offset: int = 0) -> pd.DataFrame:
-    # Direct read when DuckDB is accessible — avoids HTTP + double serialisation.
+    # Direct read when DuckDB is on disk — avoids HTTP + double serialisation.
     db_path = _local_db_path()
     if db_path:
         from mfethuls.storage import duckdb_session
@@ -114,18 +189,17 @@ def query_dataset(name: str, limit: int = 5000, offset: int = 0) -> pd.DataFrame
             safe = name.replace('"', '""')
             return backend.query(f'SELECT * FROM "{safe}" LIMIT ? OFFSET ?', [limit, offset])
 
-    # Fallback: remote deployment, reconstruct DataFrame from JSON response.
+    # Fallback: reconstruct DataFrame from API JSON response.
     result = _get(f"/dataset/{name}", limit=limit, offset=offset)
     cols = [c["name"] for c in result.get("columns", [])]
     return pd.DataFrame(result.get("rows", []), columns=cols)
 
 
 def delete_dataset(name: str) -> Dict[str, Any]:
+    # Deletes always go through the API — requires a DuckDB write lock on the server.
     if mode() == "service":
         import requests
-        resp = requests.delete(
-            f"{api_url()}/dataset/{name}", headers=api_headers(), timeout=15
-        )
+        resp = requests.delete(f"{api_url()}/dataset/{name}", headers=api_headers(), timeout=15)
         resp.raise_for_status()
         return resp.json()
 
@@ -155,10 +229,9 @@ def preview_registry(
             )
             resp.raise_for_status()
             return resp.json()
-        return _get("/registry/preview")  # use server-side PATH_TO_REGISTRY
+        return _get("/registry/preview")
 
     from mfethuls.registry_validator import validate_registry_dataframe
-
     if file_bytes:
         from mfethuls.api.utils import read_tabular_content_bytes
         df = read_tabular_content_bytes(file_bytes)
@@ -168,11 +241,7 @@ def preview_registry(
         df = read_tabular_content(path)
 
     data_root = os.environ.get("PATH_TO_DATA")
-    return validate_registry_dataframe(
-        df,
-        check_data_paths=bool(data_root),
-        data_root=data_root,
-    )
+    return validate_registry_dataframe(df, check_data_paths=bool(data_root), data_root=data_root)
 
 
 # ---------------------------------------------------------------------------
@@ -188,12 +257,7 @@ def trigger_ingest_service(
     params: Dict[str, Any] = {"storage_mode": storage_mode, "allow_invalid": allow_invalid}
     if cloud_provider:
         params["cloud_provider"] = cloud_provider
-    resp = requests.post(
-        f"{api_url()}/ingest",
-        headers=api_headers(),
-        params=params,
-        timeout=30,
-    )
+    resp = requests.post(f"{api_url()}/ingest", headers=api_headers(), params=params, timeout=30)
     resp.raise_for_status()
     return resp.json()
 
@@ -215,12 +279,8 @@ def local_ingest(
         for name in experiment_names:
             try:
                 result = ingest_experiment_dataset(
-                    name,
-                    refresh=refresh,
-                    storage_mode="local",
-                    cloud_provider=None,
-                    db_url=None,
-                    query_backend=qb,
+                    name, refresh=refresh, storage_mode="local",
+                    cloud_provider=None, db_url=None, query_backend=qb,
                 )
                 results.append((name, result or {}))
             except Exception as exc:

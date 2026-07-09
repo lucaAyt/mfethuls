@@ -2,7 +2,6 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-import json
 import streamlit as st
 import pandas as pd
 
@@ -18,17 +17,6 @@ if client.mode() == "service":
         default_key = os.environ.get("MFETHULS_API_KEY", "")
         st.session_state["api_url"] = st.text_input("API URL", value=st.session_state.get("api_url", default_url))
         st.session_state["api_key"] = st.text_input("API key", type="password", value=st.session_state.get("api_key", default_key))
-
-
-def _read_metadata(storage_path: str) -> dict:
-    meta_path = os.path.splitext(storage_path)[0] + ".metadata.json"
-    if not os.path.exists(meta_path):
-        return {}
-    try:
-        with open(meta_path, encoding="utf8") as fh:
-            return json.load(fh)
-    except Exception:
-        return {}
 
 
 def _storage_label(storage_path: str) -> str:
@@ -62,12 +50,12 @@ if not datasets:
 rows = []
 for d in datasets:
     storage_path = d.get("storage_path", "")
-    meta = _read_metadata(storage_path)
     rows.append({
         "name": d.get("name", ""),
-        "instrument": meta.get("instrument_name") or meta.get("instrument_type") or "",
-        "sample_id": meta.get("sample_id") or "",
-        "run_id": meta.get("run_id") or "",
+        "experiment_name": d.get("experiment_name", ""),
+        "instrument": d.get("instrument_name") or d.get("instrument_type") or "",
+        "sample_id": d.get("sample_id") or "",
+        "run_id": d.get("run_id") or "",
         "storage": _storage_label(storage_path),
         "registered_at": d.get("registered_at", ""),
         "storage_path": storage_path,
@@ -76,7 +64,7 @@ for d in datasets:
 df_summary = pd.DataFrame(rows)
 
 show_paths = st.toggle("Show full paths", value=False)
-display_cols = ["name", "instrument", "sample_id", "run_id", "storage", "registered_at"]
+display_cols = ["experiment_name", "name", "instrument", "sample_id", "run_id", "storage", "registered_at"]
 if show_paths:
     display_cols.append("storage_path")
 
@@ -100,11 +88,11 @@ if st.button("Load"):
             st.error(f"Query failed: {exc}")
             st.stop()
 
-    meta = _read_metadata(next((d["storage_path"] for d in datasets if d["name"] == selected), ""))
-
-    if meta:
+    selected_meta = next((d for d in datasets if d["name"] == selected), {})
+    display_meta = {k: v for k, v in selected_meta.items() if v and k != "storage_path"}
+    if display_meta:
         with st.expander("Metadata", expanded=False):
-            st.json(meta)
+            st.json(display_meta)
 
     col1, col2 = st.columns(2)
     col1.metric("Rows", f"{len(df):,}")
