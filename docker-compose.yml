@@ -81,66 +81,34 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  metabase:
-    build:
-      context: .
-      dockerfile: Dockerfile.metabase
-      args:
-        - METABASE_VERSION=0.58.9
-        - METABASE_DUCKDB_DRIVER_VERSION=1.4.3.1
-    container_name: metabase
-    hostname: metabase
-    user: "0"
-    volumes:
-      - ./:/home/metabase/data
-      - ${DATA_ROOT}:/data
-    environment:
-      - MB_PLUGINS_DIR=/home/metabase/plugins/
-      - MB_RESULT_ROW_MAXIMUM=1000000
-    ports:
-      - "3000:3000"
-    restart: unless-stopped
-
-  quack:
+  streamlit:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        MFETHULS_EXTRAS: service
-    container_name: mfethuls-quack
+        MFETHULS_EXTRAS: "viz"
+    container_name: mfethuls-streamlit
     working_dir: /app
     volumes:
       - ./:/app
       - ${DATA_ROOT}:/data
     environment:
       MFETHULS_MODE: service
-      MFETHULS_DUCKDB_PATH: /data/mfethuls.duckdb
+      MFETHULS_API_URL: http://api:8000
+      MFETHULS_API_KEY: ${MFETHULS_API_KEY}
       PATH_TO_DATA: ${PATH_TO_DATA:-/data}
       PATH_TO_REGISTRY: ${PATH_TO_REGISTRY:-/data/experiments_template.csv}
-      MFETHULS_POSTGRES_ENABLED: ${MFETHULS_POSTGRES_ENABLED}
-      MFETHULS_POSTGRES_USER: ${MFETHULS_POSTGRES_USER}
-      MFETHULS_POSTGRES_PASSWORD: ${MFETHULS_POSTGRES_PASSWORD}
-      MFETHULS_POSTGRES_DB: ${MFETHULS_POSTGRES_DB}
-      MFETHULS_POSTGRES_HOST: ${MFETHULS_POSTGRES_HOST_SERVICE}
-      MFETHULS_POSTGRES_PORT: ${MFETHULS_POSTGRES_PORT}
-    entrypoint: ["python", "-m", "mfethuls.quack_server"]
+    entrypoint: [
+      "streamlit", "run", "/app/apps/Home.py",
+      "--server.port=8501",
+      "--server.address=0.0.0.0",
+      "--server.headless=true"
+    ]
     depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "8080:8080"
-    restart: unless-stopped
-
-  caddy:
-    image: caddy:2
-    container_name: mfethuls-caddy
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-    ports:
-      - "8081:8081"
-    depends_on:
-      quack:
+      api:
         condition: service_started
+    ports:
+      - "8501:8501"
     restart: unless-stopped
 
 volumes:

@@ -72,25 +72,23 @@ flowchart LR
   end
 
   subgraph service ["Service mode (MFETHULS_MODE=service)"]
-    USER[User / Client]
+    USER[User / Browser]
     AUTH[Auth middleware\nBearer token]
     API[FastAPI :8000]
     WK[Worker]
     PG[(Postgres\njobs + metadata)]
     LD2[(DuckDB file)]
     LP2[Parquet local/cloud]
-    MB[Metabase :3000]
-    QS[Quack server :8080]
+    ST[Streamlit :8501]
 
-    USER -->|Authorization: Bearer| AUTH
+    USER --> ST
+    ST -->|Authorization: Bearer| AUTH
     AUTH --> API
     API --> PG
     WK --> PG
     API -->|read-only\nper request| LD2
     WK -->|brief write\nend of job| LD2
     WK --> LP2
-    MB --> QS
-    QS -->|read-only\nper request| LD2
   end
 ```
 
@@ -306,7 +304,7 @@ DuckDB uses an OS-level exclusive file lock for write connections. A read connec
 | `apps/streamlit_app.py` | local | Ingest sidebar, dataset browser, ad-hoc plots |
 | FastAPI (`api/`) | service | Preview, ingest, job management, dataset access |
 | Worker (`worker.py`) | service | Background ingest processor |
-| Metabase via Quack gateway | service | BI dashboards over DuckDB views |
+| Streamlit (`apps/`) | local + service | Registry, Explorer, Datasets, Jobs pages |
 
 ---
 

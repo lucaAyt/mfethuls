@@ -1,6 +1,6 @@
 # Cloud Deployment — DigitalOcean + Tailscale
 
-Step-by-step guide to running mfethuls on a DigitalOcean Droplet accessible to the lab team via Tailscale. This is the Phase 1 deployment: manual data sync, full functionality.
+Step-by-step guide to running mfethuls on a DigitalOcean Droplet accessible to the lab team via Tailscale.
 
 ---
 
@@ -149,6 +149,12 @@ curl http://100.x.x.x:8000/health
 # {"status": "ok"}
 ```
 
+Open the Streamlit dashboard in your browser:
+
+```
+http://100.x.x.x:8501
+```
+
 ---
 
 ## Step 5 — Push data to the server
@@ -192,9 +198,14 @@ The server reads the registry from `PATH_TO_REGISTRY` — no file upload needed.
 
 For each team member:
 
-1. They install Tailscale and join the lab tailnet (send them the tailnet name, they log in at tailscale.com with the lab account credentials or via an invite link)
-2. Give them the Tailscale IP of the server (`100.x.x.x`) and the `MFETHULS_API_KEY`
-3. They can now reach the API, Metabase (`:3000`), and the Quack gateway (`:8080`) from anywhere — no VPN setup required beyond Tailscale
+1. They install Tailscale and join the lab tailnet (send them the tailnet name; they log in at tailscale.com with the lab account credentials or via an invite link)
+2. Give them the Tailscale IP of the server (`100.x.x.x`)
+3. They open `http://100.x.x.x:8501` in their browser — the Streamlit dashboard requires no local install
+
+| Service | URL |
+|---------|-----|
+| Streamlit dashboard | `http://100.x.x.x:8501` |
+| REST API | `http://100.x.x.x:8000` |
 
 ---
 
@@ -211,7 +222,7 @@ Postgres data and DuckDB (both on the block volume) survive rebuilds.
 
 ---
 
-## What's not automated yet (Phase 1 known limitations)
+## Known limitations
 
 | Item | Status | Plan |
 |------|--------|------|
