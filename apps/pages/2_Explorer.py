@@ -60,11 +60,16 @@ if not datasets:
     st.info("No datasets registered yet. Go to the Registry page to ingest experiments.")
     st.stop()
 
-dataset_names = [d["name"] for d in datasets]
+# Map human-readable label → internal DuckDB table_name.
+label_to_name = {
+    (d.get("experiment_name") or d["name"]): d["name"]
+    for d in datasets
+}
 
 with st.sidebar:
     st.subheader("Datasets")
-    selected_names = st.multiselect("Select experiments to overlay", options=dataset_names)
+    selected_labels = st.multiselect("Select experiments to overlay", options=list(label_to_name.keys()))
+    selected_names = [label_to_name[l] for l in selected_labels]
     limit = st.number_input("Row limit per dataset", min_value=100, max_value=1_000_000, value=5000, step=500)
     if st.button("Refresh dataset list"):
         client.list_datasets.clear()
@@ -78,10 +83,10 @@ if not selected_names:
 # Load data
 # ---------------------------------------------------------------------------
 frames: list[pd.DataFrame] = []
-for name in selected_names:
+for label, name in zip(selected_labels, selected_names):
     try:
         df = client.query_dataset(name, limit=int(limit))
-        df["_experiment"] = name
+        df["_experiment"] = label  # human-readable label for plot legend
         frames.append(df)
     except Exception as exc:
         st.error(f"Failed to load {name}: {exc}")

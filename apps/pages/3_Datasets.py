@@ -64,7 +64,7 @@ for d in datasets:
 df_summary = pd.DataFrame(rows)
 
 show_paths = st.toggle("Show full paths", value=False)
-display_cols = ["experiment_name", "name", "instrument", "sample_id", "run_id", "storage", "registered_at"]
+display_cols = ["experiment_name", "sample_id", "run_id", "instrument", "storage", "registered_at"]
 if show_paths:
     display_cols.append("storage_path")
 
@@ -77,7 +77,13 @@ st.caption(f"{len(datasets)} dataset(s) registered.")
 st.divider()
 st.subheader("Inspect dataset")
 
-selected = st.selectbox("Dataset", options=[d["name"] for d in datasets])
+# Display human-readable label but use internal table_name for queries.
+label_to_name = {
+    (d.get("experiment_name") or d["name"]): d["name"]
+    for d in datasets
+}
+selected_label = st.selectbox("Dataset", options=list(label_to_name.keys()))
+selected = label_to_name[selected_label]
 limit = st.number_input("Row limit", min_value=10, max_value=100_000, value=200, step=100)
 
 if st.button("Load"):

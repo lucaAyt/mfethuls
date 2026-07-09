@@ -169,19 +169,19 @@ class DuckDBQueryBackend:
             self._conn.execute(
                 f'CREATE OR REPLACE VIEW "{self._sql_string(view_name)}" AS SELECT * FROM read_parquet(\'{self._sql_string(storage_path)}\');'
             )
-        self._conn.execute(
-            """
-            INSERT INTO dataset_registry (table_name, storage_path, experiment_name, raw_data_filename)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(table_name)
-            DO UPDATE SET
-                storage_path = excluded.storage_path,
-                experiment_name = excluded.experiment_name,
-                raw_data_filename = excluded.raw_data_filename,
-                registered_at = now();
-            """,
-            [view_name, storage_path, experiment_name, raw_data_filename],
-        )
+            self._conn.execute(
+                """
+                INSERT INTO dataset_registry (table_name, storage_path, experiment_name, raw_data_filename)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(table_name)
+                DO UPDATE SET
+                    storage_path = excluded.storage_path,
+                    experiment_name = excluded.experiment_name,
+                    raw_data_filename = excluded.raw_data_filename,
+                    registered_at = now();
+                """,
+                [view_name, storage_path, experiment_name, raw_data_filename],
+            )
         return view_name
 
     def list_registered(self) -> List[Dict[str, Any]]:

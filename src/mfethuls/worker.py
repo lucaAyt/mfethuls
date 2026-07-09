@@ -74,7 +74,7 @@ def _process_job_ingest(
     # Collect Parquet paths during parsing; DuckDB registration happens in one
     # brief write window at the end so we don't hold an exclusive lock while
     # parsing (which can take minutes for large registries).
-    parquet_paths: List[tuple] = []  # (storage_path, experiment_id)
+    parquet_paths: List[Dict[str, Any]] = []
 
     total = max(len(experiment_names), 1)
     for idx, experiment_name in enumerate(experiment_names, start=1):
@@ -111,7 +111,14 @@ def _process_job_ingest(
             }
             if storage_path:
                 entry["storage_path"] = storage_path
-                parquet_paths.append((storage_path, exp.experiment_id))
+                from mfethuls.storage.config import _view_basename
+                parquet_paths.append({
+                    "storage_path": storage_path,
+                    "experiment_id": exp.experiment_id,
+                    "view_name": _view_basename(exp),
+                    "experiment_name": exp.name,
+                    "raw_data_filename": getattr(exp, "raw_data_filename", None),
+                })
 
             dataset_results.append(entry)
 
@@ -135,26 +142,26 @@ def _process_job_ingest(
         update_job(job_id, progress=progress)
 
     # Brief write window: open DuckDB once, batch-register all Parquet files,
-    # then close immediately. API and Quack readers are blocked only during this.
-    registry_table = None
+    # then close immediately. API and Streamlit readers are blocked only during this.
     try:
         with DuckDBQueryBackend() as qb:
-            for storage_path, experiment_id in parquet_paths:
+            for item in parquet_paths:
                 try:
-                    dataset_id = qb.register_parquet(storage_path)
+                    view_name = qb.register_parquet(
+                        item["storage_path"],
+                        table_name=item["view_name"],
+                        experiment_name=item["experiment_name"],
+                        raw_data_filename=item["raw_data_filename"],
+                    )
                     for entry in dataset_results:
-                        if entry.get("storage_path") == storage_path:
-                            entry["dataset_id"] = dataset_id
-                    logger.info("job_id=%s experiment_id=%s registered dataset_id=%s", job_id, experiment_id, dataset_id)
+                        if entry.get("storage_path") == item["storage_path"]:
+                            entry["dataset_id"] = view_name
+                    logger.info(
+                        "job_id=%s experiment_id=%s registered view=%s",
+                        job_id, item["experiment_id"], view_name,
+                    )
                 except Exception:
-                    logger.warning("job_id=%s failed to register %s in DuckDB", job_id, storage_path)
-
-            registry_table = qb.register_parquet(
-                job_registry_path,
-                table_name=f"registry_{job_id}",
-                overwrite=True,
-                persist_view=False,
-            )
+                    logger.warning("job_id=%s failed to register %s in DuckDB", job_id, item["storage_path"])
     except Exception:
         logger.exception("job_id=%s DuckDB batch registration failed", job_id)
 
@@ -164,9 +171,8 @@ def _process_job_ingest(
         status="completed",
         message="ingest completed",
         datasets=dataset_results,
-        registry_table=registry_table,
     )
-    logger.info("job_id=%s ingest completed registry_table=%s", job_id, registry_table)
+    logger.info("job_id=%s ingest completed", job_id)
     return get_job(job_id)
 
 
