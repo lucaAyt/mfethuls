@@ -69,7 +69,10 @@ if client.mode() == "service":
             "Key", type="password", value=st.session_state.get("api_key", default_key)
         )
         ok, msg = client.health_check()
-        st.success(f"✓ {msg}") if ok else st.error(f"✗ {msg}")
+        if ok:
+            st.success(f"✓ {msg}")
+        else:
+            st.error(f"✗ {msg}")
         st.divider()
 
 # ---------------------------------------------------------------------------
