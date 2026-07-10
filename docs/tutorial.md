@@ -1,6 +1,6 @@
 # mfethuls Tutorial
 
-Step-by-step walkthroughs for both operating modes. Start with **Local mode** if you're a researcher working on your own machine. Use **Service mode** if you're running a shared lab server with team access and Metabase dashboards.
+Step-by-step walkthroughs for both operating modes. Start with **Local mode** if you're a researcher working on your own machine. Use **Service mode** if you're running a shared lab server with team access via the Streamlit dashboard.
 
 Prerequisites: Python 3.11+, a virtual environment, and instrument data files on disk.
 
@@ -164,21 +164,20 @@ Double-click `launch.bat` (Windows) or run `bash launch.sh` (macOS/Linux). See [
 **Using the CLI directly:**
 
 ```shell
-streamlit run apps/streamlit_app.py
+streamlit run apps/Home.py
 ```
 
 Open `http://localhost:8501` in your browser.
 
-- **Sidebar → Registry**: load your CSV/XLSX and preview validation
-- **Sidebar → Ingest**: run ingest for selected experiments
-- **Datasets tab**: browse registered datasets by name, sample, and run
-- **Plot tab**: ad-hoc scatter/line plots across multiple experiments
+- **Sidebar → Ingest**: load your registry CSV/XLSX, select experiments, and run ingest with a live progress bar
+- **Sidebar → Datasets**: browse registered datasets by name, sample, and run; select which to load
+- **Main area → Filters / Plot**: ad-hoc scatter/line plots across multiple experiments with filter and export controls
 
 ---
 
 ## Service mode
 
-Service mode runs the full lab server stack. A FastAPI handles HTTP requests from the team, a background worker processes ingest jobs, Postgres tracks job state, DuckDB provides the query catalog, and Metabase serves dashboards. All API requests require a bearer token.
+Service mode runs the full lab server stack. A FastAPI handles HTTP requests from the team, a background worker processes ingest jobs, Postgres tracks job state, DuckDB provides the query catalog, and a Streamlit app serves as the team dashboard. All API requests require a bearer token.
 
 ### 1. Prerequisites
 
@@ -231,9 +230,8 @@ docker compose up --build
 Services that start:
 - `mfethuls-api` on port 8000 — REST API
 - `mfethuls-worker` — background job processor
+- `mfethuls-streamlit` on port 8501 — team dashboard
 - `postgres` on port 5432 — job queue and metadata
-- `metabase` on port 3000 — BI dashboards
-- `caddy` on port 443 — TLS reverse proxy (optional)
 
 Check that everything is healthy:
 
@@ -383,17 +381,12 @@ curl -s -X DELETE http://localhost:8000/dataset/CL_dsc_001_S001_R001 \
 
 This removes the DuckDB view and catalog entry only. The Parquet file on disk is not deleted. Re-run an ingest to re-register it.
 
-### 10. Connect Metabase
+### 10. Open the Streamlit dashboard
 
-Metabase connects through the Quack gateway which provides read-only SQL access to DuckDB.
+Open `http://localhost:8501` (or `http://<tailscale-ip>:8501` in service mode) in your browser.
 
-1. Open `http://localhost:3000` in your browser
-2. Complete the Metabase setup wizard
-3. Add a new database connection: **DuckDB** (via the Quack driver)
-   - Host: `mfethuls-quack` (internal Docker hostname)
-   - Port: `8080` (or as configured in `docker-compose.yml`)
-4. Browse tables — each ingested dataset appears as a table named after the experiment (e.g. `CL_dsc_001_S001_R001`)
-5. Create questions and dashboards using the normalised column names from [SCHEMA_CONTRACT.md](../SCHEMA_CONTRACT.md)
+- **Sidebar → Datasets**: select one or more experiments to visualise
+- **Main area → Plot**: overlay curves, change axes, apply filters, export SVG/PNG
 
 ---
 

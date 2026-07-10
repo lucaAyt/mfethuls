@@ -325,4 +325,3 @@ Or for structured errors (e.g. validation failures):
 | `MFETHULS_S3_ENDPOINT` | S3-compatible endpoint URL |
 | `MFETHULS_S3_ACCESS_KEY` | S3 access key |
 | `MFETHULS_S3_SECRET_KEY` | S3 secret key |
-| `MFETHULS_ADMIN_TOKEN` | Token for Quack server `/admin/refresh` |

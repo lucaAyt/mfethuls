@@ -144,7 +144,7 @@ CL_pending,,,,,Planned — not yet run,,
 
 ## Tips for experimentalists
 
-**Naming convention:** establish a lab-wide prefix (e.g. `CL_` for your group) and use the instrument type as part of the name. This makes the dataset list in Metabase and the Streamlit browser much easier to scan.
+**Naming convention:** establish a lab-wide prefix (e.g. `CL_` for your group) and use the instrument type as part of the name. This makes the dataset list in the Streamlit dashboard much easier to scan.
 
 **One row per run:** if you repeat an experiment (`R001`, `R002`), create a separate row for each run. The `name` must be unique across all rows.
 
@@ -154,4 +154,4 @@ CL_pending,,,,,Planned — not yet run,,
 
 **Validate before you ingest:** use `POST /registry/preview` (service) or the Streamlit sidebar preview button (local) to catch formatting errors before starting a long ingest job.
 
-**Custom columns are fine:** any column beyond the standard set is stored as experiment metadata and is queryable via Metabase. Use them freely for concentration, solvent, temperature, batch number, etc.
+**Custom columns are fine:** any column beyond the standard set is stored as experiment metadata. Use them freely for concentration, solvent, temperature, batch number, etc.

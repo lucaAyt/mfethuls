@@ -11,7 +11,7 @@ Recommended stack
 - Postgres for metadata (JSONB) + indexes (GIN on JSONB)
 - Parquet files for dataset storage (local for dev; S3/GCS/Azure for prod)
 - DuckDB for local ad-hoc queries; Trino/Presto/Athena for prod-scale queries
-- BI: Superset/Metabase over Postgres (metadata) + Trino for parquet analytics
+- BI: Streamlit dashboard (current); Superset or similar over Postgres + DuckDB for future scale
 
 Schema sketch (Postgres)
 

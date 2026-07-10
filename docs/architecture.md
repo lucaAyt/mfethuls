@@ -94,7 +94,7 @@ flowchart LR
 
 **Local mode:** no Postgres required; ingest writes Parquet and registers DuckDB views on disk. Single-process — no lock contention.
 
-**Service mode:** API queues jobs in Postgres; worker runs the ingest pipeline; API holds DuckDB read-only for milliseconds per request; worker holds a write lock only at the end of each job (batch view registration). Metabase connects through the Quack gateway in read-only mode.
+**Service mode:** API queues jobs in Postgres; worker runs the ingest pipeline; API holds DuckDB read-only for milliseconds per request; worker holds a write lock only at the end of each job (batch view registration). Streamlit connects directly to DuckDB via the shared data volume.
 
 ---
 
@@ -301,10 +301,9 @@ DuckDB uses an OS-level exclusive file lock for write connections. A read connec
 | Interface | Mode | Purpose |
 |-----------|------|---------|
 | Notebooks / CLI | local | Load, compare, plot experiments via Python API |
-| `apps/streamlit_app.py` | local | Ingest sidebar, dataset browser, ad-hoc plots |
+| `apps/Home.py` | local + service | Ingest sidebar, dataset browser, ad-hoc plots |
 | FastAPI (`api/`) | service | Preview, ingest, job management, dataset access |
 | Worker (`worker.py`) | service | Background ingest processor |
-| Streamlit (`apps/`) | local + service | Registry, Explorer, Datasets, Jobs pages |
 
 ---
 
@@ -339,7 +338,6 @@ src/mfethuls/
     auth.py               # verify_token bearer token dependency
     routes.py             # Route handlers
   worker.py               # Background job processor + timeout
-  quack_server.py         # HTTP gateway for Metabase → DuckDB
   plotting/               # Optional viz (viz extra)
 ```
 
