@@ -157,40 +157,85 @@ http://100.x.x.x:8501
 
 ---
 
-## Step 5 — Push data to the server
+## Step 5 — Configure rclone for OneDrive sync
 
-For the first deployment, sync raw instrument data manually with `rsync`. Run this from your lab machine whenever you have new data to ingest:
+rclone pulls data from OneDrive to the Droplet on demand. The OAuth token is generated on your local machine (where a browser is available) and copied to the server — this sidesteps any institutional restrictions on headless OAuth.
 
-```shell
-# From your Windows machine (Git Bash or WSL)
-rsync -avz --progress \
-  "/mnt/c/Users/BertossL/OneDrive - Université de Fribourg/Documents/" \
-  root@100.x.x.x:/mnt/mfethuls-data/raw/
-```
+### One-time setup (run on your Windows machine)
 
-Or from macOS/Linux:
-```shell
-rsync -avz --progress \
-  "/Users/you/OneDrive - Lab/Documents/" \
-  root@100.x.x.x:/mnt/mfethuls-data/raw/
-```
+Install rclone locally: download from [rclone.org/downloads](https://rclone.org/downloads/) and add to PATH.
 
-Also sync the registry CSV to the server:
+Configure the OneDrive remote:
 
 ```shell
-rsync -avz --progress \
-  "/mnt/c/Users/BertossL/OneDrive - Université de Fribourg/Documents/experiments_template.csv" \
-  root@100.x.x.x:/mnt/mfethuls_data/
+rclone config
 ```
 
-Once data and registry are on the server, trigger ingest:
+Follow the prompts:
+- Name: `onedrive`
+- Storage type: `Microsoft OneDrive`
+- Sign in with your institutional (or personal) Microsoft account in the browser that opens
+- Accept defaults for everything else
+
+Copy the config to the Droplet:
+
+```shell
+# Windows (Git Bash / WSL)
+scp ~/.config/rclone/rclone.conf root@100.x.x.x:/root/.config/rclone/rclone.conf
+
+# macOS / Linux
+scp ~/.config/rclone/rclone.conf root@100.x.x.x:/root/.config/rclone/rclone.conf
+```
+
+Add the rclone paths to `.env` on the Droplet:
+
+```
+RCLONE_REMOTE=onedrive
+RCLONE_SOURCE_PATH=Documents/raw
+RCLONE_REGISTRY_PATH=Documents/experiments_template.csv
+```
+
+Verify it works from the Droplet:
+
+```shell
+rclone ls onedrive:Documents
+```
+
+### Token refresh (~every 90 days)
+
+Microsoft OAuth tokens expire. When sync starts failing, re-run `rclone config` locally and re-copy the conf file to the Droplet.
+
+### Sync on demand
+
+**Via Streamlit:** open the Ingest sidebar → click **"Sync from OneDrive"**. An info message confirms the sync started; wait ~30 s before triggering ingest.
+
+**Via curl:**
+
+```shell
+curl -s -X POST http://100.x.x.x:8000/sync \
+  -H "Authorization: Bearer <your-api-key>"
+# {"status": "sync_started"}
+```
+
+Then trigger ingest:
 
 ```shell
 curl -s -X POST http://100.x.x.x:8000/ingest \
   -H "Authorization: Bearer <your-api-key>"
 ```
 
-The server reads the registry from `PATH_TO_REGISTRY` — no file upload needed.
+### Fallback: direct file transfer (SFTP / rsync)
+
+When rclone is unavailable or the token has lapsed, push data directly over SSH.
+
+**Non-technical users (Windows):** use [WinSCP](https://winscp.net) — free GUI SFTP client. Connect with the Tailscale IP and your SSH key, then drag and drop files into `/mnt/mfethuls-data/`.
+
+**Technical users:**
+
+```shell
+rsync -avz --progress /local/raw-data/ root@100.x.x.x:/mnt/mfethuls-data/
+rsync -avz --progress experiments_template.csv root@100.x.x.x:/mnt/mfethuls-data/
+```
 
 ---
 
@@ -226,8 +271,8 @@ Postgres data and DuckDB (both on the block volume) survive rebuilds.
 
 | Item | Status | Plan |
 |------|--------|------|
-| Data sync from OneDrive | Manual `rsync` | Phase 1b: `rclone` sync on demand |
-| Registry sync | Manual `rsync` alongside raw data | Phase 1b: `rclone` sync on demand |
+| Data sync from OneDrive | rclone on-demand (Streamlit button or `POST /sync`) | Done — Phase 1b |
+| Registry sync | rclone alongside raw data | Done — Phase 1b |
 | TLS for team access | Plain HTTP over Tailscale | Acceptable: Tailscale encrypts all traffic end-to-end (WireGuard). Add `tailscale serve` for HTTPS if needed. |
 | Automated backups | None | Add DigitalOcean volume snapshot policy (1-click in console) |
 

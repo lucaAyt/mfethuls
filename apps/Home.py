@@ -187,6 +187,14 @@ with st.sidebar.expander("Ingest", expanded=False):
                 st.error(f"Could not fetch job status: {exc}")
                 st.session_state["ingest_job_id"] = None
 
+        st.divider()
+        if st.button("Sync from OneDrive", use_container_width=True):
+            try:
+                client.trigger_sync()
+                st.info("Sync started — wait ~30 s then trigger ingest.")
+            except Exception as exc:
+                st.error(f"Sync failed to start: {exc}")
+
 # ---------------------------------------------------------------------------
 # Datasets expander
 # ---------------------------------------------------------------------------

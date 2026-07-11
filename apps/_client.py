@@ -314,6 +314,10 @@ def local_ingest(
 # Jobs (service mode only)
 # ---------------------------------------------------------------------------
 
+def trigger_sync() -> Dict[str, Any]:
+    return _post("/sync")
+
+
 def list_jobs(status: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
     if mode() != "service":
         return []

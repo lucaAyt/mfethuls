@@ -30,6 +30,11 @@ echo "Installing Tailscale..."
 curl -fsSL https://tailscale.com/install.sh | sh
 echo "Tailscale installed. Run 'tailscale up' after this script to join the tailnet."
 
+# ── rclone ────────────────────────────────────────────────────────────────────
+echo "Installing rclone..."
+curl https://rclone.org/install.sh | bash
+echo "rclone installed. Copy rclone.conf from your local machine after setup."
+
 # ── Data volume ───────────────────────────────────────────────────────────────
 echo "Setting up data directory..."
 DATA_DIR=/mnt/mfethuls-data
@@ -71,5 +76,8 @@ echo "  4. cp env_example .env && nano .env      # fill in credentials"
 echo "  5. docker compose up --build -d"
 echo "  6. curl http://localhost:8000/health      # should return {\"status\": \"ok\"}"
 echo
-echo "Then rsync your data:"
+echo "Then copy your rclone config and sync data from OneDrive:"
+echo "  scp ~/.config/rclone/rclone.conf root@<tailscale-ip>:/root/.config/rclone/rclone.conf"
+echo "  bash scripts/sync_from_onedrive.sh"
+echo "Or sync directly via rsync/scp (technical users):"
 echo "  rsync -avz /local/data/ root@<tailscale-ip>:$DATA_DIR/"

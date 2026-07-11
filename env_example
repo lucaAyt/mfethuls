@@ -90,6 +90,14 @@ SEC_FOLDER_NAME=SEC
 DMA_FOLDER_NAME=DMA
 SAXS_FOLDER_NAME=SAXS
 
+##========== RCLONE SYNC (Phase 1b) ==========
+# Used by POST /sync to pull raw data and registry from OneDrive.
+# One-time setup: run 'rclone config' locally, copy rclone.conf to Droplet.
+# See docs/deployment.md Step 5 for full instructions.
+RCLONE_REMOTE=onedrive
+RCLONE_SOURCE_PATH=Documents/raw
+RCLONE_REGISTRY_PATH=Documents/experiments_template.csv
+
 ##========== TESTING CONFIG ==========
 # Optional paths for test data (local mode)
 MFETHULS_TEST_DATA_ROOT=/home/user/Documents/mfethuls_test_data

@@ -7,7 +7,10 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+import shutil
+import subprocess
+
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
 
 from ..config.mode import is_service_mode
@@ -105,6 +108,21 @@ async def ingest(
         "job_registry_storage_path": job_registry_path,
     }
     return JSONResponse(content=payload, status_code=202, headers={"Location": f"/jobs/{job_id}"})
+
+
+@router.post("/sync")
+async def sync_from_onedrive(background_tasks: BackgroundTasks) -> Dict[str, Any]:
+    """Pull raw data and registry from OneDrive using rclone (fire-and-forget)."""
+    _ensure_service_mode()
+    script = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../../scripts/sync_from_onedrive.sh")
+    )
+    if not os.path.exists(script):
+        raise HTTPException(status_code=500, detail="sync script not found on server")
+    if not shutil.which("rclone"):
+        raise HTTPException(status_code=500, detail="rclone not installed on server")
+    background_tasks.add_task(subprocess.run, ["bash", script], env=os.environ.copy())
+    return {"status": "sync_started"}
 
 
 @router.get("/jobs")
