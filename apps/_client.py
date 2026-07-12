@@ -269,15 +269,27 @@ def preview_registry(
 # Ingest
 # ---------------------------------------------------------------------------
 
+def list_registry_experiments() -> List[str]:
+    """Return experiment names from the server-side registry (via /registry/preview)."""
+    try:
+        result = _get("/registry/preview")
+        return [r["values"]["name"] for r in result.get("rows", []) if r["values"].get("name")]
+    except Exception:
+        return []
+
+
 def trigger_ingest_service(
     storage_mode: str = "local",
     cloud_provider: Optional[str] = None,
     allow_invalid: bool = False,
+    experiments: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     import requests
     params: Dict[str, Any] = {"storage_mode": storage_mode, "allow_invalid": allow_invalid}
     if cloud_provider:
         params["cloud_provider"] = cloud_provider
+    if experiments:
+        params["experiments"] = ",".join(experiments)
     resp = requests.post(f"{api_url()}/ingest", headers=api_headers(), params=params, timeout=30)
     resp.raise_for_status()
     return resp.json()

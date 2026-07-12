@@ -62,12 +62,17 @@ async def ingest(
     storage_mode: str = "local",
     cloud_provider: Optional[str] = None,
     allow_invalid: bool = Query(False),
+    experiments: Optional[str] = Query(None, description="Comma-separated experiment names to ingest; omit for all"),
 ) -> Dict[str, Any]:
     """Start ingestion job. Registry must exist at PATH_TO_REGISTRY on the server."""
 
     _ensure_service_mode()
     registry_path = resolve_registry_path(os.environ.get("PATH_TO_REGISTRY"))
     df = read_tabular_content(registry_path)
+
+    if experiments:
+        names = [n.strip() for n in experiments.split(",") if n.strip()]
+        df = df[df["name"].isin(names)].reset_index(drop=True)
 
     data_root = os.environ.get("PATH_TO_DATA")
     validation = validate_registry_dataframe(

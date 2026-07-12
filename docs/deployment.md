@@ -53,11 +53,16 @@ apt-get install -y git
 cd /opt && git clone -b feature/cloud_deployment git@github.com:lucaAyt/mfethuls.git && cd mfethuls
 ```
 
-Then run the bootstrap script (installs Docker, Tailscale, mounts the block volume, creates data directories):
+Then run the bootstrap script (installs Docker, Tailscale, rclone, mounts the block volume, creates data directories):
 
 ```shell
 bash scripts/vm_setup.sh
 ```
+
+> **If your Droplet was provisioned before rclone was added to `vm_setup.sh`**, install it manually:
+> ```shell
+> curl https://rclone.org/install.sh | bash
+> ```
 
 Next, join the tailnet:
 

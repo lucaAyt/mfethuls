@@ -55,24 +55,15 @@ def _storage_label(path: str) -> str:
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# API connection (service mode only)
+# API health (service mode only — credentials come from env vars)
 # ---------------------------------------------------------------------------
 if client.mode() == "service":
     with st.sidebar:
-        st.subheader("API")
-        default_url = os.environ.get("MFETHULS_API_URL", "http://localhost:8000")
-        default_key = os.environ.get("MFETHULS_API_KEY", "")
-        st.session_state["api_url"] = st.text_input(
-            "URL", value=st.session_state.get("api_url", default_url)
-        )
-        st.session_state["api_key"] = st.text_input(
-            "Key", type="password", value=st.session_state.get("api_key", default_key)
-        )
         ok, msg = client.health_check()
         if ok:
-            st.success(f"✓ {msg}")
+            st.success(f"✓ API {msg}")
         else:
-            st.error(f"✗ {msg}")
+            st.error(f"✗ API {msg}")
         st.divider()
 
 # ---------------------------------------------------------------------------
@@ -143,19 +134,45 @@ with st.sidebar.expander("Ingest", expanded=False):
             st.rerun()
 
     else:
-        # Service mode
+        # Service mode — sync, then select experiments to ingest
+        if st.button("Sync from OneDrive", use_container_width=True):
+            try:
+                client.trigger_sync()
+                st.session_state.pop("registry_experiments", None)
+                st.info("Sync started — wait ~30 s, then load registry.")
+            except Exception as exc:
+                st.error(f"Sync failed to start: {exc}")
+
+        if st.button("Load registry", use_container_width=True):
+            with st.spinner("Fetching experiment list..."):
+                st.session_state["registry_experiments"] = client.list_registry_experiments()
+
+        experiment_names = st.session_state.get("registry_experiments", [])
+        selected_experiments: list[str] = []
+        if experiment_names:
+            select_all = st.checkbox("Select all", value=False)
+            selected_experiments = (
+                experiment_names
+                if select_all
+                else st.multiselect("Experiments", options=experiment_names)
+            )
+            st.caption(f"{len(selected_experiments)} selected.")
+        elif "registry_experiments" in st.session_state:
+            st.info("No experiments found in registry.")
+
         storage_mode = st.selectbox("Storage mode", ["local", "cloud", "both"], index=0)
         cloud_provider = None
         if storage_mode in {"cloud", "both"}:
             cloud_provider = st.selectbox("Cloud provider", ["s3", "azure"])
         allow_invalid = st.checkbox("Allow invalid rows", value=False)
 
-        if st.button("Trigger ingest", use_container_width=True):
+        if st.button("Trigger ingest", disabled=not selected_experiments, use_container_width=True):
             try:
                 result = client.trigger_ingest_service(
                     storage_mode=storage_mode,
                     cloud_provider=cloud_provider,
                     allow_invalid=allow_invalid,
+                    experiments=selected_experiments if not select_all else None,
                 )
                 st.session_state["ingest_job_id"] = result.get("job_id")
             except Exception as exc:
@@ -186,14 +203,6 @@ with st.sidebar.expander("Ingest", expanded=False):
             except Exception as exc:
                 st.error(f"Could not fetch job status: {exc}")
                 st.session_state["ingest_job_id"] = None
-
-        st.divider()
-        if st.button("Sync from OneDrive", use_container_width=True):
-            try:
-                client.trigger_sync()
-                st.info("Sync started — wait ~30 s then trigger ingest.")
-            except Exception as exc:
-                st.error(f"Sync failed to start: {exc}")
 
 # ---------------------------------------------------------------------------
 # Datasets expander
