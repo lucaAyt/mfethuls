@@ -283,9 +283,10 @@ def trigger_ingest_service(
     cloud_provider: Optional[str] = None,
     allow_invalid: bool = False,
     experiments: Optional[List[str]] = None,
+    refresh: bool = False,
 ) -> Dict[str, Any]:
     import requests
-    params: Dict[str, Any] = {"storage_mode": storage_mode, "allow_invalid": allow_invalid}
+    params: Dict[str, Any] = {"storage_mode": storage_mode, "allow_invalid": allow_invalid, "refresh": refresh}
     if cloud_provider:
         params["cloud_provider"] = cloud_provider
     if experiments:

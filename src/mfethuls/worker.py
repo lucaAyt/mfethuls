@@ -55,6 +55,7 @@ def process_job(job_id: str) -> Optional[Dict[str, Any]]:
             storage_mode=storage_mode,
             cloud_provider=cloud_provider,
             db_url=get_postgres_db_url(),
+            refresh=bool(job.get("refresh", False)),
         )
     except Exception as exc:  # pragma: no cover - worker level catch
         logger.exception("job_id=%s ingest failed", job_id)
@@ -69,6 +70,7 @@ def _process_job_ingest(
     storage_mode: str,
     cloud_provider: Optional[str],
     db_url: Optional[str],
+    refresh: bool = False,
 ) -> Dict[str, Any]:
     dataset_results: List[Dict[str, Any]] = []
     # Collect Parquet paths during parsing; DuckDB registration happens in one
@@ -97,7 +99,7 @@ def _process_job_ingest(
             result = ingest_experiment_dataset(
                 exp.name,
                 use_storage=True,
-                refresh=False,
+                refresh=refresh,
                 storage_mode=storage_mode,
                 cloud_provider=cloud_provider,
                 db_url=db_url,

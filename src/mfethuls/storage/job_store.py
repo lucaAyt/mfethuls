@@ -48,12 +48,17 @@ def _ensure_schema(engine) -> None:
                     job_registry_storage_path TEXT,
                     registry_table TEXT,
                     datasets JSONB,
+                    refresh BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TIMESTAMP NOT NULL DEFAULT now(),
                     updated_at TIMESTAMP NOT NULL DEFAULT now()
                 );
                 """
             )
         )
+        # Migrate existing tables that pre-date the refresh column.
+        conn.execute(text(
+            "ALTER TABLE ingest_jobs ADD COLUMN IF NOT EXISTS refresh BOOLEAN NOT NULL DEFAULT FALSE;"
+        ))
 
 def _row_to_dict(row) -> Dict[str, Any]:
     if row is None:
@@ -73,6 +78,7 @@ def create_job(
     job_registry_storage_path: str,
     storage_mode: Optional[str],
     cloud_provider: Optional[str],
+    refresh: bool = False,
 ) -> str:
     engine = _get_engine()
     resolved_job_id = job_id or uuid.uuid4().hex
@@ -87,9 +93,10 @@ def create_job(
                     message,
                     storage_mode,
                     cloud_provider,
-                    job_registry_storage_path
+                    job_registry_storage_path,
+                    refresh
                 )
-                VALUES (:job_id, 'queued', 0, 'queued', :storage_mode, :cloud_provider, :job_registry_storage_path);
+                VALUES (:job_id, 'queued', 0, 'queued', :storage_mode, :cloud_provider, :job_registry_storage_path, :refresh);
                 """
             ),
             {
@@ -97,6 +104,7 @@ def create_job(
                 "storage_mode": storage_mode,
                 "cloud_provider": cloud_provider,
                 "job_registry_storage_path": job_registry_storage_path,
+                "refresh": refresh,
             },
         )
     return resolved_job_id

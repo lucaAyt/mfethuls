@@ -63,6 +63,7 @@ async def ingest(
     cloud_provider: Optional[str] = None,
     allow_invalid: bool = Query(False),
     experiments: Optional[str] = Query(None, description="Comma-separated experiment names to ingest; omit for all"),
+    refresh: bool = Query(False, description="Force re-parse even if Parquet cache exists"),
 ) -> Dict[str, Any]:
     """Start ingestion job. Registry must exist at PATH_TO_REGISTRY on the server."""
 
@@ -105,7 +106,7 @@ async def ingest(
     job_registry_path = os.path.join(get_api_storage_root(), f"job_registry_record_for_{job_id}.parquet")
     df.to_parquet(job_registry_path, index=False)
 
-    create_job(job_id, job_registry_path, storage_mode, cloud_provider)
+    create_job(job_id, job_registry_path, storage_mode, cloud_provider, refresh=refresh)
 
     payload = {
         "job_id": job_id,

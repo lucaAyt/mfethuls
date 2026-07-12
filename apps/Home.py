@@ -134,31 +134,37 @@ with st.sidebar.expander("Ingest", expanded=False):
             st.rerun()
 
     else:
-        # Service mode — sync, then select experiments to ingest
-        if st.button("Sync from OneDrive", use_container_width=True):
+        # Service mode
+        st.caption("Sync from OneDrive, then select experiments to ingest.")
+
+        col_sync, col_load = st.columns(2)
+        if col_sync.button("Sync", use_container_width=True):
             try:
                 client.trigger_sync()
                 st.session_state.pop("registry_experiments", None)
                 st.info("Sync started — wait ~30 s, then load registry.")
             except Exception as exc:
-                st.error(f"Sync failed to start: {exc}")
-
-        if st.button("Load registry", use_container_width=True):
+                st.error(f"Sync failed: {exc}")
+        if col_load.button("Load registry", use_container_width=True):
             with st.spinner("Fetching experiment list..."):
                 st.session_state["registry_experiments"] = client.list_registry_experiments()
 
+        refresh_ingest = st.checkbox("Re-ingest even if cached", value=False)
+
         experiment_names = st.session_state.get("registry_experiments", [])
+        select_all = False
         selected_experiments: list[str] = []
         if experiment_names:
-            select_all = st.checkbox("Select all", value=False)
-            selected_experiments = (
-                experiment_names
-                if select_all
-                else st.multiselect("Experiments", options=experiment_names)
-            )
-            st.caption(f"{len(selected_experiments)} selected.")
+            select_all = st.checkbox("Select all experiments", value=False)
+            if select_all:
+                selected_experiments = experiment_names
+                st.caption(f"Selected {len(selected_experiments)} experiments.")
+            else:
+                selected_experiments = st.multiselect("Experiments", options=experiment_names)
         elif "registry_experiments" in st.session_state:
             st.info("No experiments found in registry.")
+        else:
+            st.info("Load registry to list experiments.")
 
         storage_mode = st.selectbox("Storage mode", ["local", "cloud", "both"], index=0)
         cloud_provider = None
@@ -166,13 +172,14 @@ with st.sidebar.expander("Ingest", expanded=False):
             cloud_provider = st.selectbox("Cloud provider", ["s3", "azure"])
         allow_invalid = st.checkbox("Allow invalid rows", value=False)
 
-        if st.button("Trigger ingest", disabled=not selected_experiments, use_container_width=True):
+        if st.button("Ingest experiments", disabled=not selected_experiments, use_container_width=True):
             try:
                 result = client.trigger_ingest_service(
                     storage_mode=storage_mode,
                     cloud_provider=cloud_provider,
                     allow_invalid=allow_invalid,
-                    experiments=selected_experiments if not select_all else None,
+                    experiments=None if select_all else selected_experiments,
+                    refresh=refresh_ingest,
                 )
                 st.session_state["ingest_job_id"] = result.get("job_id")
             except Exception as exc:
@@ -194,7 +201,7 @@ with st.sidebar.expander("Ingest", expanded=False):
                     time.sleep(2)
                     st.rerun()
                 elif status == "completed":
-                    st.success("Ingest complete!")
+                    st.success("Ingestion complete.")
                     client.list_datasets.clear()
                     st.session_state["ingest_job_id"] = None
                 elif status == "failed":
