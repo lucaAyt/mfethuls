@@ -31,7 +31,7 @@ services:
       - ./:/app
       - ${DATA_ROOT}:/data
       - /usr/bin/rclone:/usr/bin/rclone:ro
-      - /root/.config/rclone:/root/.config/rclone:ro
+      - /root/.config/rclone:/root/.config/rclone
     environment:
       MFETHULS_MODE: service
       MFETHULS_API_KEY: ${MFETHULS_API_KEY}
