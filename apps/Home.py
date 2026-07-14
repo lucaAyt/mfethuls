@@ -409,26 +409,6 @@ with st.expander("Plot", expanded=True):
 
             # Export ---------------------------------------------------------
             with st.expander("Export plot", expanded=False):
-                x_bounds = _finite_bounds(data[x_col])
-                y_bounds = _finite_bounds(long_df[y_series]) if y_series in long_df.columns else None
-
-                rc = st.columns(2)
-                use_x_range = rc[0].checkbox("Limit X range")
-                use_y_range = rc[1].checkbox("Limit Y range")
-
-                if use_x_range and x_bounds:
-                    xr = st.columns(2)
-                    x_min = xr[0].number_input("X min", value=float(x_bounds[0]), format="%.6f")
-                    x_max = xr[1].number_input("X max", value=float(x_bounds[1]), format="%.6f")
-                    fig.update_xaxes(range=[x_min, x_max])
-
-                if use_y_range and y_bounds:
-                    yr = st.columns(2)
-                    y_min = yr[0].number_input("Y min", value=float(y_bounds[0]), format="%.6f")
-                    y_max = yr[1].number_input("Y max", value=float(y_bounds[1]), format="%.6f")
-                    fig.update_yaxes(range=[y_min, y_max])
-
-                st.divider()
                 dl1, dl2 = st.columns(2)
                 dl1.download_button(
                     "Download SVG",
@@ -448,5 +428,11 @@ with st.expander("Plot", expanded=True):
             st.plotly_chart(
                 fig,
                 use_container_width=True,
-                config={"displaylogo": False},
+                config={
+                    "displaylogo": False,
+                    "toImageButtonOptions": {
+                        "format": "svg",
+                        "filename": _figure_download_name(title, "svg"),
+                    },
+                },
             )
