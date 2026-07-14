@@ -8,12 +8,11 @@ ENV PYTHONUTF8=1
 
 ARG MFETHULS_EXTRAS=service
 
-# Shared libraries required by kaleido's bundled Chromium (SVG/image export).
-# Only installed when the viz extra is present (streamlit service), harmless otherwise.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
-    libcups2 libdrm2 libxcomposite1 libxdamage1 \
-    libxfixes3 libxrandr2 libgbm1 libasound2 \
+# Google Chrome for kaleido SVG/image export (kaleido 1.x uses Chrome, not bundled Chromium).
+RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates \
+    && wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && apt-get install -y /tmp/chrome.deb \
+    && rm /tmp/chrome.deb \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml /app/pyproject.toml
