@@ -328,6 +328,10 @@ def trigger_sync() -> Dict[str, Any]:
     return _post("/sync")
 
 
+def get_sync_status() -> Dict[str, Any]:
+    return _get("/sync/status")
+
+
 def list_jobs(status: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
     if mode() != "service":
         return []

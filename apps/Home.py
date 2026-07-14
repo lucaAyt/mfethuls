@@ -135,19 +135,39 @@ with st.sidebar.expander("Ingest", expanded=False):
 
     else:
         # Service mode
-        st.caption("Sync from OneDrive, then select experiments to ingest.")
+        sync_running = st.session_state.get("sync_running", False)
 
-        col_sync, col_load = st.columns(2)
-        if col_sync.button("Sync", use_container_width=True):
-            try:
-                client.trigger_sync()
-                st.session_state.pop("registry_experiments", None)
-                st.info("Sync started — wait ~30 s, then load registry.")
-            except Exception as exc:
-                st.error(f"Sync failed: {exc}")
-        if col_load.button("Load registry", use_container_width=True):
-            with st.spinner("Fetching experiment list..."):
-                st.session_state["registry_experiments"] = client.list_registry_experiments()
+        if sync_running:
+            # Polling loop — rerun every 2 s until sync finishes
+            with st.spinner("Syncing from OneDrive…"):
+                try:
+                    s = client.get_sync_status()
+                    if s.get("running"):
+                        time.sleep(2)
+                        st.rerun()
+                    elif s.get("error"):
+                        st.session_state["sync_running"] = False
+                        st.error(f"Sync failed: {s['error']}")
+                    else:
+                        st.session_state["sync_running"] = False
+                        # Auto-load registry on success
+                        try:
+                            st.session_state["registry_experiments"] = client.list_registry_experiments()
+                        except Exception as exc:
+                            st.warning(f"Sync complete but could not load registry: {exc}")
+                        st.rerun()
+                except Exception as exc:
+                    st.session_state["sync_running"] = False
+                    st.error(f"Could not reach API: {exc}")
+        else:
+            if st.button("Sync from OneDrive", use_container_width=True):
+                try:
+                    client.trigger_sync()
+                    st.session_state["sync_running"] = True
+                    st.session_state.pop("registry_experiments", None)
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Sync failed: {exc}")
 
         refresh_ingest = st.checkbox("Re-ingest even if cached", value=False)
 
@@ -164,7 +184,7 @@ with st.sidebar.expander("Ingest", expanded=False):
         elif "registry_experiments" in st.session_state:
             st.info("No experiments found in registry.")
         else:
-            st.info("Load registry to list experiments.")
+            st.caption("Sync to load the experiment list.")
 
         storage_mode = st.selectbox("Storage mode", ["local", "cloud", "both"], index=0)
         cloud_provider = None
