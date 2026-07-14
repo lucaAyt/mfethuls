@@ -271,7 +271,7 @@ def preview_registry(
 
 def list_registry_experiments() -> List[str]:
     """Return experiment names from the server-side registry (via /registry/preview)."""
-    result = _get("/registry/preview")
+    result = _post("/registry/preview")
     return [r["values"]["name"] for r in result.get("rows", []) if r["values"].get("name")]
 
 

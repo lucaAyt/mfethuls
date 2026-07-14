@@ -30,6 +30,8 @@ services:
     volumes:
       - ./:/app
       - ${DATA_ROOT}:/data
+      - /usr/bin/rclone:/usr/bin/rclone:ro
+      - /root/.config/rclone:/root/.config/rclone:ro
     environment:
       MFETHULS_MODE: service
       MFETHULS_API_KEY: ${MFETHULS_API_KEY}
@@ -43,6 +45,10 @@ services:
       MFETHULS_POSTGRES_DB: ${MFETHULS_POSTGRES_DB}
       MFETHULS_POSTGRES_HOST: ${MFETHULS_POSTGRES_HOST_SERVICE}
       MFETHULS_POSTGRES_PORT: ${MFETHULS_POSTGRES_PORT}
+      DATA_ROOT: /data
+      RCLONE_REMOTE: ${RCLONE_REMOTE:-onedrive}
+      RCLONE_SOURCE_PATH: ${RCLONE_SOURCE_PATH:-Documents/raw}
+      RCLONE_REGISTRY_PATH: ${RCLONE_REGISTRY_PATH:-Documents/experiments_template.csv}
     command: ["api"]
     depends_on:
       postgres:
