@@ -212,14 +212,14 @@ Microsoft OAuth tokens expire. When sync starts failing, re-run `rclone config` 
 
 ### Sync on demand
 
-**Via Streamlit:** open the Ingest sidebar → click **"Sync from OneDrive"**. An info message confirms the sync started; wait ~30 s before triggering ingest.
+**Via Streamlit:** open the Ingest sidebar → click **"Sync from OneDrive"**. A spinner shows while rclone runs; when it finishes the experiment list loads automatically. Select experiments and click **"Ingest experiments"**.
 
-**Via curl:**
+**Via curl** (blocks until rclone completes, then returns):
 
 ```shell
 curl -s -X POST http://100.x.x.x:8000/sync \
   -H "Authorization: Bearer <your-api-key>"
-# {"status": "sync_started"}
+# {"status": "sync_complete"}
 ```
 
 Then trigger ingest:
@@ -244,7 +244,23 @@ rsync -avz --progress experiments_template.csv root@100.x.x.x:/mnt/mfethuls-data
 
 ---
 
-## Step 6 — Share access with the team
+## Step 6 — Enable automated backups
+
+The block volume holds all persistent state: raw data, Parquet files, DuckDB, and Postgres data. Enable automated snapshots so a daily restore point exists.
+
+In the DigitalOcean console:
+
+1. Go to **Volumes** → click your block volume (`mfethuls-data`)
+2. Click **Snapshots** → **Enable automatic backups**
+3. Set frequency to **Daily**, retention to **7 snapshots** (one week of daily restore points, ~$1/mo for a 100 GB volume)
+
+That's it. Snapshots run overnight and can be restored to a new volume from the same console if the Droplet is ever lost.
+
+> **What is not backed up:** the Droplet's system disk (OS, Docker, app code). That is disposable — `vm_setup.sh` + `git clone` + `.env` rebuilds it from scratch in under 10 minutes. Only the block volume matters.
+
+---
+
+## Step 7 — Share access with the team
 
 For each team member:
 
@@ -279,6 +295,6 @@ Postgres data and DuckDB (both on the block volume) survive rebuilds.
 | Data sync from OneDrive | rclone on-demand (Streamlit button or `POST /sync`) | Done — Phase 1b |
 | Registry sync | rclone alongside raw data | Done — Phase 1b |
 | TLS for team access | Plain HTTP over Tailscale | Acceptable: Tailscale encrypts all traffic end-to-end (WireGuard). Add `tailscale serve` for HTTPS if needed. |
-| Automated backups | None | Add DigitalOcean volume snapshot policy (1-click in console) |
+| Automated backups | Daily DO volume snapshots, 7-day retention | Done — Step 6 |
 
 Tailscale encrypts all traffic between devices using WireGuard — plain HTTP over the Tailscale network is safe. You do not need a TLS certificate for private lab access.
