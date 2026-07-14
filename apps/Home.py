@@ -135,37 +135,11 @@ with st.sidebar.expander("Ingest", expanded=False):
 
     else:
         # Service mode
-        sync_running = st.session_state.get("sync_running", False)
-
-        if sync_running:
-            # Polling loop — rerun every 2 s until sync finishes
-            with st.spinner("Syncing from OneDrive…"):
-                try:
-                    s = client.get_sync_status()
-                    if s.get("running"):
-                        time.sleep(2)
-                        st.rerun()
-                    elif s.get("error"):
-                        st.session_state["sync_running"] = False
-                        st.error(f"Sync failed: {s['error']}")
-                    else:
-                        st.session_state["sync_running"] = False
-                        # Auto-load registry on success
-                        try:
-                            st.session_state["registry_experiments"] = client.list_registry_experiments()
-                        except Exception as exc:
-                            st.warning(f"Sync complete but could not load registry: {exc}")
-                        st.rerun()
-                except Exception as exc:
-                    st.session_state["sync_running"] = False
-                    st.error(f"Could not reach API: {exc}")
-        else:
-            if st.button("Sync from OneDrive", use_container_width=True):
+        if st.button("Sync from OneDrive", use_container_width=True):
+            with st.spinner("Syncing from OneDrive… this may take a minute"):
                 try:
                     client.trigger_sync()
-                    st.session_state["sync_running"] = True
-                    st.session_state.pop("registry_experiments", None)
-                    st.rerun()
+                    st.session_state["registry_experiments"] = client.list_registry_experiments()
                 except Exception as exc:
                     st.error(f"Sync failed: {exc}")
 

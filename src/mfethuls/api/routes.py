@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
-import threading
 import uuid
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import shutil
 import subprocess
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
 
 from ..config.mode import is_service_mode
@@ -23,37 +22,6 @@ from .schemas import QueryRequest
 from .utils import duckdb_session, get_api_storage_root, read_tabular_content_bytes
 
 router = APIRouter()
-
-_sync_lock = threading.Lock()
-_sync_state: Dict[str, Any] = {"running": False, "error": None, "finished_at": None}
-
-
-def _run_sync(script: str) -> None:
-    global _sync_state
-    try:
-        result = subprocess.run(
-            ["bash", script], env=os.environ.copy(), capture_output=True, text=True
-        )
-        with _sync_lock:
-            if result.returncode != 0:
-                _sync_state = {
-                    "running": False,
-                    "error": (result.stderr or f"exit {result.returncode}")[-500:],
-                    "finished_at": datetime.now(timezone.utc).isoformat(),
-                }
-            else:
-                _sync_state = {
-                    "running": False,
-                    "error": None,
-                    "finished_at": datetime.now(timezone.utc).isoformat(),
-                }
-    except Exception as exc:
-        with _sync_lock:
-            _sync_state = {
-                "running": False,
-                "error": str(exc),
-                "finished_at": datetime.now(timezone.utc).isoformat(),
-            }
 
 
 def _ensure_service_mode() -> None:
@@ -150,9 +118,8 @@ async def ingest(
 
 
 @router.post("/sync")
-async def sync_from_onedrive(background_tasks: BackgroundTasks) -> Dict[str, Any]:
-    """Pull raw data and registry from OneDrive using rclone."""
-    global _sync_state
+async def sync_from_onedrive() -> Dict[str, Any]:
+    """Pull raw data and registry from OneDrive using rclone (blocks until complete)."""
     _ensure_service_mode()
     script = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "../../../scripts/sync_from_onedrive.sh")
@@ -161,20 +128,13 @@ async def sync_from_onedrive(background_tasks: BackgroundTasks) -> Dict[str, Any
         raise HTTPException(status_code=500, detail="sync script not found on server")
     if not shutil.which("rclone"):
         raise HTTPException(status_code=500, detail="rclone not installed on server")
-    with _sync_lock:
-        if _sync_state["running"]:
-            return {"status": "already_running"}
-        _sync_state = {"running": True, "error": None, "finished_at": None}
-    background_tasks.add_task(_run_sync, script)
-    return {"status": "sync_started"}
-
-
-@router.get("/sync/status")
-async def sync_status() -> Dict[str, Any]:
-    """Return current rclone sync state."""
-    _ensure_service_mode()
-    with _sync_lock:
-        return dict(_sync_state)
+    result = await asyncio.to_thread(
+        subprocess.run, ["bash", script], env=os.environ.copy(), capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or f"rclone exited {result.returncode}")[-500:]
+        raise HTTPException(status_code=500, detail=detail)
+    return {"status": "sync_complete"}
 
 
 @router.get("/jobs")

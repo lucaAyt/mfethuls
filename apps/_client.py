@@ -325,11 +325,10 @@ def local_ingest(
 # ---------------------------------------------------------------------------
 
 def trigger_sync() -> Dict[str, Any]:
-    return _post("/sync")
-
-
-def get_sync_status() -> Dict[str, Any]:
-    return _get("/sync/status")
+    import requests
+    resp = requests.post(f"{api_url()}/sync", headers=api_headers(), timeout=300)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def list_jobs(status: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
