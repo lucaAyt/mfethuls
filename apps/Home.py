@@ -201,7 +201,22 @@ with st.sidebar.expander("Ingest", expanded=False):
                     time.sleep(2)
                     st.rerun()
                 elif status == "completed":
-                    st.success("Ingestion complete.")
+                    datasets = job.get("datasets") or []
+                    counts: dict[str, int] = {}
+                    failed_names: list[str] = []
+                    for d in datasets:
+                        s = d.get("status", "unknown")
+                        counts[s] = counts.get(s, 0) + 1
+                        if s == "failed":
+                            failed_names.append(d.get("name") or d.get("experiment_id") or "?")
+                    summary = ", ".join(f"{k}: {v}" for k, v in counts.items()) or "no results"
+                    if failed_names:
+                        st.warning(f"Completed with errors — {summary}")
+                        with st.expander(f"{len(failed_names)} failed"):
+                            for n in failed_names:
+                                st.caption(f"✗ {n}")
+                    else:
+                        st.success(f"Ingestion complete — {summary}")
                     client.list_datasets.clear()
                     st.session_state["ingest_job_id"] = None
                 elif status == "failed":
@@ -420,28 +435,24 @@ with st.expander("Plot", expanded=True):
                     fig.update_yaxes(range=[y_min, y_max])
 
                 st.divider()
-                dl_cols = st.columns(3)
-                for col, fmt, mime in zip(
-                    dl_cols,
-                    ["svg", "png", "html"],
-                    ["image/svg+xml", "image/png", "text/html"],
-                ):
-                    try:
-                        col.download_button(
-                            f"Download {fmt.upper()}",
-                            data=_figure_bytes(fig, fmt),
-                            file_name=_figure_download_name(title, fmt),
-                            mime=mime,
-                            use_container_width=True,
-                        )
-                    except Exception as exc:
-                        col.warning(f"{fmt.upper()} unavailable: {exc}")
+                dl1, dl2 = st.columns(2)
+                dl1.download_button(
+                    "Download SVG",
+                    data=_figure_bytes(fig, "svg"),
+                    file_name=_figure_download_name(title, "svg"),
+                    mime="image/svg+xml",
+                    use_container_width=True,
+                )
+                dl2.download_button(
+                    "Download HTML",
+                    data=_figure_bytes(fig, "html"),
+                    file_name=_figure_download_name(title, "html"),
+                    mime="text/html",
+                    use_container_width=True,
+                )
 
             st.plotly_chart(
                 fig,
                 use_container_width=True,
-                config={
-                    "displaylogo": False,
-                    "toImageButtonOptions": {"format": "svg", "filename": "mfethuls_figure"},
-                },
+                config={"displaylogo": False},
             )
