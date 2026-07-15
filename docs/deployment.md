@@ -50,7 +50,7 @@ Clone the repo first so you have the setup script:
 
 ```shell
 apt-get install -y git
-cd /opt && git clone -b feature/cloud_deployment git@github.com:lucaAyt/mfethuls.git && cd mfethuls
+cd /opt && git clone https://github.com/lucaAyt/mfethuls.git && cd mfethuls
 ```
 
 Then run the bootstrap script (installs Docker, Tailscale, rclone, mounts the block volume, creates data directories):

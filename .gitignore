@@ -136,6 +136,12 @@ ENV/
 env.bak/
 venv.bak/
 
+# mfethuls runtime artefacts
+*.duckdb
+*.duckdb.wal
+.mfethuls_registry/
+mfethuls_storage/
+
 # Spyder project settings
 .spyderproject
 .spyproject

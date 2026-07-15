@@ -1,206 +1,153 @@
 # mfethuls
 
-A Python framework for parsing, normalizing, and managing data from laboratory instruments. Raw instrument exports (DSC, TGA, FTIR, UV-Vis, SEC, NMR, Rheometer, DMA, SAXS, MS) are parsed against a shared experiment registry, normalized to a canonical schema, and stored as queryable Parquet datasets — accessible via REST API, Metabase dashboards, notebooks, or a local Streamlit explorer.
+A Python framework for parsing, normalising, and managing data from laboratory instruments. Raw instrument exports are ingested against a shared experiment registry, normalised to a canonical schema, and stored as queryable Parquet datasets — accessible via a Streamlit dashboard, REST API, or notebooks.
+
+---
+
+## Instrument support
+
+| Instrument | Models |
+|---|---|
+| DSC | Generic, Mettler Toledo, Perkin Elmer |
+| TGA | Generic |
+| FTIR | Bruker |
+| UV-Vis | Shimadzu, Ocean Optics Flame (in-situ) |
+| NMR | Bruker |
+| Rheometer | Anton Paar |
+| DMA | TA Q800 |
+| SEC | Agilent |
+| SAXS | Anton Paar |
+| MS | Bruker |
+
+Each parser normalises raw exports to a [canonical column schema](SCHEMA_CONTRACT.md) — same column names and units regardless of instrument model.
 
 ---
 
 ## Install
 
-Work inside a virtual environment:
-
 ```shell
-python -m venv .venv && source .venv/bin/activate   # Linux/macOS
-python -m venv .venv && .venv\Scripts\activate       # Windows
+pip install git+https://github.com/lucaAyt/mfethuls.git
 ```
 
-Install from GitHub (SSH recommended):
+Install extras as needed:
+
+| Extra | Installs | Use when |
+|---|---|---|
+| `viz` | Plotly, Matplotlib, Kaleido, Streamlit | Streamlit dashboard or notebook plotting |
+| `notebook` | Jupyter | Interactive notebooks |
+| `service` | FastAPI, Uvicorn, SQLAlchemy, psycopg2 | Running the API + worker |
+| `cloud` | boto3, azure-storage-blob | S3 or Azure Blob Parquet storage |
+| `postgres` | SQLAlchemy, psycopg2 | Postgres metadata access from notebooks |
 
 ```shell
-pip install git+ssh://git@github.com/lucaAyt/mfethuls.git
-```
-
-For development, clone and install as editable:
-
-```shell
-git clone ssh://git@github.com/lucaAyt/mfethuls.git
-cd mfethuls
-pip install -e .
-```
-
-**Extras** — install only what you need:
-
-| Extra | Installs | When to use |
-|-------|----------|-------------|
-| `service` | FastAPI, Uvicorn, SQLAlchemy, Psycopg2 | API + worker containers |
-| `cloud` | boto3, azure-storage-blob | S3 / Azure Blob storage |
-| `viz` | Matplotlib, Plotly, Kaleido | Plotting |
-| `notebook` | Jupyter, IPython | Interactive notebooks |
-
-```shell
-pip install -e '.[service]'          # API + worker
-pip install -e '.[service,cloud]'    # API + worker + cloud storage
-pip install -e '.[viz,notebook]'     # Local analysis
+pip install "mfethuls[viz,notebook]"        # local analysis
+pip install "mfethuls[service,cloud]"       # server deployment
 ```
 
 ---
 
-## Configuration
+## Local mode — notebooks and Streamlit
 
-Copy `env_example` to `.env` and edit before running anything:
+No Docker, no Postgres, no server. Set paths in `.env` (copy from `env_example`):
 
-```shell
-cp env_example .env
+```
+MFETHULS_MODE=local
+PATH_TO_DATA=/path/to/raw/instrument/data
+PATH_TO_REGISTRY=/path/to/experiments_template.csv
+PATH_TO_LOCAL_STORAGE=/path/to/parquet/output
 ```
 
-Key variables:
+**Run the Streamlit explorer:**
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `MFETHULS_MODE` | yes | `local` or `service` |
-| `PATH_TO_DATA` | yes | Root folder containing raw instrument exports |
-| `PATH_TO_REGISTRY` | yes | Path to the shared experiments CSV/XLSX |
-| `PATH_TO_LOCAL_STORAGE` | yes | Where Parquet files are written |
-| `MFETHULS_DUCKDB_PATH` | no | DuckDB catalog file path (default: inside storage root) |
-| `MFETHULS_API_KEY` | service | Bearer token for API authentication — **required in service mode** |
-| `MFETHULS_POSTGRES_ENABLED` | service | `true` to enable Postgres job queue + metadata |
-| `MFETHULS_POSTGRES_USER` | service | Postgres credentials |
-| `MFETHULS_POSTGRES_PASSWORD` | service | |
-| `MFETHULS_POSTGRES_DB` | service | |
-| `MFETHULS_POSTGRES_HOST` | service | |
-| `MFETHULS_JOB_TIMEOUT_SECONDS` | no | Max seconds per ingest job (default: 1800) |
+```shell
+streamlit run apps/Home.py
+```
 
----
+Non-technical users on Windows: double-click `launch.bat`. A setup wizard collects paths on first run. Requires only [`uv`](https://docs.astral.sh/uv/). See [docs/local_user_setup.md](docs/local_user_setup.md).
 
-## Local mode (notebooks, CLI, Streamlit)
-
-Local mode requires no Postgres and no Docker. Everything runs in a single Python process.
-
-### Python API
+**Python API:**
 
 ```python
 import mfethuls
 
-# Load experiments from the shared registry
-experiments = mfethuls.load_experiments(["exp_001", "exp_002"])
+# Load one or more experiments
+cs = mfethuls.load_experiments(["exp_001", "exp_002"])
+df = cs.to_dataframe()   # tidy long-format DataFrame
 
-# Combine into a comparison set and get a tidy DataFrame
-comparison = mfethuls.compare(experiments)
-df = comparison.to_dataframe()
+# Load all experiments for a sample
+cs = mfethuls.load_samples(["S001", "S002"])
 ```
-
-### Streamlit explorer
-
-**For non-technical users** — double-click `launch.bat` (Windows) or run `bash launch.sh` (macOS/Linux). A first-run wizard collects your data paths. Requires only [`uv`](https://docs.astral.sh/uv/getting-started/installation/) — see [docs/local_user_setup.md](docs/local_user_setup.md) for the full guide.
-
-**For developers:**
-
-```shell
-streamlit run apps/streamlit_app.py
-```
-
-Provides a registry loader, ingest sidebar, dataset browser, and ad-hoc plotting.
-
-### Notebooks
-
-See `notebooks/` for worked examples. The `tutorial_basic_usecase` notebook covers the end-to-end local workflow.
 
 ---
 
-## Service mode (Docker API + worker)
+## Service mode — shared lab server
 
-Service mode runs the full stack: FastAPI, background worker, Postgres job queue, DuckDB catalog, and Metabase dashboards.
-
-### Start
+Runs a Docker Compose stack: FastAPI + background worker + Postgres + Streamlit. The team accesses the Streamlit dashboard over a private network (Tailscale recommended).
 
 ```shell
-docker compose up --build
+cp env_example .env   # fill in credentials and paths
+docker compose up --build -d
 ```
 
-### Authentication
+**Workflow in the Streamlit dashboard:**
 
-All API endpoints (except `GET /health`) require a bearer token.
+1. **Ingest sidebar → Sync from OneDrive** — pulls raw data and registry via rclone
+2. **Select experiments** — multiselect from the registry
+3. **Ingest experiments** — live progress bar polls until done
+4. **Datasets tab** — browse, filter, and plot any ingested dataset
+5. **Export** — SVG (server-side via kaleido) or interactive HTML
 
-Set `MFETHULS_API_KEY` in your `.env`:
-
-```
-MFETHULS_API_KEY=your-secret-token
-```
-
-Include the header in every request:
+**REST API** (all endpoints require `Authorization: Bearer <token>`):
 
 ```shell
--H "Authorization: Bearer your-secret-token"
-```
+# Validate registry (reads from server PATH_TO_REGISTRY)
+curl -s -X POST http://localhost:8000/registry/preview \
+  -H "Authorization: Bearer <token>"
 
-### Workflow
-
-**1. Validate your registry before ingesting:**
-
-```shell
-curl -s http://localhost:8000/registry/preview \
-  -H "Authorization: Bearer your-secret-token" \
-  -F "file=@path/to/experiments_template.csv" | jq '.summary'
-```
-
-**2. Start an ingest job:**
-
-```shell
+# Start ingest job
 curl -s -X POST http://localhost:8000/ingest \
-  -H "Authorization: Bearer your-secret-token" \
-  -F "file=@path/to/experiments_template.csv"
-```
+  -H "Authorization: Bearer <token>"
 
-Returns `{"job_id": "...", "status": "queued"}`.
-
-**3. Poll job status:**
-
-```shell
+# Poll job status
 curl -s http://localhost:8000/jobs/<job_id> \
-  -H "Authorization: Bearer your-secret-token" | jq '{status, progress}'
-```
+  -H "Authorization: Bearer <token>" | jq '{status, progress}'
 
-**4. List all jobs:**
-
-```shell
-curl -s "http://localhost:8000/jobs?status=completed&limit=10" \
-  -H "Authorization: Bearer your-secret-token"
-```
-
-**5. Browse datasets:**
-
-```shell
+# List datasets
 curl -s http://localhost:8000/datasets \
-  -H "Authorization: Bearer your-secret-token"
+  -H "Authorization: Bearer <token>"
 ```
 
-**6. Fetch dataset rows (paginated):**
+See [docs/api_reference.md](docs/api_reference.md) for the full reference. For cloud deployment on DigitalOcean + Tailscale see [docs/deployment.md](docs/deployment.md).
 
-```shell
-curl -s "http://localhost:8000/dataset/<table_name>?limit=100&offset=0" \
-  -H "Authorization: Bearer your-secret-token"
-```
+---
 
-**7. Delete a dataset from the catalog:**
+## Data access for analysis
 
-```shell
-curl -s -X DELETE http://localhost:8000/dataset/<table_name> \
-  -H "Authorization: Bearer your-secret-token"
-```
+Three stores, each with a distinct role — see [docs/data_scientist_guide.md](docs/data_scientist_guide.md) for the full guide including DuckDB SQL recipes and model-building patterns.
 
-Note: `DELETE` removes the dataset from the DuckDB catalog and query layer. Parquet files on disk or object storage are not deleted and can be re-registered.
+| Store | What's in it | How to query |
+|---|---|---|
+| **DuckDB** | Measurement data — one VIEW per experiment | `duckdb.connect(path).execute("SELECT * FROM exp_name")` |
+| **Postgres** | Metadata — instrument, sample, provenance | `mfethuls.storage.notebook.list_datasets(pg_url)` |
+| **Parquet** | Source of truth for measurement data | `pd.read_parquet(path)` |
 
 ---
 
 ## Docs
 
 | Document | Contents |
-|----------|----------|
-| [docs/local_user_setup.md](docs/local_user_setup.md) | Non-technical user guide — run Streamlit locally with `uv` |
-| [docs/tutorial.md](docs/tutorial.md) | Step-by-step tutorials for local mode and service mode |
-| [docs/registry_reference.md](docs/registry_reference.md) | Registry spreadsheet format, column reference, example CSV, measurement profiles |
-| [docs/architecture.md](docs/architecture.md) | System context, deployment modes, data-flow diagrams |
-| [docs/api_reference.md](docs/api_reference.md) | Full API endpoint reference with request/response examples |
-| [docs/deployment.md](docs/deployment.md) | DigitalOcean + Tailscale cloud deployment guide |
-| [docs/ingest_preview_contract.md](docs/ingest_preview_contract.md) | Detailed preview and ingest payload contracts |
-| [docs/database_integration.md](docs/database_integration.md) | Postgres + Parquet + DuckDB design notes |
-| [SCHEMA_CONTRACT.md](SCHEMA_CONTRACT.md) | Canonical column names, units, and normalization rules |
+|---|---|
+| [docs/local_user_setup.md](docs/local_user_setup.md) | Non-technical user guide — `uv` + launcher |
+| [docs/tutorial.md](docs/tutorial.md) | Step-by-step walkthroughs for local and service mode |
+| [docs/data_scientist_guide.md](docs/data_scientist_guide.md) | Notebook access — Python API, DuckDB SQL, Postgres, model building |
+| [docs/registry_reference.md](docs/registry_reference.md) | Registry format, column reference, measurement profiles |
+| [docs/architecture.md](docs/architecture.md) | System diagrams, ETL pipeline, storage design |
+| [docs/api_reference.md](docs/api_reference.md) | Full REST API reference |
+| [docs/deployment.md](docs/deployment.md) | Cloud deployment guide |
+| [SCHEMA_CONTRACT.md](SCHEMA_CONTRACT.md) | Canonical column names, units, normalisation rules |
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).

@@ -346,6 +346,7 @@ src/mfethuls/
 ## Related docs
 
 - [tutorial.md](tutorial.md) — step-by-step local and service mode tutorials
+- [data_scientist_guide.md](data_scientist_guide.md) — notebook access patterns: Python API, DuckDB SQL, Postgres metadata, model building
 - [registry_reference.md](registry_reference.md) — registry spreadsheet format and column reference
 - [api_reference.md](api_reference.md) — complete endpoint reference with examples
 - [ingest_preview_contract.md](ingest_preview_contract.md) — preview and ingest payload details

@@ -19,7 +19,7 @@ python -m venv .venv
 source .venv/bin/activate            # Linux/macOS
 .venv\Scripts\activate               # Windows
 
-pip install git+ssh://git@github.com/lucaAyt/mfethuls.git
+pip install git+https://github.com/lucaAyt/mfethuls.git
 ```
 
 Add optional extras if needed:
@@ -182,7 +182,7 @@ Service mode runs the full lab server stack. A FastAPI handles HTTP requests fro
 ### 1. Prerequisites
 
 - Docker and Docker Compose installed
-- The repository cloned: `git clone ssh://git@github.com/lucaAyt/mfethuls.git`
+- The repository cloned: `git clone https://github.com/lucaAyt/mfethuls.git`
 - Your registry CSV and raw data accessible to the containers
 
 ### 2. Configure `.env`
@@ -242,12 +242,12 @@ curl http://localhost:8000/health
 
 ### 4. Validate your registry
 
-Before starting an ingest, check the registry for errors:
+Before starting an ingest, check that the registry at `PATH_TO_REGISTRY` on the server is valid. The registry is read from the server path — no file upload needed:
 
 ```shell
-curl -s http://localhost:8000/registry/preview \
+curl -s -X POST http://localhost:8000/registry/preview \
   -H "Authorization: Bearer your-secret-token-here" \
-  -F "file=@/local/path/to/experiments_registry.csv" | jq '.summary'
+  | jq '.summary'
 ```
 
 ```json
@@ -257,9 +257,8 @@ curl -s http://localhost:8000/registry/preview \
 To see which row failed:
 
 ```shell
-curl -s http://localhost:8000/registry/preview \
+curl -s -X POST http://localhost:8000/registry/preview \
   -H "Authorization: Bearer your-secret-token-here" \
-  -F "file=@/local/path/to/experiments_registry.csv" \
   | jq '.rows[] | select(.valid == false)'
 ```
 
@@ -270,20 +269,18 @@ Fix any errors before proceeding. Common causes:
 
 ### 5. Start an ingest job
 
-Upload the registry and start processing:
+The registry is read from `PATH_TO_REGISTRY` on the server. Sync it there first (via the Streamlit sync button or rclone manually), then trigger ingest:
 
 ```shell
 curl -s -X POST http://localhost:8000/ingest \
   -H "Authorization: Bearer your-secret-token-here" \
-  -F "file=@/local/path/to/experiments_registry.csv" \
   | jq .
 ```
 
 ```json
 {
   "job_id": "a3f8c1e2d4b567...",
-  "status": "queued",
-  "job_registry_storage_path": "/app/.mfethuls_registry/job_registry_record_for_a3f8c1e2d4b567.parquet"
+  "status": "queued"
 }
 ```
 
@@ -383,10 +380,11 @@ This removes the DuckDB view and catalog entry only. The Parquet file on disk is
 
 ### 10. Open the Streamlit dashboard
 
-Open `http://localhost:8501` (or `http://<tailscale-ip>:8501` in service mode) in your browser.
+Open `http://localhost:8501` (or `http://<tailscale-ip>:8501` on a shared server) in your browser.
 
-- **Sidebar → Datasets**: select one or more experiments to visualise
-- **Main area → Plot**: overlay curves, change axes, apply filters, export SVG/PNG
+- **Sidebar → Ingest**: sync from OneDrive, select experiments, run ingest with live progress
+- **Sidebar → Datasets**: browse registered datasets by name, instrument, sample, and run
+- **Main area → Plot**: overlay curves, change axes, apply filters, export SVG or interactive HTML
 
 ---
 
