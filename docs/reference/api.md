@@ -100,10 +100,7 @@ Parse and validate a registry spreadsheet. Returns per-row results without start
 
 ### `POST /ingest`
 
-Start a background ingest job. Validates the registry first; rejects if invalid rows exist (unless `allow_invalid=true`).
-
-**Request:** `multipart/form-data`
-- `file` (optional): CSV or XLSX upload. If omitted, reads `PATH_TO_REGISTRY`.
+Start a background ingest job. Validates the registry first; rejects if invalid rows exist (unless `allow_invalid=true`). Reads the registry from `PATH_TO_REGISTRY` on the server.
 
 **Query parameters:**
 
@@ -112,6 +109,8 @@ Start a background ingest job. Validates the registry first; rejects if invalid 
 | `storage_mode` | string | `local` | `local`, `cloud`, or `both` |
 | `cloud_provider` | string | — | `s3` or `azure` (required when `storage_mode` is `cloud` or `both`) |
 | `allow_invalid` | bool | `false` | Submit even if registry has invalid rows |
+| `experiments` | string | — | Comma-separated experiment names to ingest; omit for all |
+| `refresh` | bool | `false` | Force re-parse even if Parquet cache exists |
 
 **Response 202:**
 ```json
@@ -132,6 +131,21 @@ Header: `Location: /jobs/<job_id>`
   "invalid_rows": [...]
 }
 ```
+
+---
+
+### `POST /sync`
+
+Pull raw data and registry from OneDrive using rclone. Blocks until the sync completes (up to several minutes for large data sets).
+
+Requires rclone to be installed on the server and `RCLONE_REMOTE`, `RCLONE_SOURCE_PATH`, `RCLONE_REGISTRY_PATH` set in `.env`. See [cloud_deployment.md](../guides/cloud_deployment.md) for setup.
+
+**Response 200:**
+```json
+{"status": "sync_complete"}
+```
+
+**Response 500:** rclone not installed, sync script not found, or rclone exited with an error (body contains last 500 chars of stderr).
 
 ---
 
@@ -325,3 +339,6 @@ Or for structured errors (e.g. validation failures):
 | `MFETHULS_S3_ENDPOINT` | S3-compatible endpoint URL |
 | `MFETHULS_S3_ACCESS_KEY` | S3 access key |
 | `MFETHULS_S3_SECRET_KEY` | S3 secret key |
+| `RCLONE_REMOTE` | rclone remote name (e.g. `onedrive`) |
+| `RCLONE_SOURCE_PATH` | OneDrive path to raw data folder |
+| `RCLONE_REGISTRY_PATH` | OneDrive path to registry CSV |

@@ -84,7 +84,7 @@ The profile value is flexible — mfethuls accepts common synonyms and normalise
 "temperature"             → oscillatory_temperature_sweep
 ```
 
-If you are unsure, run `POST /registry/preview` (service mode) or the Python preview helper (local mode) before submitting an ingest.
+If you are unsure, use `POST /registry/preview` (service mode) to validate the registry without starting an ingest — see [reference/api.md](api.md).
 
 ---
 
@@ -152,6 +152,6 @@ CL_pending,,,,,Planned — not yet run,,
 
 **Don't delete old rows:** mfethuls skips re-ingesting experiments whose data has not changed. Deleting a row won't remove the dataset from the catalog unless you explicitly call `DELETE /dataset/{name}`. Leave old rows in place.
 
-**Validate before you ingest:** use `POST /registry/preview` (service) or the Streamlit sidebar preview button (local) to catch formatting errors before starting a long ingest job.
+**Validate before you ingest:** use `POST /registry/preview` (service mode) to catch formatting errors before starting a long ingest job. See [reference/api.md](api.md) for the request format.
 
 **Custom columns are fine:** any column beyond the standard set is stored as experiment metadata. Use them freely for concentration, solvent, temperature, batch number, etc.

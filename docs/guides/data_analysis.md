@@ -1,6 +1,6 @@
-# Data Scientist Guide — Querying and Analysing Lab Data
+# Data Analysis Guide — Querying Lab Data in Notebooks
 
-This guide covers every way to access mfethuls data programmatically: the Python API, DuckDB SQL, Postgres metadata, and direct Parquet reads. It is written for data scientists who want to build models, run statistical analysis, or do exploratory work in notebooks — not for experimentalists running ingests.
+This guide covers every way to access mfethuls data programmatically: the Python API, DuckDB SQL, Postgres metadata, and direct Parquet reads. Written for data scientists doing model building, statistical analysis, or exploratory work in notebooks — not for experimentalists running ingests.
 
 ---
 
@@ -112,6 +112,24 @@ df = fetch_dataset("CL_dsc_001_S001_R001")
 pip install "mfethuls[notebook,viz]"
 # or with uv:
 uv pip install "mfethuls[notebook,viz]"
+```
+
+The `notebook` extra installs both Jupyter and Marimo. Use whichever you prefer — the Python API and DuckDB patterns below work identically in both.
+
+---
+
+## Check what's been ingested
+
+```python
+from mfethuls.storage.notebook import list_datasets
+
+# Local mode — no arguments
+list_datasets()
+
+# Service mode (over Tailscale)
+list_datasets("postgresql://mfethuls:<password>@100.x.x.x:5432/mfethuls")[
+    ["experiment_name", "instrument_name", "sample_id", "registered_at"]
+]
 ```
 
 ---
@@ -255,12 +273,12 @@ Use Postgres for discovery and filtering — find the right experiments before l
 
 ```python
 from mfethuls.storage.notebook import list_datasets
-import pandas as pd
 
-PG_URL = "postgresql://mfethuls:<password>@100.x.x.x:5432/mfethuls"
+# Local mode — no arguments needed
+meta = list_datasets()
 
-# All datasets as a DataFrame
-meta = list_datasets(PG_URL, limit=1000)
+# Service mode — pass Postgres URL for richer metadata
+meta = list_datasets("postgresql://mfethuls:<password>@100.x.x.x:5432/mfethuls", limit=1000)
 print(meta.columns.tolist())
 # ['id', 'experiment_id', 'sample_id', 'run_id', 'experiment_name',
 #  'instrument_name', 'instrument_type', 'instrument_model',
@@ -365,20 +383,20 @@ print(enriched.groupby(["sample_id", "measurement_profile"])["heat_flow_mW"].des
 
 ## Column reference by instrument
 
-Each instrument produces a normalised set of columns after ingest. The canonical names are defined in `SCHEMA_CONTRACT.md` at the repo root. Key examples:
+Each instrument produces a normalised set of columns after ingest. The canonical names are defined in [docs/reference/schema.md](../reference/schema.md).
 
 | Instrument | Key columns |
 |---|---|
 | DSC | `temperature_C`, `heat_flow_mW`, `time_s` |
 | TGA | `temperature_C`, `mass_mg`, `mass_pct`, `time_s` |
-| FTIR | `wavenumber_cm`, `absorbance`, `transmittance` |
-| UV-Vis | `wavelength_nm`, `absorbance` |
-| Rheometer | `angular_frequency_rad_s`, `storage_modulus_Pa`, `loss_modulus_Pa`, `tan_delta` |
-| SEC | `elution_volume_mL`, `signal_mV`, `molecular_weight_Da` |
-| NMR | `ppm`, `intensity` |
-| DMA | `temperature_C`, `frequency_Hz`, `storage_modulus_MPa`, `tan_delta` |
+| FTIR | `wavenumber_cm_inv`, `absorbance_a_u`, `transmittance_pct` |
+| UV-Vis | `wavelength_nm`, `absorbance_a_u` |
+| Rheometer | `angular_frequency_rad_s`, `storage_modulus_pa`, `loss_modulus_pa`, `tan_delta` |
+| SEC | `retention_time_min`, `detector_response_a_u`, `detector_name` |
+| NMR | `chemical_shift_ppm`, `intensity_a_u` |
+| DMA | `temperature_C`, `frequency_hz`, `storage_modulus_mpa`, `loss_modulus_mpa`, `tan_delta` |
 
-All datasets also carry `experiment_name`, `experiment_id` (internal hex), `sample_id`, `run_id` from the registry.
+All datasets also carry `experiment_name`, `experiment_id` (internal hex, system-assigned), `sample_id`, `run_id` from the registry.
 
 ---
 
@@ -386,7 +404,7 @@ All datasets also carry `experiment_name`, `experiment_id` (internal hex), `samp
 
 **Normalise before concatenating** — instruments report in different units even within the same type. Check `measurement_profile` from Postgres — it tells you which experimental protocol was used and whether signals are directly comparable.
 
-**Use `experiment_name` as the join key** — it is stable across re-ingests, human-readable, and present in both DuckDB views and Postgres metadata. `experiment_id` is an internal hex and not needed outside the storage layer.
+**Use `experiment_name` as the join key** — it is stable across re-ingests, human-readable, and present in both DuckDB views and Postgres metadata. `experiment_id` is an internal hex assigned by the system and not needed outside the storage layer.
 
 **Filter in Postgres, load in DuckDB** — Postgres is cheap to query for discovery; DuckDB loads potentially large Parquet files. Do not load all datasets and filter in Python.
 

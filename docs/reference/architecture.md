@@ -345,10 +345,8 @@ src/mfethuls/
 
 ## Related docs
 
-- [tutorial.md](tutorial.md) — step-by-step local and service mode tutorials
-- [data_scientist_guide.md](data_scientist_guide.md) — notebook access patterns: Python API, DuckDB SQL, Postgres metadata, model building
-- [registry_reference.md](registry_reference.md) — registry spreadsheet format and column reference
-- [api_reference.md](api_reference.md) — complete endpoint reference with examples
-- [ingest_preview_contract.md](ingest_preview_contract.md) — preview and ingest payload details
-- [database_integration.md](database_integration.md) — Postgres + Parquet + DuckDB design notes
-- [SCHEMA_CONTRACT.md](../SCHEMA_CONTRACT.md) — canonical column names and normalization rules
+- [guides/quickstart.md](../guides/quickstart.md) — entry point for new users
+- [guides/data_analysis.md](../guides/data_analysis.md) — notebook access patterns: Python API, DuckDB SQL, Postgres metadata, model building
+- [reference/registry.md](registry.md) — registry spreadsheet format and column reference
+- [reference/api.md](api.md) — complete endpoint reference with examples
+- [reference/schema.md](schema.md) — canonical column names and normalization rules

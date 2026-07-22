@@ -205,3 +205,14 @@ class PostgresMetadataBackend(MetadataBackend):
                 fetched = res.fetchone()
                 row = dict(fetched._mapping) if fetched is not None else None
         return dict(row) if row is not None else None
+
+    def get_dataset_by_name(self, experiment_name: str) -> Optional[Dict[str, Any]]:
+        sql = "SELECT * FROM datasets WHERE experiment_name = :name ORDER BY created_at DESC LIMIT 1"
+        with self.engine.connect() as conn:
+            res = conn.execute(text(sql), {"name": experiment_name})
+            try:
+                row = res.mappings().first()
+            except Exception:
+                fetched = res.fetchone()
+                row = dict(fetched._mapping) if fetched is not None else None
+        return dict(row) if row is not None else None

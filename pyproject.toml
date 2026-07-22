@@ -1,6 +1,6 @@
 [project]
 name = "mfethuls"
-version = "0.1.0"
+version = "0.1.1"
 description = "Composable framework for lab instrument data parsing, characterization and analysis for python people in labs."
 authors = [{name = "Luca Bertossi", email = "lucabertossi@gmail.com"}]
 readme = "README.md"
@@ -23,6 +23,7 @@ postgres = [
 ]
 notebook = [
     "notebook>=6.5.3",
+    "marimo>=0.9.0",
 ]
 cloud = [
     "boto3>=1.34.0",

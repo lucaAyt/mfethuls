@@ -19,7 +19,7 @@ A Python framework for parsing, normalising, and managing data from laboratory i
 | SAXS | Anton Paar |
 | MS | Bruker |
 
-Each parser normalises raw exports to a [canonical column schema](SCHEMA_CONTRACT.md) — same column names and units regardless of instrument model.
+Each parser normalises raw exports to a [canonical column schema](docs/reference/schema.md) — same column names and units regardless of instrument model.
 
 ---
 
@@ -63,7 +63,7 @@ PATH_TO_LOCAL_STORAGE=/path/to/parquet/output
 streamlit run apps/Home.py
 ```
 
-Non-technical users on Windows: double-click `launch.bat`. A setup wizard collects paths on first run. Requires only [`uv`](https://docs.astral.sh/uv/). See [docs/local_user_setup.md](docs/local_user_setup.md).
+Non-technical users on Windows: double-click `launch.bat`. A setup wizard collects paths on first run. Requires only [`uv`](https://docs.astral.sh/uv/). See [docs/guides/local_setup.md](docs/guides/local_setup.md).
 
 **Python API:**
 
@@ -117,19 +117,13 @@ curl -s http://localhost:8000/datasets \
   -H "Authorization: Bearer <token>"
 ```
 
-See [docs/api_reference.md](docs/api_reference.md) for the full reference. For cloud deployment on DigitalOcean + Tailscale see [docs/deployment.md](docs/deployment.md).
+See [docs/reference/api.md](docs/reference/api.md) for the full reference. For cloud deployment on DigitalOcean + Tailscale see [docs/guides/cloud_deployment.md](docs/guides/cloud_deployment.md).
 
 ---
 
 ## Data access for analysis
 
-Three stores, each with a distinct role — see [docs/data_scientist_guide.md](docs/data_scientist_guide.md) for the full guide including DuckDB SQL recipes and model-building patterns.
-
-| Store | What's in it | How to query |
-|---|---|---|
-| **DuckDB** | Measurement data — one VIEW per experiment | `duckdb.connect(path).execute("SELECT * FROM exp_name")` |
-| **Postgres** | Metadata — instrument, sample, provenance | `mfethuls.storage.notebook.list_datasets(pg_url)` |
-| **Parquet** | Source of truth for measurement data | `pd.read_parquet(path)` |
+Three stores, each with a distinct role — see [docs/guides/data_analysis.md](docs/guides/data_analysis.md) for the full guide including DuckDB SQL recipes and model-building patterns.
 
 ---
 
@@ -137,14 +131,15 @@ Three stores, each with a distinct role — see [docs/data_scientist_guide.md](d
 
 | Document | Contents |
 |---|---|
-| [docs/local_user_setup.md](docs/local_user_setup.md) | Non-technical user guide — `uv` + launcher |
-| [docs/tutorial.md](docs/tutorial.md) | Step-by-step walkthroughs for local and service mode |
-| [docs/data_scientist_guide.md](docs/data_scientist_guide.md) | Notebook access — Python API, DuckDB SQL, Postgres, model building |
-| [docs/registry_reference.md](docs/registry_reference.md) | Registry format, column reference, measurement profiles |
-| [docs/architecture.md](docs/architecture.md) | System diagrams, ETL pipeline, storage design |
-| [docs/api_reference.md](docs/api_reference.md) | Full REST API reference |
-| [docs/deployment.md](docs/deployment.md) | Cloud deployment guide |
-| [SCHEMA_CONTRACT.md](SCHEMA_CONTRACT.md) | Canonical column names, units, normalisation rules |
+| [docs/guides/quickstart.md](docs/guides/quickstart.md) | Start here — Tailscale dashboard access or local Python setup |
+| [docs/guides/workflow.md](docs/guides/workflow.md) | End-to-end tutorial — registry → ingest → dashboard → notebook |
+| [docs/guides/local_setup.md](docs/guides/local_setup.md) | Non-technical user guide — `uv` + launcher |
+| [docs/guides/cloud_deployment.md](docs/guides/cloud_deployment.md) | Cloud deployment on DigitalOcean + Tailscale |
+| [docs/guides/data_analysis.md](docs/guides/data_analysis.md) | Notebook access — Python API, DuckDB SQL, Postgres, model building |
+| [docs/reference/registry.md](docs/reference/registry.md) | Registry format, column reference, measurement profiles |
+| [docs/reference/api.md](docs/reference/api.md) | Full REST API reference |
+| [docs/reference/architecture.md](docs/reference/architecture.md) | System diagrams, ETL pipeline, storage design |
+| [docs/reference/schema.md](docs/reference/schema.md) | Canonical column names, units, normalisation rules |
 
 ---
 

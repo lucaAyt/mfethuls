@@ -93,7 +93,6 @@ nano .env
 Set these values (everything else can stay as default):
 
 ```
-MFETHULS_MODE=local           # not used by containers but keep it
 DATA_ROOT=/mnt/mfethuls-data  # the block volume mount point
 
 MFETHULS_API_KEY=<generate with: python3 -c "import secrets; print(secrets.token_urlsafe(32))">
@@ -292,9 +291,9 @@ Postgres data and DuckDB (both on the block volume) survive rebuilds.
 
 | Item | Status | Plan |
 |------|--------|------|
-| Data sync from OneDrive | rclone on-demand (Streamlit button or `POST /sync`) | Done — Phase 1b |
-| Registry sync | rclone alongside raw data | Done — Phase 1b |
+| Data sync from OneDrive | rclone on-demand (Streamlit button or `POST /sync`) | Done |
+| Registry sync | rclone alongside raw data | Done |
 | TLS for team access | Plain HTTP over Tailscale | Acceptable: Tailscale encrypts all traffic end-to-end (WireGuard). Add `tailscale serve` for HTTPS if needed. |
-| Automated backups | Daily DO volume snapshots, 7-day retention | Done — Step 6 |
+| Automated backups | Daily DO volume snapshots, 7-day retention | Done |
 
 Tailscale encrypts all traffic between devices using WireGuard — plain HTTP over the Tailscale network is safe. You do not need a TLS certificate for private lab access.

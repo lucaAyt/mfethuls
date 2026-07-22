@@ -52,12 +52,12 @@ cd mfethuls
 
 To use a **specific release version**:
 ```shell
-git checkout v0.0.13   # replace with the version tag you want
+git checkout v<version>   # replace with the version tag you want
 ```
 
 To use a **specific branch** (e.g. to test a new feature):
 ```shell
-git checkout feature/id_redesign
+git checkout feature/some-branch
 ```
 
 List available release tags:
@@ -124,7 +124,7 @@ PATH_TO_LOCAL_STORAGE=C:\Lab\mfethuls_storage
 ## Switching between versions or branches
 
 ```shell
-git checkout v0.0.14              # specific release
+git checkout v<version>           # specific release
 git checkout main                 # latest stable
 git checkout feature/some-branch  # a specific branch
 ```
