@@ -57,6 +57,8 @@ PATH_TO_REGISTRY=/path/to/experiments_template.csv
 PATH_TO_LOCAL_STORAGE=/path/to/parquet/output
 ```
 
+`experiments_template.csv` in the repo root is a pre-filled registry template — open in Excel and adapt to your experiments.
+
 **Run the Streamlit explorer:**
 
 ```shell

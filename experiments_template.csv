@@ -1,0 +1,13 @@
+name,instrument_name,sample_id,run_id,raw_data_filename,measurement_profile,description,operator
+MY_DSC_001,dsc_mettler_toledo,S001,R001,,,First DSC run,
+MY_DSC_002,dsc_perkin_elmer,S001,R001,,,PerkinElmer DSC run,
+MY_TGA_001,tga,S001,R001,,,TGA run,
+MY_FTIR_001,ftir,S001,R001,,,FTIR spectrum,
+MY_NMR_001,nmr,S001,R001,,,NMR spectrum,
+MY_SEC_001,sec,S001,R001,,,SEC chromatogram,
+MY_RHEOMETER_FREQ,rheometer,S001,R001,,oscillatory_frequency_sweep,Frequency sweep,
+MY_RHEOMETER_FLOW,rheometer,S001,R001,,flow_curve,Flow curve,
+MY_DMA_001,dma,S001,R001,,oscillatory_temperature_sweep,DMA temperature sweep,
+MY_UVVIS_001,uv_vis,S001,R001,,,UV-Vis spectrum,
+MY_SAXS_001,saxs,S001,R001,,,SAXS pattern,
+MY_MS_001,ms,S001,R001,,,Mass spectrum,

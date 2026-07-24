@@ -62,6 +62,8 @@ PATH_TO_LOCAL_STORAGE=/path/to/parquet/output
 
 `PATH_TO_DATA` should be the root folder containing instrument subfolders (`DSC/`, `TGA/`, etc.).
 
+`experiments_template.csv` in the repo root is a pre-filled starting point — open it in Excel and replace the placeholder rows with your experiments.
+
 ### Launch
 
 **Windows:** double-click `launch.bat`.

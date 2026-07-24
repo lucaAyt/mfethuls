@@ -37,33 +37,42 @@ uv --version
 
 ## Step 2 — Get the repository
 
-### Option A — Download a zip (no git required)
+### Option A — Download a zip (easiest, no git required)
 
 1. Go to the GitHub repository page
 2. Click **Code → Download ZIP**
 3. Unzip to a folder on your machine (e.g. `C:\Lab\mfethuls`)
 
-### Option B — Clone with git (recommended for staying up to date)
+### Option B — Clone with git (easier to update later)
 
 ```shell
 git clone https://github.com/lucaAyt/mfethuls.git
 cd mfethuls
 ```
 
-To use a **specific release version**:
-```shell
-git checkout v<version>   # replace with the version tag you want
+To update later, run `git pull` from the project folder.
+
+---
+
+## Data folder structure
+
+Before you launch for the first time, organise your raw instrument data like this:
+
+```
+PATH_TO_DATA/          ← the path you give the setup wizard
+  DSC/                 ← Mettler Toledo, PerkinElmer, other
+  TGA/                 ← TGA files
+  FTIR/                ← Bruker FTIR files
+  NMR/                 ← Bruker NMR folders
+  SEC/                 ← Agilent SEC files
+  Rheology/            ← Anton Paar rheometer files
+  DMA/                 ← TA Q800 DMA files
+  UV_VIS/              ← Shimadzu / Ocean Optics
+  SAXS/                ← Anton Paar SAXS files
+  MS/                  ← Bruker MS files
 ```
 
-To use a **specific branch** (e.g. to test a new feature):
-```shell
-git checkout feature/some-branch
-```
-
-List available release tags:
-```shell
-git tag --sort=-v:refname | head -10
-```
+Files can be placed **at any depth** inside the instrument folder — subfolders are fine. mfethuls walks the full folder tree to find your files.
 
 ---
 
@@ -85,6 +94,8 @@ On first launch, a setup wizard collects three paths:
 | Path for processed storage | *(leave blank for default)* | Where Parquet files will be written |
 
 These are saved to `.env` in the project folder. You will not be prompted again.
+
+The repo includes `experiments_template.csv` — open it in Excel to see all supported instruments and columns. Replace the placeholder rows with your own experiments, or use it as a starting point for a new registry file.
 
 After the wizard, Streamlit starts automatically and opens at `http://localhost:8501`.
 
@@ -118,18 +129,6 @@ PATH_TO_DATA=C:\Lab\RawData
 PATH_TO_REGISTRY=C:\Lab\registry.csv
 PATH_TO_LOCAL_STORAGE=C:\Lab\mfethuls_storage
 ```
-
----
-
-## Switching between versions or branches
-
-```shell
-git checkout v<version>           # specific release
-git checkout main                 # latest stable
-git checkout feature/some-branch  # a specific branch
-```
-
-Then launch as normal — `uv` re-syncs dependencies if the branch changed them.
 
 ---
 

@@ -24,7 +24,7 @@ Your goal: get these into mfethuls, compare the heat flow curves, and extract th
 
 ## Step 1 — Add experiments to the registry
 
-Open your registry CSV (`experiments_template.csv`) in Excel or a text editor and add three rows:
+Open `experiments_template.csv` (included in the repo root) in Excel. Delete the placeholder rows and add your three experiments:
 
 ```
 name,instrument_name,sample_id,run_id,description,operator
@@ -85,7 +85,13 @@ Select multiple datasets and click **"Compare"** to overlay them on the same axe
 
 ## Step 5 — Query in a notebook
 
-Open a Jupyter or Marimo notebook in the same project directory (`.env` is loaded automatically).
+The repo includes `notebooks/local_tutorial.py` — a Marimo notebook that walks through all the patterns below interactively. Open it with:
+
+```shell
+uv run --extra notebook marimo edit notebooks/local_tutorial.py
+```
+
+Or open a Jupyter or Marimo notebook of your own in the same project directory (`.env` is loaded automatically).
 
 ### Check what's been ingested
 
