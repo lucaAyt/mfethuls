@@ -13,7 +13,7 @@ def _():
 
 @app.cell
 def _():
-    import os 
+    import os
     import pandas as pd
 
     from mfethuls import load_experiments, load_samples, plot_experiments
@@ -34,15 +34,15 @@ def _():
 def _(mo):
     mo.md(r"""
     ### Ingest data
-    > Only needs to be done once off or if there are updates.<br>
-    > Once the data is in storage (ingestion complete) it can be queried by spawning DuckDBQueryBackend().
+    > Only needs to be done once, or when new experiments are added to the registry.<br>
+    > Once ingested, data can be queried directly from storage without re-parsing.
     """)
     return
 
 
 @app.cell
 def _(load_experiment_registry):
-    # Load the experimental registry, the interface for the experimentalist
+    # Load the experiment registry — the shared spreadsheet that describes each experiment
     df_registry = load_experiment_registry()
     df_registry
     return
@@ -50,40 +50,37 @@ def _(load_experiment_registry):
 
 @app.cell
 def _(load_experiments):
-    # If you would like to ingest data that has been added to registry or refresh
-    ingest_data = True
-    if ingest_data:
-        # Ingest the data and load experiment into dataset
-        ds_experiments = load_experiments(['EXP002'], use_storage=True, refresh=False)
-        ds_experiments
+    # Ingest experiments and load into a ComparisonSet
+    # Set refresh=True to re-parse even if already cached
+    ds_experiments = load_experiments(['LB_dsc_001', 'LB_dsc_002'], use_storage=True, refresh=False)
+    ds_experiments
     return
 
 
 @app.cell
 def _(list_datasets):
-    # Check datasets to see if your experiment has been ingested 
+    # Check which experiments have been ingested
     list_datasets()
     return
 
 
 @app.cell
 def _(get_dataset):
-    # You can get the metadata for an experiment
-    get_dataset('QEP')
+    # Inspect metadata for a single experiment
+    get_dataset('LB_dsc_001')
     return
 
 
 @app.cell
 def _(load_experiments):
-    # If your experiment has been ingested you can load it with the experiment name.
-    # Load a comparison set including dataset and metadata
-    load_experiments(['QEP'])
+    # Load a single experiment by name
+    load_experiments(['LB_dsc_001'])
     return
 
 
 @app.cell
 def _(load_samples):
-    # Or load all experiments associated with a particular sample ID
+    # Or load all experiments for a sample ID
     cs = load_samples(['S001'])
     cs
     return (cs,)
@@ -91,7 +88,7 @@ def _(load_samples):
 
 @app.cell
 def _(cs):
-    # Convert dataset to a dataframe
+    # Convert to a tidy long-format DataFrame
     df = cs.to_dataframe()
     df
     return (df,)
@@ -101,15 +98,16 @@ def _(cs):
 def _(mo):
     mo.md(r"""
     ## Plot data
-    > Use the built in plotting module<br>
-    > Use you're favourite python package to plot from dataframe
+    > Use the built-in plotting module, or any Python plotting library from the DataFrame.
     """)
     return
 
 
 @app.cell
-def _(cs, plot_experiments):
-    plot_experiments(cs)
+def _(load_experiments, plot_experiments):
+    # Compare two DSC experiments on the same axes
+    cs_dsc = load_experiments(['LB_dsc_001', 'LB_dsc_002'])
+    plot_experiments(cs_dsc, x='temperature_C', y='heat_flow_mW')
     return
 
 
@@ -122,8 +120,7 @@ def _():
 
 @app.cell
 def _(df, sns):
-    mask = (df.name=='EXP002') & (df.profile.isin(['Heating_1', 'Cooling_0']))
-    sns.lineplot(df[mask], x='temperature_C', y='heat_flow_mW', hue='profile', palette='flare')
+    sns.lineplot(df, x='temperature_C', y='heat_flow_mW', hue='experiment_name', palette='flare')
     return
 
 

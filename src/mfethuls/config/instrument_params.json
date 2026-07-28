@@ -46,6 +46,12 @@
     "folder_name": "UV_Vis"
   },
   {
+    "type": "fluorescence",
+    "model": "flame",
+    "name": "fluorescence_insitu",
+    "folder_name": "Fluorescence"
+  },
+  {
     "type": "uv_vis",
     "model": "Shimadzu",
     "name": "uv_vis",

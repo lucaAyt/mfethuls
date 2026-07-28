@@ -64,6 +64,8 @@ PATH_TO_LOCAL_STORAGE=/path/to/parquet/output
 
 `experiments_template.csv` in the repo root is a pre-filled starting point — open it in Excel and replace the placeholder rows with your experiments.
 
+**No data yet?** The repo includes example files (`examples/data/` — DSC, TGA, FTIR, fluorescence in-situ). Point `PATH_TO_DATA` at `examples/data/` and `PATH_TO_REGISTRY` at `examples/experiments_registry.csv` to run a complete ingest immediately.
+
 ### Launch
 
 **Windows:** double-click `launch.bat`.

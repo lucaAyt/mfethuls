@@ -1,21 +1,22 @@
 # Workflow Tutorial
 
-This tutorial walks through a complete mfethuls workflow from raw files to notebook analysis. By the end you will have ingested three DSC experiments, browsed them in the Streamlit dashboard, and queried the data in a notebook.
+This tutorial walks through a complete mfethuls workflow from raw files to notebook analysis. By the end you will have ingested two DSC experiments, browsed them in the Streamlit dashboard, and queried the data in a notebook.
 
 **Prerequisites:** completed [local setup](local_setup.md) — `uv` installed, repo cloned, `launch.bat` / `launch.sh` working.
+
+> **Follow along with example data:** point `PATH_TO_DATA` at `examples/data/` and `PATH_TO_REGISTRY` at `examples/experiments_registry.csv` (both at the repo root) when the setup wizard asks — the files used in this tutorial are included.
 
 ---
 
 ## The scenario
 
-You have just run three DSC experiments on two polymer samples. The instrument exported three `.txt` files into your `DSC/` folder:
+You have just run two DSC experiments on two polymer samples. The instrument exported two `.txt` files into your `DSC/` folder:
 
 ```
-C:\Lab\RawData\
+PATH_TO_DATA\
   DSC\
-    CL_dsc_001.txt    ← sample S001, first run
-    CL_dsc_002.txt    ← sample S002, first run
-    CL_dsc_003.txt    ← sample S002, second run (repeat)
+    poly1.txt    ← sample S001, first run
+    poly2.txt    ← sample S002, first run
 ```
 
 Your goal: get these into mfethuls, compare the heat flow curves, and extract the peak temperature as a feature for downstream modelling.
@@ -24,19 +25,18 @@ Your goal: get these into mfethuls, compare the heat flow curves, and extract th
 
 ## Step 1 — Add experiments to the registry
 
-Open `experiments_template.csv` (included in the repo root) in Excel. Delete the placeholder rows and add your three experiments:
+Open `experiments_template.csv` (included in the repo root) in Excel. Delete the placeholder rows and add your two experiments:
 
 ```
-name,instrument_name,sample_id,run_id,description,operator
-CL_dsc_001,dsc_mettler_toledo,S001,R001,baseline scan,Maria
-CL_dsc_002,dsc_mettler_toledo,S002,R001,baseline scan,Maria
-CL_dsc_003,dsc_mettler_toledo,S002,R002,repeat — higher ramp rate,Maria
+name,instrument_name,sample_id,run_id,raw_data_filename,description,operator
+LB_dsc_001,dsc_mettler_toledo,S001,R001,poly1,DSC run — polymer 1,LB
+LB_dsc_002,dsc_mettler_toledo,S002,R001,poly2,DSC run — polymer 2,LB
 ```
 
 Key points:
-- `name` must be unique and matches what you'll see in the dashboard and notebooks.
+- `name` must be unique — it's what you'll see in the dashboard and notebooks. A lab-prefix + instrument + run number convention (`LB_dsc_001`) makes the list easy to scan.
 - `instrument_name` must match exactly — see the [registry reference](../reference/registry.md) for the full list.
-- `raw_data_filename` is left blank here because the file names match the `name` column. If your instrument auto-generates a different filename, fill that column in.
+- `raw_data_filename` is the file stem. Use it when the filename differs from `name` (as here: file is `poly1.txt`, registry entry is `LB_dsc_001`).
 
 Save the CSV. That's the only file you touch before ingesting.
 
@@ -61,13 +61,13 @@ Streamlit opens at `http://localhost:8501`. On first launch the setup wizard wil
 
 In the Streamlit sidebar, expand **Ingest**. Enter the path to your registry CSV in the text input — the experiment list loads automatically from the file.
 
-Select `CL_dsc_001`, `CL_dsc_002`, and `CL_dsc_003` from the multiselect (or tick **"Select all"** if these are the only rows), then click **"Ingest"**. A progress bar advances as each experiment is parsed, normalised, and written to Parquet.
+Select `LB_dsc_001` and `LB_dsc_002` from the multiselect (or tick **"Select all"** if these are the only rows), then click **"Ingest"**. A progress bar advances as each experiment is parsed, normalised, and written to Parquet.
 
 If a row has a validation error (unknown instrument name, file not found, etc.), it will surface as an error message after the ingest attempt. Fix the registry CSV and ingest again — already-successful experiments are skipped unless you tick **"Re-parse even if cached"**.
 
 When it finishes:
-- Three Parquet files exist under `PATH_TO_LOCAL_STORAGE/dsc_mettler_toledo/<hex_id>/`
-- Three views are registered in the DuckDB catalog: `CL_dsc_001_S001_R001`, `CL_dsc_002_S002_R001`, `CL_dsc_003_S002_R002`
+- Two Parquet files exist under `PATH_TO_LOCAL_STORAGE/dsc_mettler_toledo/<hex_id>/`
+- Two views are registered in the DuckDB catalog: `LB_dsc_001_S001_R001`, `LB_dsc_002_S002_R001`
 
 > **Service mode:** click **"Sync from OneDrive"** first to pull data from OneDrive, then select experiments and click **"Ingest experiments"**. To validate a registry without ingesting, use `POST /registry/preview` from the API — see [reference/api.md](../reference/api.md).
 
@@ -75,11 +75,11 @@ When it finishes:
 
 ## Step 4 — Browse and plot
 
-Switch to the **Datasets** tab. Your three experiments appear in the list. Select `CL_dsc_001_S001_R001` — a scatter plot of `heat_flow_mW` vs `temperature_C` renders immediately.
+Switch to the **Datasets** tab. Your two experiments appear in the list. Select `LB_dsc_001_S001_R001` — a scatter plot of `heat_flow_mW` vs `temperature_C` renders immediately.
 
 Use the axis dropdowns to explore other columns. The toolbar camera button exports the current view as an SVG (editable in Inkscape). The **Export** section below the plot offers a side-by-side SVG and interactive HTML download.
 
-Select multiple datasets and click **"Compare"** to overlay them on the same axes — useful for checking whether `CL_dsc_002` and `CL_dsc_003` agree.
+Select both datasets and click **"Compare"** to overlay them on the same axes.
 
 ---
 
@@ -99,10 +99,9 @@ Or open a Jupyter or Marimo notebook of your own in the same project directory (
 from mfethuls.storage.notebook import list_datasets
 
 list_datasets()
-#    experiment_name          table_name              registered_at
-# 0  CL_dsc_001        CL_dsc_001_S001_R001   2026-07-22 09:14:01
-# 1  CL_dsc_002        CL_dsc_002_S002_R001   2026-07-22 09:14:02
-# 2  CL_dsc_003        CL_dsc_003_S002_R002   2026-07-22 09:14:03
+#    experiment_name       table_name               registered_at
+# 0  LB_dsc_001      LB_dsc_001_S001_R001   2026-07-28 09:14:01
+# 1  LB_dsc_002      LB_dsc_002_S002_R001   2026-07-28 09:14:02
 ```
 
 ### Load experiments with the Python API
@@ -110,7 +109,7 @@ list_datasets()
 ```python
 import mfethuls
 
-cs = mfethuls.load_experiments(["CL_dsc_001", "CL_dsc_002", "CL_dsc_003"])
+cs = mfethuls.load_experiments(["LB_dsc_001", "LB_dsc_002"])
 df = cs.to_dataframe()
 
 print(df.columns.tolist())
@@ -133,16 +132,12 @@ import os
 
 conn = duckdb.connect(os.environ["MFETHULS_DUCKDB_PATH"], read_only=True)
 
-# Stack all three experiments
 df = conn.execute("""
     SELECT experiment_name, temperature_C, heat_flow_mW
-    FROM "CL_dsc_001_S001_R001"
+    FROM "LB_dsc_001_S001_R001"
     UNION ALL
     SELECT experiment_name, temperature_C, heat_flow_mW
-    FROM "CL_dsc_002_S002_R001"
-    UNION ALL
-    SELECT experiment_name, temperature_C, heat_flow_mW
-    FROM "CL_dsc_003_S002_R002"
+    FROM "LB_dsc_002_S002_R001"
 """).df()
 
 # Extract peak heat flow per experiment

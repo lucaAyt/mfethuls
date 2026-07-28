@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 @register_parser('uv_vis', 'flame')
 @register_parser('reflection', 'flame')
+@register_parser('fluorescence', 'flame')
 class FlameOceanOpticsParser:
     def __init__(self, file_extension='.txt'):
         self.file_extension = file_extension

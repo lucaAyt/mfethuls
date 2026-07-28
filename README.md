@@ -34,7 +34,7 @@ Install extras as needed:
 | Extra | Installs | Use when |
 |---|---|---|
 | `viz` | Plotly, Matplotlib, Kaleido, Streamlit | Streamlit dashboard or notebook plotting |
-| `notebook` | Jupyter | Interactive notebooks |
+| `notebook` | Jupyter, Marimo | Interactive notebooks |
 | `service` | FastAPI, Uvicorn, SQLAlchemy, psycopg2 | Running the API + worker |
 | `cloud` | boto3, azure-storage-blob | S3 or Azure Blob Parquet storage |
 | `postgres` | SQLAlchemy, psycopg2 | Postgres metadata access from notebooks |
@@ -57,7 +57,7 @@ PATH_TO_REGISTRY=/path/to/experiments_template.csv
 PATH_TO_LOCAL_STORAGE=/path/to/parquet/output
 ```
 
-`experiments_template.csv` in the repo root is a pre-filled registry template — open in Excel and adapt to your experiments.
+`experiments_template.csv` in the repo root is a pre-filled registry template — open in Excel and adapt to your experiments. To try mfethuls without your own data, point `PATH_TO_DATA` at `examples/data/` and `PATH_TO_REGISTRY` at `examples/experiments_registry.csv` — example DSC, TGA, FTIR, and fluorescence in-situ files are included.
 
 **Run the Streamlit explorer:**
 

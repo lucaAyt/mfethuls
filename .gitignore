@@ -149,6 +149,9 @@ notebooks/*.ipynb
 # Accidental Windows device-name file
 nul
 
+# Office temp files (Excel lock files etc.)
+~$*
+
 # Spyder project settings
 .spyderproject
 .spyproject

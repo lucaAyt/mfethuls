@@ -39,8 +39,9 @@ These are optional and validated on load. Rows with malformed identifiers are sk
 | `dsc` | DSC — prior model | `DSC/` | |
 | `dsc_perkin_elmer` | DSC — PerkinElmer | `DSC/` | Higher sensitivity |
 | `dsc_mettler_toledo` | DSC — Mettler Toledo | `DSC/` | |
-| `uv_vis` | UV-Vis — Shimadzu | `UV_VIS/` | |
-| `uv_insitu` | UV-Vis in-situ — Ocean Insight Flame | `UV_VIS/` | |
+| `uv_vis` | UV-Vis — Shimadzu | `UV_Vis/` | |
+| `uv_insitu` | UV-Vis in-situ — Ocean Insight Flame | `UV_Vis/` | |
+| `fluorescence_insitu` | Fluorescence in-situ — Ocean Insight Flame | `Fluorescence/` | Same parser as `uv_insitu` |
 | `rheometer` | Rheometer — Anton Paar | `Rheology/` | `measurement_profile` recommended |
 | `tga` | TGA | `TGA/` | |
 | `nmr` | NMR — Bruker | `NMR/` | |
