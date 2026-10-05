@@ -207,6 +207,12 @@ def get_experiment(name: str) -> Experiment:
         raise KeyError(f"Unknown experiment name: {name!r}") from exc
 
 
+def is_experiment_registered(name: str) -> bool:
+    """Return True if an experiment with this name is in the in-memory registry."""
+
+    return name in _EXPERIMENT_REGISTRY
+
+
 def read_tabular_content(path: str) -> pd.DataFrame:
     """Read a CSV/XLSX file into a DataFrame."""
 

@@ -4,6 +4,7 @@ from .comparison import ComparisonMode, plot_comparison, plot_experiments
 from .core import plot_dataset
 from .dma import plot_dma
 from .dsc import plot_dsc
+from .fluorescence import plot_fluorescence
 from .ftir import plot_ftir
 from .ms import plot_ms
 from .nmr import plot_nmr
@@ -26,6 +27,7 @@ __all__ = [
     "plot_dataset",
     "plot_dma",
     "plot_dsc",
+    "plot_fluorescence",
     "plot_ftir",
     "plot_ms",
     "plot_nmr",

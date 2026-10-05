@@ -155,7 +155,7 @@ def test_find_data_files_locates_file_in_subfolder():
         assert any("chitosan_jan15.txt" in f for f in files)
 
 
-def test_find_data_files_collects_all_files_in_same_dir():
+def test_find_data_files_ignores_other_files_in_same_dir():
     with tempfile.TemporaryDirectory() as tmpdir:
         sub = os.path.join(tmpdir, "exp_folder")
         os.makedirs(sub)
@@ -163,8 +163,29 @@ def test_find_data_files_collects_all_files_in_same_dir():
             open(os.path.join(sub, fname), "w").close()
 
         parent, files = find_data_files(tmpdir, "sample")
-        assert len(files) == 3
-        assert all(os.path.dirname(f) == sub for f in files)
+        assert parent == sub
+        assert files == [os.path.join(sub, "sample.txt")]
+
+
+def test_find_data_files_shared_folder_returns_own_file_only():
+    """Several experiments in one folder each get only their own file."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for fname in [".gitkeep", "poly1.txt", "poly2.txt"]:
+            open(os.path.join(tmpdir, fname), "w").close()
+
+        _, files1 = find_data_files(tmpdir, "poly1")
+        _, files2 = find_data_files(tmpdir, "poly2")
+        assert files1 == [os.path.join(tmpdir, "poly1.txt")]
+        assert files2 == [os.path.join(tmpdir, "poly2.txt")]
+
+
+def test_find_data_files_collects_all_extensions_for_stem():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for fname in ["poly1.txt", "poly1.csv", "poly2.txt"]:
+            open(os.path.join(tmpdir, fname), "w").close()
+
+        _, files = find_data_files(tmpdir, "poly1")
+        assert {os.path.basename(f) for f in files} == {"poly1.txt", "poly1.csv"}
 
 
 def test_find_data_files_raises_file_not_found():
@@ -214,22 +235,16 @@ def test_find_data_files_matches_directory_name():
         assert parent == exp_folder
 
 
-def test_find_data_files_combines_file_and_directory():
-    """When a matching file AND a matching folder both exist, results are combined."""
+def test_find_data_files_raises_on_file_and_directory():
+    """A matching file AND a matching folder is ambiguous and raises ValueError."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Anchor file co-located in tmpdir
         open(os.path.join(tmpdir, "sample_A.txt"), "w").close()
-        # Subfolder with individual measurements
         folder = os.path.join(tmpdir, "sample_A")
         os.makedirs(folder)
         open(os.path.join(folder, "meas_001.csv"), "w").close()
-        open(os.path.join(folder, "meas_002.csv"), "w").close()
 
-        _parent, files = find_data_files(tmpdir, "sample_A")
-        basenames = {os.path.basename(f) for f in files}
-        assert "sample_A.txt" in basenames
-        assert "meas_001.csv" in basenames
-        assert "meas_002.csv" in basenames
+        with pytest.raises(ValueError, match="both a file and a directory"):
+            find_data_files(tmpdir, "sample_A")
 
 
 def test_find_data_files_raises_on_ambiguous_directory():

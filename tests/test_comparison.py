@@ -1,8 +1,22 @@
+from pathlib import Path
+
 import pandas as pd
+import pytest
 
 from mfethuls import ComparisonSet, load_experiments, load_samples
 from mfethuls.comparison import ComparisonSet as ComparisonSetDirect, load_comparison_set
 from mfethuls.dataset import Dataset
+from mfethuls.experiments import get_experiment
+
+EXAMPLE_REGISTRY = Path(__file__).resolve().parents[1] / "examples" / "experiments_registry.csv"
+
+
+@pytest.fixture
+def empty_experiment_registry(monkeypatch):
+    """Start from an empty in-memory registry, as in a fresh Python session."""
+    from mfethuls import experiments as experiments_module
+
+    monkeypatch.setattr(experiments_module, "_EXPERIMENT_REGISTRY", {})
 
 
 def test_load_comparison_set_to_dataframe_works(monkeypatch):
@@ -15,6 +29,7 @@ def test_load_comparison_set_to_dataframe_works(monkeypatch):
 
     from mfethuls import comparison as comparison_module
 
+    monkeypatch.setattr(comparison_module, "is_experiment_registered", lambda name: True)
     monkeypatch.setattr(
         comparison_module,
         "load_experiment_dataset",
@@ -43,6 +58,7 @@ def test_load_experiments_is_preferred_alias(monkeypatch):
             metadata={"experiment_id": name, "experiment_name": f"name_{name}"},
         )
 
+    monkeypatch.setattr("mfethuls.comparison.is_experiment_registered", lambda name: True)
     monkeypatch.setattr("mfethuls.comparison.load_experiment_dataset", _fake_loader)
 
     comparison = load_experiments(["exp_a"])
@@ -80,3 +96,28 @@ def test_load_samples_filters_registry_and_loads_matching_experiments(monkeypatc
     assert isinstance(comparison, ComparisonSet)
     assert loaded_names == ["exp_a", "exp_c"]
     assert comparison.labels == ["name_exp_a", "name_exp_c"]
+
+
+def test_load_experiments_loads_registry_in_fresh_session(monkeypatch, empty_experiment_registry):
+    """load_experiments reads PATH_TO_REGISTRY itself, like load_samples."""
+    monkeypatch.setenv("PATH_TO_REGISTRY", str(EXAMPLE_REGISTRY))
+
+    def _fake_loader(name, use_storage=True, refresh=False, **kwargs):
+        _ = use_storage, refresh, kwargs
+        exp = get_experiment(name)  # raises if the registry was not loaded
+        return Dataset(
+            data=pd.DataFrame({"temperature_C": [25.0]}),
+            metadata={"experiment_id": exp.name, "experiment_name": exp.name},
+        )
+
+    monkeypatch.setattr("mfethuls.comparison.load_experiment_dataset", _fake_loader)
+
+    comparison = load_experiments(["LB_dsc_001", "LB_dsc_002"])
+    assert comparison.labels == ["LB_dsc_001", "LB_dsc_002"]
+
+
+def test_load_experiments_unknown_name_mentions_registry(monkeypatch, empty_experiment_registry):
+    monkeypatch.delenv("PATH_TO_REGISTRY", raising=False)
+
+    with pytest.raises(KeyError, match="experiments_registry.csv"):
+        load_experiments(["does_not_exist"], registry_path=str(EXAMPLE_REGISTRY))

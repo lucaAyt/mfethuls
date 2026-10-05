@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "required_columns": [
+    "wavelength_nm"
+  ],
+  "dtypes": {
+    "wavelength_nm": "float64",
+    "emission_counts": "float64"
+  },
+  "models": {
+    "flame": {
+      "aliases": {
+        "wavelength_nm": [
+          "wavelength (nm)",
+          "Wavelength (nm)",
+          "Wavelength [nm]"
+        ],
+        "emission_counts": [
+          "intensity"
+        ],
+        "timestamp": [
+          "time"
+        ]
+      }
+    }
+  }
+}

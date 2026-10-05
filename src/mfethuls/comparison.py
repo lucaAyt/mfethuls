@@ -7,7 +7,7 @@ from typing import Sequence, TYPE_CHECKING
 import pandas as pd
 
 from .config.loader import load_experiment_dataset
-from .experiments import load_experiment_registry
+from .experiments import is_experiment_registered, load_experiment_registry, resolve_registry_path
 from .dataset import Dataset
 
 if TYPE_CHECKING:
@@ -74,11 +74,13 @@ def load_comparison_set(
     storage_mode: str = "local",
     cloud_provider: str | None = None,
     query_backend: "DuckDBQueryBackend | None" = None,
+    registry_path: str | None = None,
 ) -> ComparisonSet:
     """Compatibility wrapper for load_experiments."""
 
     return load_experiments(
         experiment_names,
+        registry_path=registry_path,
         use_storage=use_storage,
         refresh=refresh,
         storage_mode=storage_mode,
@@ -123,9 +125,28 @@ def _load_comparison_from_names(
     return ComparisonSet(datasets=datasets, labels=labels)
 
 
+def _ensure_experiments_registered(names: Sequence[str], registry_path: str | None) -> None:
+    """Load the experiment registry if any requested name is not registered yet."""
+
+    missing = [name for name in names if not is_experiment_registered(name)]
+    if not missing:
+        return
+
+    load_experiment_registry(registry_path)
+
+    still_missing = [name for name in missing if not is_experiment_registered(name)]
+    if still_missing:
+        raise KeyError(
+            f"Unknown experiment name(s): {still_missing}. They are not in the registry at "
+            f"{resolve_registry_path(registry_path)!r}, or their rows were skipped as invalid "
+            "(see the registry warnings above)."
+        )
+
+
 def load_experiments(
     experiment_names: Sequence[str],
     *,
+    registry_path: str | None = None,
     use_storage: bool = True,
     refresh: bool = False,
     storage_mode: str = "local",
@@ -135,9 +156,15 @@ def load_experiments(
 ) -> ComparisonSet:
     """Load multiple experiments into a comparison set for inspection or plotting.
 
+    Like load_samples, the experiment registry is loaded automatically (from
+    ``registry_path`` or ``PATH_TO_REGISTRY``) when a requested experiment is
+    not registered in this session yet.
+
     If db_url is provided, dataset metadata will be registered in the specified
     Postgres database after local storage save.
     """
+    _ensure_experiments_registered([str(name) for name in experiment_names], registry_path)
+
     return _load_comparison_from_names(
         experiment_names,
         use_storage=use_storage,

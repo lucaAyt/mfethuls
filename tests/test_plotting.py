@@ -14,6 +14,7 @@ from mfethuls.plotting import (
     plot_comparison,
     plot_dataset,
     plot_dsc,
+    plot_fluorescence,
     plot_ftir,
     plot_experiments,
     plot_rheology,
@@ -40,6 +41,39 @@ def test_plot_uv_vis_chooses_absorbance():
     assert ax.get_xlabel() == "wavelength_nm"
     assert ax.get_ylabel() == "absorbance_a_u"
     assert len(ax.lines) == 1
+
+
+def test_plot_fluorescence_uses_emission_counts():
+    dataset = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [400, 450, 500], "emission_counts": [12.0, 80.0, 30.0]}),
+        metadata={"experiment_id": "EXP001"},
+    )
+
+    fig, ax = _close(plot_fluorescence(dataset))
+    assert ax.get_xlabel() == "wavelength_nm"
+    assert ax.get_ylabel() == "emission_counts"
+
+
+@pytest.mark.parametrize("metadata", [{"instrument_type": "fluorescence"}, {}])
+def test_plot_dataset_dispatches_fluorescence_by_metadata_or_columns(metadata):
+    dataset = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [400, 450, 500], "emission_counts": [12.0, 80.0, 30.0]}),
+        metadata={"experiment_id": "EXP001", **metadata},
+    )
+
+    fig, ax = _close(plot_dataset(dataset))
+    assert ax.get_ylabel() == "emission_counts"
+    assert "Fluorescence" in ax.get_title()
+
+
+def test_plot_uv_vis_rejects_fluorescence_data():
+    dataset = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [400, 450], "emission_counts": [12.0, 80.0]}),
+        metadata={"experiment_id": "EXP001"},
+    )
+
+    with pytest.raises(PlotError):
+        plot_uv_vis(dataset)
 
 
 def test_plot_dsc_uses_canonical_columns():
@@ -431,6 +465,7 @@ def test_load_comparison_set_preserves_order_and_options(monkeypatch):
             metadata={"experiment_name": f"name_{name}", "experiment_id": name},
         )
 
+    monkeypatch.setattr("mfethuls.comparison.is_experiment_registered", lambda name: True)
     monkeypatch.setattr("mfethuls.comparison.load_experiment_dataset", _fake_loader)
 
     result = load_comparison_set(["EXP003", "EXP001"], use_storage=False, refresh=True)
@@ -460,6 +495,7 @@ def test_load_comparison_set_label_fallbacks(monkeypatch):
         _ = name, use_storage, refresh, kwargs
         return queue.pop(0)
 
+    monkeypatch.setattr("mfethuls.comparison.is_experiment_registered", lambda name: True)
     monkeypatch.setattr("mfethuls.comparison.load_experiment_dataset", _fake_loader)
 
     result = load_comparison_set(["exp_a", "exp_b"])

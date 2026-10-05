@@ -27,9 +27,9 @@ def instrument_data_path_constructor(path, *args):
     """Build a dict mapping raw_data_filename → list of file paths.
 
     Walks ``path`` (the instrument root folder) and locates files whose stem
-    matches each entry in ``args``.  All non-parquet files co-located in the
-    same directory as the matched file are collected, so multi-file experiments
-    work transparently.
+    matches each entry in ``args``, or a folder named after it.  Only files
+    with that stem are collected; for multi-file experiments, put the files in
+    a folder named after the experiment (see ``manifest.find_data_files``).
 
     Returns ``{raw_data_filename: [sorted_file_paths], ...}``.
     """

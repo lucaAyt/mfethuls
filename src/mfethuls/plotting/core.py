@@ -229,6 +229,8 @@ def _resolve_plot_kind(dataset: Dataset, kind: Optional[str]) -> Optional[str]:
         return "rheology"
     if instrument_type == "uv_vis":
         return "uv_vis"
+    if instrument_type == "fluorescence":
+        return "fluorescence"
     if instrument_type == "ftir":
         return "ftir"
     if instrument_type == "dsc":
@@ -249,6 +251,8 @@ def _resolve_plot_kind(dataset: Dataset, kind: Optional[str]) -> Optional[str]:
     if is_supported_rheology_profile(measurement_profile):
         return "rheology"
 
+    if {"wavelength_nm", "emission_counts"}.issubset(columns):
+        return "fluorescence"
     if {"wavelength_nm"}.issubset(columns):
         return "uv_vis"
     if {"wavenumber_cm_inv"}.issubset(columns):
@@ -290,6 +294,7 @@ def plot_dataset(
 
     from .dma import plot_dma
     from .dsc import plot_dsc
+    from .fluorescence import plot_fluorescence
     from .ftir import plot_ftir
     from .ms import plot_ms
     from .nmr import plot_nmr
@@ -303,6 +308,16 @@ def plot_dataset(
 
     if resolved_kind == "uv_vis":
         return plot_uv_vis(
+            dataset,
+            group_by=group_by,
+            max_groups=max_groups,
+            ax=ax,
+            title=title,
+            strict=strict,
+            **kwargs,
+        )
+    if resolved_kind == "fluorescence":
+        return plot_fluorescence(
             dataset,
             group_by=group_by,
             max_groups=max_groups,

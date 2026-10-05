@@ -51,6 +51,7 @@ def _resolve_x_column(dataset: Dataset, resolved_kind: str) -> str | None:
 
     simple_x = {
         "uv_vis": "wavelength_nm",
+        "fluorescence": "wavelength_nm",
         "ftir": "wavenumber_cm_inv",
         "dsc": "temperature_C",
         "tga": "temperature_C",

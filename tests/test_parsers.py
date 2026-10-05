@@ -19,7 +19,7 @@ ALL_PARSER_KEYS = [
     ("rheometer", "anton_paar"),
     ("dma", "ta_q800"),
     ("uv_vis", "flame"),
-    ("reflection", "flame"),
+    ("fluorescence", "flame"),
     ("uv_vis", "Shimadzu"),
 ]
 
@@ -115,13 +115,13 @@ PARSER_BEHAVIOR_CASES = [
     },
     {
         "key": ("uv_vis", "flame"),
-        "raw": {"wavelength (nm)": [400.0, 450.0], "transmission": [0.8, 0.75]},
+        "raw": {"wavelength (nm)": [400.0, 450.0], "intensity": [0.8, 0.75]},
         "expect": {"wavelength_nm", "transmittance_pct"},
     },
     {
-        "key": ("reflection", "flame"),
-        "raw": {"wavelength (nm)": [400.0, 450.0], "transmission": [0.8, 0.75]},
-        "expect": {"wavelength_nm", "transmittance_pct"},
+        "key": ("fluorescence", "flame"),
+        "raw": {"wavelength (nm)": [400.0, 450.0], "intensity": [11.9, -4.1]},
+        "expect": {"wavelength_nm", "emission_counts"},
     },
     {
         "key": ("uv_vis", "Shimadzu"),

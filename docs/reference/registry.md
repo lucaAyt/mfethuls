@@ -105,9 +105,22 @@ PATH_TO_DATA/
     freq_sweep_S003_R001.txt
 ```
 
+Several experiments can share one folder. Each experiment only gets the files whose stem matches its own `raw_data_filename`. Other files in the folder are ignored.
+
+**Folder per experiment:** some instruments write many files per run (e.g. UV-Vis in-situ, fluorescence kinetics, NMR). Put those files in a folder named after the experiment and set `raw_data_filename` to the folder name. All files directly inside that folder are collected.
+
+```
+PATH_TO_DATA/
+  Fluorescence/
+    poly3/                      ← found by raw_data_filename = "poly3"
+      t001.txt
+      t002.txt
+```
+
 **Rules:**
-- The filename stem must match `raw_data_filename` exactly (case-sensitive on Linux).
+- The filename stem must match `raw_data_filename` exactly (case-sensitive on Linux). Every file with that stem is collected, e.g. both `poly1.txt` and `poly1.csv`.
 - If the same filename stem exists in more than one subfolder, ingest raises an error — rename one of the files to remove the ambiguity.
+- A name must match **either** a file **or** a folder, not both. If `poly1.txt` and a folder `poly1/` both exist under the instrument folder, ingest raises an error — rename one of them.
 - If no matching file is found at ingest time, the row produces a **warning** (not an error) — the experiment can be ingested later once the file is present.
 
 ---

@@ -48,15 +48,16 @@ def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[
 
     Two searches run in a single os.walk:
 
-    1. **File-stem match** — finds a file whose stem equals ``raw_data_filename``
-       and collects all co-located non-parquet files (original behaviour).
+    1. **File-stem match** — collects the non-parquet files whose stem equals
+       ``raw_data_filename`` (e.g. ``poly1.txt`` and ``poly1.csv``). Other files
+       in the same folder are ignored, so several experiments can share a folder.
     2. **Directory-name match** — finds a directory named ``raw_data_filename``
        and collects all files immediately inside it. This handles
        folder-per-experiment instruments (e.g. UV/Vis in-situ, NMR) where the
        experiment data lives in a named subfolder with no single anchor file.
 
-    Both searches may contribute to the result (combined, deduplicated). Each
-    search raises ``ValueError`` if the same name is found in more than one
+    Exactly one of the searches may match. ``ValueError`` is raised if both a
+    file and a directory match, or if either search matches in more than one
     location. ``FileNotFoundError`` is raised when neither search finds anything.
 
     Returns:
@@ -64,7 +65,7 @@ def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[
     """
     target_stem = Path(raw_data_filename).stem
 
-    file_matched_dirs: dict[str, None] = {}
+    file_matches: dict[str, list[str]] = {}
     dir_matched_folders: list[str] = []
 
     for root, dirs, files in os.walk(instrument_data_path):
@@ -73,14 +74,13 @@ def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[
             if fpath.suffix.lower() == ".parquet":
                 continue
             if fpath.stem == target_stem or fpath.name == raw_data_filename:
-                file_matched_dirs[root] = None
-                break
+                file_matches.setdefault(root, []).append(os.path.join(root, fname))
         for dirname in dirs:
             if dirname == raw_data_filename:
                 dir_matched_folders.append(os.path.join(root, dirname))
 
-    if len(file_matched_dirs) > 1:
-        locations = "\n  ".join(sorted(file_matched_dirs))
+    if len(file_matches) > 1:
+        locations = "\n  ".join(sorted(file_matches))
         raise ValueError(
             f"raw_data_filename {raw_data_filename!r} matched files in multiple directories:\n"
             f"  {locations}\n"
@@ -92,27 +92,30 @@ def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[
             + "\n".join(f"  {p}" for p in dir_matched_folders)
             + "\nRename one to remove ambiguity."
         )
+    if file_matches and dir_matched_folders:
+        file_dir, matched = next(iter(file_matches.items()))
+        raise ValueError(
+            f"raw_data_filename {raw_data_filename!r} matches both a file and a directory:\n"
+            + "\n".join(f"  {p}" for p in sorted(matched))
+            + f"\n  {dir_matched_folders[0]}{os.sep}\n"
+            "Use either a single file (stem) or a folder per experiment, not both. "
+            "Rename one to remove ambiguity."
+        )
 
-    combined: set[str] = set()
-    primary_dir: str | None = None
-
-    if file_matched_dirs:
-        parent_dir = next(iter(file_matched_dirs))
-        combined.update(_collect_files(parent_dir))
-        primary_dir = parent_dir
+    if file_matches:
+        parent_dir, matched = next(iter(file_matches.items()))
+        return parent_dir, sorted(matched)
 
     if dir_matched_folders:
         folder = dir_matched_folders[0]
-        combined.update(_collect_files(folder))
-        primary_dir = primary_dir or folder
+        files = _collect_files(folder)
+        if files:
+            return folder, files
 
-    if not combined:
-        raise FileNotFoundError(
-            f"No file or directory named {raw_data_filename!r} found under {instrument_data_path!r}. "
-            "Check that PATH_TO_DATA is set correctly and the data exists."
-        )
-
-    return primary_dir, sorted(combined)
+    raise FileNotFoundError(
+        f"No file or directory named {raw_data_filename!r} found under {instrument_data_path!r}. "
+        "Check that PATH_TO_DATA is set correctly and the data exists."
+    )
 
 
 # ── Abstract backend ──────────────────────────────────────────────────────────

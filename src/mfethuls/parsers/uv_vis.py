@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 @register_parser('uv_vis', 'flame')
-@register_parser('reflection', 'flame')
 @register_parser('fluorescence', 'flame')
 class FlameOceanOpticsParser:
     def __init__(self, file_extension='.txt'):
@@ -36,7 +35,11 @@ class FlameOceanOpticsParser:
         experiment_name: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ):
-        """Parse in-situ UV or reflection data from Ocean Optics Flame.
+        """Parse in-situ UV-Vis or fluorescence data from Ocean Optics Flame.
+
+        The raw signal column is named ``intensity``; the schema of the
+        instrument type gives it its meaning (``transmittance_pct`` for
+        uv_vis, ``emission_counts`` for fluorescence).
 
         Returns a Dataset when experiment context is provided, otherwise a
         plain DataFrame for backward compatibility.
@@ -47,7 +50,7 @@ class FlameOceanOpticsParser:
             file_extension=self.file_extension,
             parse_raw=self.parse_raw_data,
             logger=logger,
-            parser_label="Flame UV",
+            parser_label="Flame",
         )
 
         if experiment_id is None:
@@ -55,7 +58,7 @@ class FlameOceanOpticsParser:
 
         df, schema_report = apply_dataframe_schema(
             df,
-            instrument_type="uv_vis",
+            instrument_type=instrument_type or "uv_vis",
             instrument_model=instrument_model or "flame",
         )
 
@@ -101,11 +104,8 @@ class FlameOceanOpticsParser:
             return pd.DataFrame()
 
         df = df.iloc[:, :2]
-        df.columns = ['wavelength (nm)', 'transmission']
+        df.columns = ['wavelength (nm)', 'intensity']
         df.loc[:, 'timestamp'] = handle_tz(timestamp) + milliseconds if timestamp else pd.NaT
-
-        # cut data
-        df = df[df['wavelength (nm)'].between(280, 900)]
 
         # Add name of experiment
         df.loc[:, 'name'] = [f'{os.path.basename(os.path.dirname(path))}'] * df.shape[0]
