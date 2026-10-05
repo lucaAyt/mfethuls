@@ -1,10 +1,10 @@
-import os
 import logging
 import argparse
 
 import mfethuls.parsers
-import mfethuls.factory as factory
+import mfethuls.factory  # noqa: F401 - loads .env
 from mfethuls import load_experiments, plot_experiments
+from mfethuls.config.mode import use_test_env
 from mfethuls.experiments import load_experiment_registry
 from mfethuls.storage import get_postgres_db_url
 
@@ -19,19 +19,7 @@ def _apply_runtime_env_mode(registry_env: str) -> None:
     if registry_env != "test":
         return
 
-    test_data_root = os.environ.get("MFETHULS_TEST_DATA_ROOT")
-    if test_data_root:
-        os.environ["PATH_TO_DATA"] = test_data_root
-        # factory.DATA_ROOT_PATH is initialized at import-time, so keep it aligned.
-        factory.DATA_ROOT_PATH = test_data_root
-
-    test_local_storage = os.environ.get("MFETHULS_TEST_LOCAL_STORAGE")
-    if test_local_storage:
-        os.environ["PATH_TO_LOCAL_STORAGE"] = test_local_storage
-
-    test_registry = os.environ.get("MFETHULS_TEST_REGISTRY")
-    if test_registry:
-        os.environ["PATH_TO_REGISTRY"] = test_registry
+    use_test_env()
 
 def mainX(argv: list[str] | None = None):
     """Small demo for manual testing of the experiment/Dataset flow.

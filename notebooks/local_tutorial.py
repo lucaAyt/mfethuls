@@ -16,13 +16,11 @@ def _():
     import os
     import pandas as pd
 
-    from mfethuls import load_experiments, load_samples, plot_experiments
+    from mfethuls import load_experiments, load_samples, plot_experiments, use_test_env
     from mfethuls.experiments import load_experiment_registry
-    from mfethuls.storage import list_datasets, get_dataset
 
+    use_test_env()  # use the test data from .env; remove this line to use your own data
     return (
-        get_dataset,
-        list_datasets,
         load_experiment_registry,
         load_experiments,
         load_samples,
@@ -52,46 +50,33 @@ def _(load_experiment_registry):
 def _(load_experiments):
     # Ingest experiments and load into a ComparisonSet
     # Set refresh=True to re-parse even if already cached
-    ds_experiments = load_experiments(['LB_dsc_001', 'LB_dsc_002'], use_storage=True, refresh=False)
-    ds_experiments
-    return
+    dsc_experiments = load_experiments(['LB_dsc_001', 'LB_dsc_002'], use_storage=True, refresh=False)
+    dsc_experiments
+    return (dsc_experiments,)
 
 
 @app.cell
-def _(list_datasets):
-    # Check which experiments have been ingested
-    list_datasets()
-    return
-
-
-@app.cell
-def _(get_dataset):
-    # Inspect metadata for a single experiment
-    get_dataset('LB_dsc_001')
-    return
-
-
-@app.cell
-def _(load_experiments):
-    # Load a single experiment by name
-    load_experiments(['LB_dsc_001'])
-    return
+def _(dsc_experiments):
+    # Convert to a tidy long-format DataFrame
+    df_dsc = dsc_experiments.to_dataframe()
+    df_dsc
+    return (df_dsc,)
 
 
 @app.cell
 def _(load_samples):
     # Or load all experiments for a sample ID
-    cs = load_samples(['S001'])
-    cs
-    return (cs,)
+    cs_s001 = load_samples(['S001'])
+    cs_s001
+    return (cs_s001,)
 
 
 @app.cell
-def _(cs):
+def _(cs_s001):
     # Convert to a tidy long-format DataFrame
-    df = cs.to_dataframe()
-    df
-    return (df,)
+    df_s001 = cs_s001.to_dataframe()
+    df_s001
+    return (df_s001,)
 
 
 @app.cell(hide_code=True)
@@ -104,10 +89,15 @@ def _(mo):
 
 
 @app.cell
-def _(load_experiments, plot_experiments):
+def _(dsc_experiments, plot_experiments):
     # Compare two DSC experiments on the same axes
-    cs_dsc = load_experiments(['LB_dsc_001', 'LB_dsc_002'])
-    plot_experiments(cs_dsc, x='temperature_C', y='heat_flow_mW')
+    plot_experiments(dsc_experiments)
+    return
+
+
+@app.cell
+def _(cs_s001, plot_experiments):
+    plot_experiments(cs_s001)
     return
 
 
@@ -119,8 +109,18 @@ def _():
 
 
 @app.cell
-def _(df, sns):
-    sns.lineplot(df, x='temperature_C', y='heat_flow_mW', hue='experiment_name', palette='flare')
+def _(df_dsc, sns):
+    # Plot from dsc experiments dataframe
+    df_dsc_heating_0 = df_dsc[df_dsc.profile.str.contains('Heating_0')]
+    sns.lineplot(df_dsc_heating_0, x='temperature_C', y='heat_flow_mW', hue='name',palette='flare')
+    return
+
+
+@app.cell
+def _(df_s001, sns):
+    # Plot from sample (s001) dataframe
+    df_ftir_s001 = df_s001[df_s001.instrument_type == 'ftir']
+    sns.lineplot(df_ftir_s001, x='wavenumber_cm_inv', y='transmittance_pct', hue='name', palette='flare')
     return
 
 

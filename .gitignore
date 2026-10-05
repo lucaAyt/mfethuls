@@ -140,6 +140,7 @@ venv.bak/
 *.duckdb
 *.duckdb.wal
 .mfethuls_registry/
+.mfethuls_manifest.json
 mfethuls_storage/
 
 # Notebooks with local outputs — commit selectively, not wholesale

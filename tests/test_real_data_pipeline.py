@@ -1,110 +1,80 @@
-import os
+"""End-to-end ingest of the onboarding examples in ``examples/``.
+
+The examples are copied to a temporary folder first, because ingest writes a
+manifest into the data folder and parquet/DuckDB files into storage.
+"""
+
+import shutil
 from pathlib import Path
 
+import pandas as pd
 import pytest
-from dotenv import load_dotenv
 
-from mfethuls import factory
+from mfethuls import experiments as experiments_module
 from mfethuls.config.loader import load_experiment_dataset
 from mfethuls.experiments import load_experiment_registry
 
-
-def _load_test_env_paths() -> tuple[str, str, str]:
-    """Load real-data test paths from .env and return normalized strings."""
-
-    # Load .env from repository root if present.
-    load_dotenv()
-
-    data_root = os.getenv("MFETHULS_TEST_DATA_ROOT")
-    registry_path = os.getenv("MFETHULS_TEST_REGISTRY")
-    local_storage = os.getenv("MFETHULS_TEST_LOCAL_STORAGE")
-
-    if not data_root or not registry_path or not local_storage:
-        pytest.skip(
-            "Real-data test paths are not configured. Set MFETHULS_TEST_DATA_ROOT, "
-            "MFETHULS_TEST_REGISTRY and MFETHULS_TEST_LOCAL_STORAGE in .env."
-        )
-
-    return data_root.strip(), registry_path.strip(), local_storage.strip()
+EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
+EXAMPLE_NAMES = pd.read_csv(EXAMPLES_DIR / "experiments_registry.csv")["name"].tolist()
 
 
 @pytest.fixture()
-def real_data_config(monkeypatch):
-    """Configure mfethuls runtime to use real-data test paths from .env."""
+def examples_config(tmp_path, monkeypatch):
+    """Point mfethuls at a temporary copy of examples/, independent of .env."""
 
-    data_root, registry_path, local_storage = _load_test_env_paths()
+    examples = tmp_path / "examples"
+    shutil.copytree(EXAMPLES_DIR, examples)
+    data_root = examples / "data"
+    registry_path = examples / "experiments_registry.csv"
+    local_storage = tmp_path / "storage"
 
-    if not Path(data_root).exists():
-        pytest.skip(f"MFETHULS_TEST_DATA_ROOT does not exist: {data_root}")
-    if not Path(registry_path).exists():
-        pytest.skip(f"MFETHULS_TEST_REGISTRY does not exist: {registry_path}")
-
-    # Point runtime environment to dedicated testing paths.
-    monkeypatch.setenv("PATH_TO_DATA", data_root)
-    monkeypatch.setenv("PATH_TO_REGISTRY", registry_path)
-    monkeypatch.setenv("PATH_TO_LOCAL_STORAGE", local_storage)
+    monkeypatch.setenv("PATH_TO_DATA", str(data_root))
+    monkeypatch.setenv("PATH_TO_REGISTRY", str(registry_path))
+    monkeypatch.setenv("PATH_TO_LOCAL_STORAGE", str(local_storage))
+    monkeypatch.setenv("MFETHULS_MODE", "local")
     monkeypatch.setenv("MFETHULS_DISABLE_STORAGE", "0")
+    monkeypatch.delenv("MFETHULS_DUCKDB_PATH", raising=False)
+    monkeypatch.setattr(experiments_module, "_EXPERIMENT_REGISTRY", {})
 
-    # factory.DATA_ROOT_PATH is initialized at import-time, so keep it aligned.
-    factory.DATA_ROOT_PATH = data_root
-
+    load_experiment_registry(str(registry_path))
     return data_root, registry_path, local_storage
 
 
-def test_real_registry_loads(real_data_config):
-    """The real registry should be readable and contain required columns."""
+def test_examples_registry_loads(examples_config):
+    """Every example row is valid and registered."""
 
-    _, registry_path, _ = real_data_config
-    df_registry = load_experiment_registry(registry_path)
+    _, registry_path, _ = examples_config
+    df_registry = load_experiment_registry(str(registry_path))
 
-    assert not df_registry.empty
-    assert "name" in df_registry.columns
-    assert "experiment_id" in df_registry.columns
-    assert "instrument_name" in df_registry.columns
+    assert {"name", "instrument_name", "raw_data_filename"}.issubset(df_registry.columns)
+    assert all(experiments_module.is_experiment_registered(name) for name in EXAMPLE_NAMES)
 
 
-def test_real_data_parse_and_cache_pipeline(real_data_config):
-    """Smoke test the end-to-end parse + local cache pipeline on real data.
+@pytest.mark.parametrize("name", EXAMPLE_NAMES)
+def test_examples_parse_and_cache_pipeline(examples_config, name):
+    """Each example parses from raw data, is stored, and loads back from the cache."""
 
-    This intentionally checks that at least one experiment can be parsed and
-    cached using real data. Individual experiments may still fail due to
-    missing files or partial datasets.
-    """
+    _, _, local_storage = examples_config
 
-    _, registry_path, local_storage = real_data_config
-    df_registry = load_experiment_registry(registry_path)
+    ds = load_experiment_dataset(name, use_storage=True, refresh=True)
+    assert ds is not None
+    assert ds.experiment_id is not None
+    assert not ds.data.empty
 
-    if "status" in df_registry.columns:
-        selected_names = df_registry[df_registry["status"] == "to_analyse"]["name"].tolist()
-    else:
-        selected_names = df_registry["name"].tolist()
+    ds_cached = load_experiment_dataset(name, use_storage=True, refresh=False)
+    assert ds_cached.experiment_id == ds.experiment_id
+    assert len(ds_cached.data) == len(ds.data)
 
-    if not selected_names:
-        pytest.skip("No experiments selected from real registry.")
+    assert local_storage.exists()
 
-    successes = []
-    failures = []
 
-    for name in selected_names:
-        try:
-            # Fresh parse from raw data and persist to local storage.
-            ds = load_experiment_dataset(name, use_storage=True, refresh=True)
-            assert ds.experiment_id is not None
-            assert not ds.data.empty
+@pytest.mark.parametrize("instrument", ["dsc", "tga", "ftir"])
+def test_examples_in_shared_folder_get_their_own_data(examples_config, instrument):
+    """poly1 and poly2 share an instrument folder but must not share data."""
 
-            # Cache load path should also work after write.
-            ds_cached = load_experiment_dataset(name, use_storage=True, refresh=False)
-            assert ds_cached.experiment_id == ds.experiment_id
-            assert not ds_cached.data.empty
-            successes.append(name)
-        except Exception as exc:  # noqa: BLE001
-            failures.append((name, repr(exc)))
+    ds1 = load_experiment_dataset(f"LB_{instrument}_001", use_storage=False)
+    ds2 = load_experiment_dataset(f"LB_{instrument}_002", use_storage=False)
 
-    # In real-world fixtures, some experiments may be incomplete; require at
-    # least one successful full parse/cache cycle to validate the pipeline.
-    assert successes, (
-        "No real-data experiment could complete parse+cache pipeline. "
-        f"Failures: {failures}"
-    )
-
-    assert Path(local_storage).exists()
+    numeric1 = ds1.data.select_dtypes("number").reset_index(drop=True)
+    numeric2 = ds2.data.select_dtypes("number").reset_index(drop=True)
+    assert not numeric1.equals(numeric2)
