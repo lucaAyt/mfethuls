@@ -39,8 +39,8 @@ def test_plot_uv_vis_chooses_absorbance():
     )
 
     fig, ax = _close(plot_uv_vis(dataset))
-    assert ax.get_xlabel() == "wavelength_nm"
-    assert ax.get_ylabel() == "absorbance_a_u"
+    assert ax.get_xlabel() == "Wavelength (nm)"
+    assert ax.get_ylabel() == "Absorbance (a.u.)"
     assert len(ax.lines) == 1
 
 
@@ -51,8 +51,8 @@ def test_plot_fluorescence_uses_emission_counts():
     )
 
     fig, ax = _close(plot_fluorescence(dataset))
-    assert ax.get_xlabel() == "wavelength_nm"
-    assert ax.get_ylabel() == "emission_counts"
+    assert ax.get_xlabel() == "Wavelength (nm)"
+    assert ax.get_ylabel() == "Emission intensity (counts)"
 
 
 @pytest.mark.parametrize("metadata", [{"instrument_type": "fluorescence"}, {}])
@@ -63,7 +63,7 @@ def test_plot_dataset_dispatches_fluorescence_by_metadata_or_columns(metadata):
     )
 
     fig, ax = _close(plot_dataset(dataset))
-    assert ax.get_ylabel() == "emission_counts"
+    assert ax.get_ylabel() == "Emission intensity (counts)"
     assert "Fluorescence" in ax.get_title()
 
 
@@ -77,15 +77,25 @@ def test_plot_uv_vis_rejects_fluorescence_data():
         plot_uv_vis(dataset)
 
 
-def test_builtin_plots_have_transparent_background():
+def test_builtin_plots_stay_black_on_white_under_dark_style():
+    """marimo's dark theme applies dark_background globally; saved figures must stay readable."""
     dataset = Dataset(
         data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.4, 0.2]}),
         metadata={"experiment_id": "EXP001"},
     )
+    black, white = (0.0, 0.0, 0.0, 1.0), (1.0, 1.0, 1.0, 1.0)
 
-    fig, ax = _close(plot_uv_vis(dataset))
-    assert fig.patch.get_alpha() == 0.0
-    assert ax.get_facecolor()[3] == 0.0
+    with plt.style.context("dark_background"):
+        fig, ax = plot_uv_vis(dataset)
+        fig.canvas.draw()  # ticks created at draw time must also stay black
+        assert fig.get_facecolor() == white
+        assert ax.get_facecolor() == white
+        assert matplotlib.colors.to_rgba(ax.xaxis.label.get_color()) == black
+        assert matplotlib.colors.to_rgba(ax.title.get_color()) == black
+        assert matplotlib.colors.to_rgba(ax.spines["bottom"].get_edgecolor()) == black
+        tick_colors = {matplotlib.colors.to_rgba(t.get_color()) for t in ax.get_xticklabels() + ax.get_yticklabels()}
+        assert tick_colors == {black}
+    plt.close(fig)
 
 
 def test_facet_figure_height_scales_with_panel_count():
@@ -117,8 +127,8 @@ def test_plot_dsc_uses_canonical_columns():
     )
 
     fig, ax = _close(plot_dsc(dataset))
-    assert ax.get_xlabel() == "temperature_C"
-    assert ax.get_ylabel() == "heat_flow_mW"
+    assert ax.get_xlabel() == "Temperature (°C)"
+    assert ax.get_ylabel() == "Heat flow (mW)"
     assert len(ax.lines) == 1
 
 
@@ -138,7 +148,7 @@ def test_plot_dsc_defaults_to_profile_grouping_when_available():
     assert len(ax.lines) == 2
     legend = ax.get_legend()
     assert legend is not None
-    assert legend.get_title().get_text() == "profile"
+    assert legend.get_title().get_text() == "Segment"
 
 
 def test_plot_dsc_omits_cycle_boundary_labels_from_legend():
@@ -168,7 +178,7 @@ def test_plot_dsc_omits_cycle_boundary_labels_from_legend():
     legend = ax.get_legend()
     assert legend is not None
     legend_labels = [text.get_text() for text in legend.get_texts()]
-    assert legend.get_title().get_text() == "profile"
+    assert legend.get_title().get_text() == "Segment"
     assert legend_labels == ["Heating"]
 
 
@@ -267,8 +277,8 @@ def test_plot_ftir_chooses_absorbance_and_reverses_axis():
     )
 
     fig, ax = _close(plot_ftir(dataset))
-    assert ax.get_xlabel() == "wavenumber_cm_inv"
-    assert ax.get_ylabel() == "absorbance_a_u"
+    assert ax.get_xlabel() == r"Wavenumber (cm$^{-1}$)"
+    assert ax.get_ylabel() == "Absorbance (a.u.)"
     assert len(ax.lines) == 1
     left, right = ax.get_xlim()
     assert left > right
@@ -287,7 +297,7 @@ def test_plot_rheology_uses_profile_requirements():
     )
 
     fig, ax = _close(plot_rheology(dataset))
-    assert ax.get_xlabel() == "angular_frequency_rad_s"
+    assert ax.get_xlabel() == r"Angular frequency $\omega$ (rad s$^{-1}$)"
     assert len(ax.lines) == 2
 
 
@@ -304,7 +314,7 @@ def test_plot_dma_uses_profile_requirements():
     )
 
     fig, ax = _close(plot_dma(dataset))
-    assert ax.get_xlabel() == "frequency_hz"
+    assert ax.get_xlabel() == "Frequency (Hz)"
     assert len(ax.lines) == 2
 
 
@@ -332,8 +342,8 @@ def test_plot_dataset_dispatches_from_columns():
     )
 
     fig, ax = _close(plot_dataset(dataset))
-    assert ax.get_xlabel() == "mz"
-    assert ax.get_ylabel() == "intensity_a_u"
+    assert ax.get_xlabel() == "$m/z$"
+    assert ax.get_ylabel() == "Intensity (a.u.)"
 
 
 def test_plot_dataset_dispatches_ftir_from_columns():
@@ -348,8 +358,8 @@ def test_plot_dataset_dispatches_ftir_from_columns():
     )
 
     fig, ax = _close(plot_dataset(dataset))
-    assert ax.get_xlabel() == "wavenumber_cm_inv"
-    assert ax.get_ylabel() == "transmittance_pct"
+    assert ax.get_xlabel() == r"Wavenumber (cm$^{-1}$)"
+    assert ax.get_ylabel() == "Transmittance (%)"
 
 
 def test_plot_dataset_dispatches_dma_from_metadata_and_profile():
@@ -368,7 +378,7 @@ def test_plot_dataset_dispatches_dma_from_metadata_and_profile():
     )
 
     fig, ax = _close(plot_dataset(dataset))
-    assert ax.get_xlabel() == "strain_pct"
+    assert ax.get_xlabel() == "Strain (%)"
 
 
 def test_plot_dataset_dispatches_dma_from_profile_without_instrument_type():
@@ -384,7 +394,7 @@ def test_plot_dataset_dispatches_dma_from_profile_without_instrument_type():
     )
 
     fig, ax = _close(plot_dataset(dataset))
-    assert ax.get_xlabel() == "strain_pct"
+    assert ax.get_xlabel() == "Strain (%)"
 
 
 def test_plotting_fails_on_missing_columns():
@@ -587,8 +597,8 @@ def test_plot_comparison_auto_facet_when_x_not_compatible():
     fig, axes = plot_experiments([ds1, ds2], mode="auto")
     plt.close(fig)
     assert axes.shape[0] == 2
-    assert axes[0, 0].get_xlabel() == "wavelength_nm"
-    assert axes[1, 0].get_xlabel() == "temperature_C"
+    assert axes[0, 0].get_xlabel() == "Wavelength (nm)"
+    assert axes[1, 0].get_xlabel() == "Temperature (°C)"
     assert axes[0, 0].get_title() == ""
     assert axes[1, 0].get_title() == ""
 

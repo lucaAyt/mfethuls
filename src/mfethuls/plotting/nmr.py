@@ -1,10 +1,38 @@
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Optional
 
 from ..dataset import Dataset
-from .core import _default_title, _figure_and_axis, _plot_grouped_single_signal, _require_columns
-from .style import apply_axes_style
+from .backend import Backend, render
+from .core import _default_title, _require_columns, _single_signal_spec
+from .spec import PlotSpec
+
+
+def build_nmr_spec(
+    dataset: Dataset,
+    *,
+    group_by: Optional[str] = None,
+    max_groups: int = 20,
+    title: Optional[str] = None,
+    strict: bool = True,
+) -> PlotSpec:
+    x_column = "chemical_shift_ppm"
+    signal = "intensity_a_u"
+
+    if strict:
+        _require_columns(dataset, [x_column, signal], "plot_nmr")
+
+    return _single_signal_spec(
+        dataset,
+        x_column=x_column,
+        y_column=signal,
+        group_by=group_by,
+        max_groups=max_groups,
+        color="#8c564b",
+        title=title or _default_title(dataset, "NMR"),
+        # NMR spectra are shown from high to low chemical shift.
+        x_reversed=True,
+    )
 
 
 def plot_nmr(
@@ -15,27 +43,13 @@ def plot_nmr(
     ax=None,
     title: Optional[str] = None,
     strict: bool = True,
-) -> Tuple[object, object]:
-    x_column = "chemical_shift_ppm"
-    y_column = "intensity_a_u"
-    if strict:
-        _require_columns(dataset, [x_column, y_column], "plot_nmr")
-
-    fig, axis = _figure_and_axis(ax)
-    _plot_grouped_single_signal(
+    backend: Optional[Backend] = None,
+):
+    spec = build_nmr_spec(
         dataset,
-        x_column=x_column,
-        y_column=y_column,
-        ax=axis,
         group_by=group_by,
         max_groups=max_groups,
-        color="#8c564b",
+        title=title,
+        strict=strict,
     )
-    axis.set_xlim(axis.get_xlim()[::-1])  # Reverse x-axis for NMR spectra
-    apply_axes_style(
-        axis,
-        title=title or _default_title(dataset, "NMR"),
-        xlabel=x_column,
-        ylabel=y_column,
-    )
-    return fig, axis
+    return render(spec, backend=backend, ax=ax)

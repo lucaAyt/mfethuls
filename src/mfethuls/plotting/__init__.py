@@ -1,22 +1,31 @@
-from ..comparison import ComparisonSet, load_comparison_set, load_experiments
 from ..comparison import ComparisonSet, load_comparison_set, load_experiments, load_samples
-from .comparison import ComparisonMode, plot_comparison, plot_experiments
-from .core import plot_dataset
+from .backend import get_default_backend, set_default_backend
+from .comparison import ComparisonMode, build_experiments_spec, plot_comparison, plot_experiments
+from .core import PlotError, build_dataset_spec, plot_dataset
 from .dma import plot_dma
 from .dsc import plot_dsc
 from .fluorescence import plot_fluorescence
 from .ftir import plot_ftir
 from .ms import plot_ms
 from .nmr import plot_nmr
+from .render_plotly import plotly_config
 from .rheology import plot_rheology
 from .saxs import plot_saxs
 from .sec import plot_sec
+from .spec import PlotSpec
 from .style import apply_axes_style
 from .tga import plot_tga
 from .uv_vis import plot_uv_vis
 
 __all__ = [
     "apply_axes_style",
+    "build_dataset_spec",
+    "build_experiments_spec",
+    "get_default_backend",
+    "PlotError",
+    "plotly_config",
+    "PlotSpec",
+    "set_default_backend",
     "ComparisonMode",
     "ComparisonSet",
     "load_comparison_set",

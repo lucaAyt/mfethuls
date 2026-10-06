@@ -26,6 +26,7 @@ from mfethuls.storage import (
 from mfethuls.storage.config import _view_basename
 from mfethuls.config.mode import is_service_mode
 from mfethuls.manifest import get_manifest_backend
+from mfethuls.schema_normalization import add_elapsed_time
 
 if TYPE_CHECKING:
     from mfethuls.storage import DuckDBQueryBackend
@@ -100,7 +101,10 @@ def get_cached_dataset(exp, cache_backend, experiment_name: str) -> Optional[Dat
                 experiment_name,
                 cache_backend.__class__.__name__,
             )
-        return cache_backend.load_dataset(exp)
+        dataset = cache_backend.load_dataset(exp)
+        # Datasets stored before time_s was derived during normalization.
+        dataset.data = add_elapsed_time(dataset.data)
+        return dataset
 
     return None
 

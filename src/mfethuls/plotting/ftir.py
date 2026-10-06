@@ -1,34 +1,22 @@
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Optional
 
 from ..dataset import Dataset
-from .core import (
-    PlotError,
-    _default_title,
-    _figure_and_axis,
-    _plot_grouped_single_signal,
-    _require_columns,
-)
-from .style import apply_axes_style
+from .backend import Backend, render
+from .core import PlotError, _default_title, _require_columns, _single_signal_spec
+from .spec import PlotSpec
 
 
-def plot_ftir(
+def build_ftir_spec(
     dataset: Dataset,
     *,
     signal: Optional[str] = None,
     group_by: Optional[str] = None,
     max_groups: int = 20,
-    ax=None,
     title: Optional[str] = None,
     strict: bool = True,
-) -> Tuple[object, object]:
-    """Plot FTIR data using canonical columns.
-
-    Expects ``wavenumber_cm_inv`` as x-axis and either ``absorbance_a_u`` or
-    ``transmittance_pct`` as signal.
-    """
-
+) -> PlotSpec:
     x_column = "wavenumber_cm_inv"
     if signal is None:
         if "absorbance_a_u" in dataset.data.columns:
@@ -42,22 +30,36 @@ def plot_ftir(
     if strict:
         _require_columns(dataset, [x_column, signal], "plot_ftir")
 
-    fig, axis = _figure_and_axis(ax)
-    _plot_grouped_single_signal(
+    return _single_signal_spec(
         dataset,
         x_column=x_column,
         y_column=signal,
-        ax=axis,
         group_by=group_by,
         max_groups=max_groups,
         color="#ff7f0e",
-    )
-    # FTIR is conventionally shown from high to low wavenumber.
-    axis.set_xlim(axis.get_xlim()[::-1])
-    apply_axes_style(
-        axis,
         title=title or _default_title(dataset, "FTIR"),
-        xlabel=x_column,
-        ylabel=signal,
+        # FTIR is conventionally shown from high to low wavenumber.
+        x_reversed=True,
     )
-    return fig, axis
+
+
+def plot_ftir(
+    dataset: Dataset,
+    *,
+    signal: Optional[str] = None,
+    group_by: Optional[str] = None,
+    max_groups: int = 20,
+    ax=None,
+    title: Optional[str] = None,
+    strict: bool = True,
+    backend: Optional[Backend] = None,
+):
+    spec = build_ftir_spec(
+        dataset,
+        signal=signal,
+        group_by=group_by,
+        max_groups=max_groups,
+        title=title,
+        strict=strict,
+    )
+    return render(spec, backend=backend, ax=ax)

@@ -64,11 +64,15 @@ def _(mo):
 
 @app.cell
 def _():
-    from mfethuls import load_experiments, load_samples, plot_experiments, use_test_env
+    from mfethuls import load_experiments, load_samples, plot_experiments, set_plot_backend, use_test_env
     from mfethuls.experiments import load_experiment_registry
 
     # Point mfethuls at the example data. Remove this line to use your own data.
     use_test_env()
+
+    # Interactive (zoomable) Plotly figures for the built-in plots.
+    # Use backend="matplotlib" on a single call for a publication figure.
+    set_plot_backend("plotly")
     return (
         load_experiment_registry,
         load_experiments,
@@ -192,6 +196,9 @@ def _(mo):
     `plot_experiments` picks a suitable plot for each instrument, e.g. heat flow against
     temperature for DSC or a spectrum for FTIR. Experiments are labelled by name, so you can
     compare them straight away.
+
+    The figures are interactive: zoom with a box drag, double-click to reset, and click a
+    legend entry to hide that experiment. Every data point is drawn; nothing is downsampled.
     """)
     return
 
@@ -207,6 +214,27 @@ def _(dsc_experiments, plot_experiments):
 def _(cs_s001, plot_experiments):
     # Everything measured on sample S001: one panel per instrument (DSC, TGA, FTIR)
     plot_experiments(cs_s001)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Publication figures
+
+    Pass `backend="matplotlib"` for a static Matplotlib figure. It returns `(fig, ax)`, so you
+    can adjust it like any Matplotlib plot and save it as a vector SVG or PDF.
+    """)
+    return
+
+
+@app.cell
+def _(dsc_experiments, plot_experiments):
+    _fig, _ax = plot_experiments(dsc_experiments, backend="matplotlib")
+    _ax.set_xlabel("Temperature (°C)")
+    _ax.set_ylabel("Heat flow (mW)")
+    _fig.savefig("dsc_comparison.svg", bbox_inches="tight")
+    _fig
     return
 
 
@@ -270,12 +298,16 @@ def _(load_experiments):
 
 
 @app.cell
+def _(fl_experiments, plot_experiments):
+    # Timestamped data gets a time_s column (seconds since the first spectrum), so the
+    # built-in plot colours the 50 spectra on one time scale instead of listing 50 timestamps.
+    plot_experiments(fl_experiments)
+    return
+
+
+@app.cell
 def _(fl_experiments):
     df_fl = fl_experiments.to_dataframe()
-
-    # Seconds since the first spectrum. A number gives a smooth colour scale and a short legend,
-    # where the raw timestamps would give 50 separate legend entries.
-    df_fl['time_s'] = (df_fl.timestamp - df_fl.timestamp.min()).dt.total_seconds()
     df_fl
     return (df_fl,)
 

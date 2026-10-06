@@ -200,20 +200,41 @@ def list_datasets() -> List[Dict[str, Any]]:
     return datasets
 
 
-@st.cache_data(show_spinner=False, ttl=30)
-def query_dataset(name: str, limit: int = 5000, offset: int = 0) -> pd.DataFrame:
+# Rows per API request when loading a whole dataset in service mode.
+_API_PAGE_ROWS = 100_000
+
+
+def _query_api(name: str, limit: int, offset: int) -> tuple[list, list]:
+    result = _get(f"/dataset/{name}", limit=limit, offset=offset)
+    return [c["name"] for c in result.get("columns", [])], result.get("rows", [])
+
+
+# Cached for 10 minutes: whole datasets are expensive to reload. Refresh clears it.
+@st.cache_data(show_spinner=False, ttl=600)
+def query_dataset(name: str, limit: Optional[int] = None, offset: int = 0) -> pd.DataFrame:
+    """Rows of a dataset; ``limit=None`` loads all of them."""
     # Direct read when DuckDB is on disk — avoids HTTP + double serialisation.
     db_path = _local_db_path()
     if db_path:
         from mfethuls.storage import duckdb_session
         with duckdb_session(db_path=db_path, read_only=True) as backend:
             safe = name.replace('"', '""')
+            if limit is None:
+                return backend.query(f'SELECT * FROM "{safe}" OFFSET ?', [offset])
             return backend.query(f'SELECT * FROM "{safe}" LIMIT ? OFFSET ?', [limit, offset])
 
-    # Fallback: reconstruct DataFrame from API JSON response.
-    result = _get(f"/dataset/{name}", limit=limit, offset=offset)
-    cols = [c["name"] for c in result.get("columns", [])]
-    return pd.DataFrame(result.get("rows", []), columns=cols)
+    # Fallback: reconstruct DataFrame from API JSON responses, page by page for all rows.
+    if limit is not None:
+        cols, rows = _query_api(name, limit, offset)
+        return pd.DataFrame(rows, columns=cols)
+
+    cols, rows = [], []
+    while True:
+        cols, page = _query_api(name, _API_PAGE_ROWS, offset + len(rows))
+        rows.extend(page)
+        if len(page) < _API_PAGE_ROWS:
+            break
+    return pd.DataFrame(rows, columns=cols)
 
 
 def delete_dataset(name: str) -> Dict[str, Any]:

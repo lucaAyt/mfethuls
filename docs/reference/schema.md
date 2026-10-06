@@ -19,7 +19,7 @@ This document defines the canonical data contract after parser normalization.
 ## Canonical Column Semantics
 
 1. temperature_C: temperature in degrees Celsius.
-2. time_s: time in seconds.
+2. time_s: time in seconds. For data that only records a wall-clock `timestamp` (e.g. Flame spectra series), normalization adds time_s as seconds since the earliest timestamp of the dataset; an instrument-provided time_s is kept.
 3. heat_flow_mW: heat flow in mW.
 4. mass_pct: mass as percent of initial mass.
 5. mass_mg: mass in mg.
