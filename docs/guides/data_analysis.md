@@ -175,12 +175,11 @@ df = cs.to_dataframe()
 ### Plot directly
 
 ```python
-mfethuls.plot_experiments(
-    cs,
-    x="temperature_C",
-    y="heat_flow_mW",
-)
+fig, ax = mfethuls.plot_experiments(cs)                  # Matplotlib, publication style
+fig = mfethuls.plot_experiments(cs, backend="plotly")    # interactive
 ```
+
+The plot is chosen per instrument (heat flow vs temperature for DSC, a spectrum for FTIR, …). See the [plotting guide](plotting.md) for comparison modes, labels and units, and saving figures.
 
 ---
 

@@ -75,11 +75,13 @@ When it finishes:
 
 ## Step 4 — Browse and plot
 
-Switch to the **Datasets** tab. Your two experiments appear in the list. Select `LB_dsc_001_S001_R001` — a scatter plot of `heat_flow_mW` vs `temperature_C` renders immediately.
+In the sidebar, expand **Datasets**. Your two experiments appear in the table. Pick `LB_dsc_001` and `LB_dsc_002` in **"Select experiments to plot"**: the main page shows row counts, a preview table and the **Plot** section.
 
-Use the axis dropdowns to explore other columns. The toolbar camera button exports the current view as an SVG (editable in Inkscape). The **Export** section below the plot offers a side-by-side SVG and interactive HTML download.
+- Choose the **X axis** (`temperature_C`) and **Y axis** (`heat_flow_mW`). Lines are coloured by experiment, and every data point is drawn.
+- Or switch on **Built-in instrument plot**: the DSC plot with one colour per heating/cooling segment and one line style per experiment.
+- Zoom by dragging a box, and double-click to reset.
 
-Select both datasets and click **"Compare"** to overlay them on the same axes.
+The toolbar above the chart sets **Axis limits** and downloads the figure as a vector **SVG** (publication style, editable in Inkscape, using your axis limits) or as interactive **HTML**. See the [plotting guide](plotting.md#streamlit-dashboard) for colour scales and data size.
 
 ---
 
@@ -121,7 +123,10 @@ df.groupby("experiment_name")["heat_flow_mW"].describe()
 ### Plot
 
 ```python
-mfethuls.plot_experiments(cs, x="temperature_C", y="heat_flow_mW")
+fig, ax = mfethuls.plot_experiments(cs)                  # heat flow vs temperature, both runs overlaid
+fig.savefig("dsc_comparison.svg", bbox_inches="tight")
+
+mfethuls.plot_experiments(cs, backend="plotly")          # interactive version
 ```
 
 ### Or go direct with DuckDB

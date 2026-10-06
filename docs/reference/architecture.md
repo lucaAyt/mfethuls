@@ -301,7 +301,7 @@ DuckDB uses an OS-level exclusive file lock for write connections. A read connec
 | Interface | Mode | Purpose |
 |-----------|------|---------|
 | Notebooks / CLI | local | Load, compare, plot experiments via Python API |
-| `apps/Home.py` | local + service | Ingest sidebar, dataset browser, ad-hoc plots |
+| `apps/Home.py` | local + service | Ingest sidebar, dataset browser, interactive plots with SVG/HTML export |
 | FastAPI (`api/`) | service | Preview, ingest, job management, dataset access |
 | Worker (`worker.py`) | service | Background ingest processor |
 
@@ -339,6 +339,13 @@ src/mfethuls/
     routes.py             # Route handlers
   worker.py               # Background job processor + timeout
   plotting/               # Optional viz (viz extra)
+    spec.py               # Backend-neutral PlotSpec (panels, traces, legends, colour bars, limits)
+    core.py, comparison.py  # build_dataset_spec / build_experiments_spec, plot_dataset / plot_experiments
+    <family>.py           # One spec builder per instrument family (dsc.py, ftir.py, ...)
+    labels.py             # Display names and units per canonical column (mathtext)
+    render_mpl.py         # Matplotlib renderer (publication style, default backend)
+    render_plotly.py      # Plotly renderer (WebGL, interactive)
+    backend.py, style.py  # Backend selection; publication rcParams
 ```
 
 ---

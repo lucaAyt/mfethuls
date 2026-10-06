@@ -23,7 +23,7 @@ You need: Tailscale installed and connected to the lab tailnet. That's it.
 
 4. **Ingest** — click **"Ingest experiments"**. A progress bar runs while the data is parsed. Completed experiments appear in the Datasets tab.
 
-5. **Browse and plot** — Datasets tab → select a dataset → tweak the plot → download as SVG (or interactive HTML).
+5. **Browse and plot** — Datasets sidebar → select experiments → choose the axes or switch on the built-in instrument plot → set axis limits if needed → download as SVG (or interactive HTML).
 
 **No install, no Python, no config.**
 

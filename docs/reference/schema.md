@@ -83,5 +83,5 @@ This document defines the canonical data contract after parser normalization.
 
 1. Any schema JSON change that renames canonical columns is a breaking change.
 2. Alias additions are backward-compatible.
-3. New canonical columns must include semantic definition and unit in this document.
+3. New canonical columns must include semantic definition and unit in this document, and a display label in `src/mfethuls/plotting/labels.py` (enforced by `tests/test_plotting_labels.py`).
 4. Profile requirement changes must be mirrored in tests.

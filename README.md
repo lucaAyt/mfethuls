@@ -34,7 +34,7 @@ Install extras as needed:
 | Extra | Installs | Use when |
 |---|---|---|
 | `viz` | Plotly, Matplotlib, Kaleido, Streamlit | Streamlit dashboard or notebook plotting |
-| `notebook` | Jupyter, Marimo | Interactive notebooks |
+| `notebook` | Jupyter, Marimo, Matplotlib, Plotly, seaborn | Interactive notebooks with plotting |
 | `service` | FastAPI, Uvicorn, SQLAlchemy, psycopg2 | Running the API + worker |
 | `cloud` | boto3, azure-storage-blob | S3 or Azure Blob Parquet storage |
 | `postgres` | SQLAlchemy, psycopg2 | Postgres metadata access from notebooks |
@@ -80,6 +80,16 @@ df = cs.to_dataframe()   # tidy long-format DataFrame
 cs = mfethuls.load_samples(["S001", "S002"])
 ```
 
+**Plotting:**
+
+```python
+fig, ax = mfethuls.plot_experiments(cs)                  # publication figure (Matplotlib)
+fig = mfethuls.plot_experiments(cs, backend="plotly")    # interactive, every data point (WebGL)
+mfethuls.set_plot_backend("plotly")                      # make Plotly the default
+```
+
+Each instrument gets a suitable plot, with axis labels and units (*Temperature (°C)*, *Wavenumber (cm⁻¹)*). Experiments that share an x-axis are overlaid, otherwise each gets its own panel, and time-resolved spectra series are coloured by elapsed time. Matplotlib figures use a fixed publication style and save as vector SVG/PDF. See [docs/guides/plotting.md](docs/guides/plotting.md).
+
 ---
 
 ## Service mode — shared lab server
@@ -96,8 +106,9 @@ docker compose up --build -d
 1. **Ingest sidebar → Sync from OneDrive** — pulls raw data and registry via rclone
 2. **Select experiments** — multiselect from the registry
 3. **Ingest experiments** — live progress bar polls until done
-4. **Datasets tab** — browse, filter, and plot any ingested dataset
-5. **Export** — SVG (server-side via kaleido) or interactive HTML
+4. **Datasets sidebar** — select experiments to preview, filter, and plot. Plots use every data point by default.
+5. **Plot** — line or scatter plots of any columns, or the built-in instrument plot; set axis limits from the toolbar
+6. **Export** — vector SVG (Matplotlib, using the axis limits) or interactive HTML
 
 **REST API** (all endpoints require `Authorization: Bearer <token>`):
 
@@ -138,6 +149,7 @@ Three stores, each with a distinct role — see [docs/guides/data_analysis.md](d
 | [docs/guides/local_setup.md](docs/guides/local_setup.md) | Non-technical user guide — `uv` + launcher |
 | [docs/guides/cloud_deployment.md](docs/guides/cloud_deployment.md) | Cloud deployment on DigitalOcean + Tailscale |
 | [docs/guides/data_analysis.md](docs/guides/data_analysis.md) | Notebook access — Python API, DuckDB SQL, Postgres, model building |
+| [docs/guides/plotting.md](docs/guides/plotting.md) | Built-in plots, Matplotlib/Plotly backends, labels and units, dashboard plotting |
 | [docs/reference/registry.md](docs/reference/registry.md) | Registry format, column reference, measurement profiles |
 | [docs/reference/api.md](docs/reference/api.md) | Full REST API reference |
 | [docs/reference/architecture.md](docs/reference/architecture.md) | System diagrams, ETL pipeline, storage design |
