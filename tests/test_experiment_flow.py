@@ -5,7 +5,6 @@ from importlib.metadata import PackageNotFoundError, version
 from unittest.mock import patch
 
 import pandas as pd
-import pytest
 
 from mfethuls.dataset import Dataset
 from mfethuls.experiments import Experiment

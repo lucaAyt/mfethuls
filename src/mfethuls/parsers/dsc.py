@@ -1,4 +1,3 @@
-import os
 import re
 import logging
 from pathlib import Path
@@ -197,8 +196,8 @@ class DSCPerkinElmerParser:
                 for line in f.readlines():
 
                     if take:
-                        l = re.split(self.delimiter, line.strip())
-                        lines.append(l)
+                        fields = re.split(self.delimiter, line.strip())
+                        lines.append(fields)
 
                     if pattern_start.match(line):
                         cols = re.split(self.delimiter, line.strip())
@@ -311,8 +310,8 @@ class DSCMettlerToledoParser:
             for line in f.readlines():
 
                 if take:
-                    l = re.split(self.delimiter, line.strip())
-                    lines.append(l)
+                    fields = re.split(self.delimiter, line.strip())
+                    lines.append(fields)
 
                 if pattern_start.match(line):
                     cols = re.split(self.delimiter, line.strip())
@@ -421,8 +420,8 @@ class DSCDefault:
                 for line in f.readlines():
 
                     if take:
-                        l = re.split(self.delimiter, line.strip())
-                        lines.append(l)
+                        fields = re.split(self.delimiter, line.strip())
+                        lines.append(fields)
 
                     if pattern_start.match(line):
                         cols = re.split(self.delimiter, line.strip())

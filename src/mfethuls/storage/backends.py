@@ -160,8 +160,8 @@ class S3ParquetStorage(DataStorageBackend):
             "s3",
             region_name=self.region,
             endpoint_url=self.endpoint_url,
-            aws_access_key_id=os.environ.get("MFETHULS_S3_ACCESS_KEY"),
-            aws_secret_access_key=os.environ.get("MFETHULS_S3_SECRET_KEY"),
+            aws_access_key_id=config.get("access_key_id"),
+            aws_secret_access_key=config.get("secret_access_key"),
             config=config_cls(signature_version="s3v4") if config_cls else None,
         )
 

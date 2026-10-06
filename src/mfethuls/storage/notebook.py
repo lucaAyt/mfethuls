@@ -14,8 +14,9 @@ def list_datasets(
 ) -> pd.DataFrame:
     """List ingested datasets.
 
-    With no arguments uses DuckDB (local mode). Pass a Postgres URL for
-    service mode to get richer metadata (instrument, sample, run info).
+    With no arguments reads the DuckDB catalog: experiment, instrument, sample,
+    run, measurement profile and row count. Pass a Postgres URL in service mode
+    to query the Postgres mirror instead.
 
     Examples:
         list_datasets()                                          # local
@@ -32,11 +33,7 @@ def list_datasets(
     from .duckdb_backend import DuckDBQueryBackend
     db_path = _get_duckdb_path()
     with DuckDBQueryBackend(db_path=db_path, read_only=True) as qb:
-        return qb.query(
-            "SELECT experiment_name, table_name, storage_path, raw_data_filename, registered_at "
-            "FROM dataset_registry ORDER BY registered_at DESC LIMIT ?",
-            [limit],
-        )
+        return pd.DataFrame(qb.list_registered()[:limit])
 
 
 def get_dataset(
@@ -62,9 +59,5 @@ def get_dataset(
     from .duckdb_backend import DuckDBQueryBackend
     db_path = _get_duckdb_path()
     with DuckDBQueryBackend(db_path=db_path, read_only=True) as qb:
-        df = qb.query(
-            "SELECT experiment_name, table_name, storage_path, raw_data_filename, registered_at "
-            "FROM dataset_registry WHERE experiment_name = ? LIMIT 1",
-            [experiment_name],
-        )
-    return pd.Series(df.iloc[0]) if not df.empty else None
+        rows = [row for row in qb.list_registered() if row["experiment_name"] == experiment_name]
+    return pd.Series(rows[0]) if rows else None

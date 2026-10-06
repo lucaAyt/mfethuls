@@ -1,4 +1,3 @@
-import os
 import re
 import logging
 from pathlib import Path
@@ -113,8 +112,8 @@ class DmaTaQ800:
                     column_names.append(re.split(self.delimiter, line.strip(), maxsplit=2)[1].casefold())
 
                 if take:
-                    l = re.split(self.delimiter, line.strip())
-                    lines.append(l)
+                    fields = re.split(self.delimiter, line.strip())
+                    lines.append(fields)
 
                 if pattern_start.match(line):
                     take = True

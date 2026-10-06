@@ -7,8 +7,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-go = pytest.importorskip("plotly.graph_objects")
-
 from mfethuls import set_plot_backend
 from mfethuls.dataset import Dataset
 from mfethuls.plotting import (
@@ -22,6 +20,8 @@ from mfethuls.plotting import (
     set_default_backend,
 )
 from mfethuls.plotting.core import PlotError
+
+go = pytest.importorskip("plotly.graph_objects")
 
 
 @pytest.fixture(autouse=True)

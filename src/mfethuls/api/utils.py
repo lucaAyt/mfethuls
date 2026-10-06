@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import os
 from contextlib import contextmanager
-from typing import Iterator, Optional
+from typing import Iterator
 
 import pandas as pd
 from fastapi import HTTPException

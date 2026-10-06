@@ -101,7 +101,8 @@ def mainX(argv: list[str] | None = None):
 
     df_registry = load_experiment_registry(args.registry)
     print("Loading experiment registry from configured environment/path defaults")
-    print("Registered experiments:\n", df_registry[["name", "experiment_id", "instrument_name"]])
+    summary_columns = [c for c in ("name", "instrument_name", "sample_id", "run_id") if c in df_registry.columns]
+    print("Registered experiments:\n", df_registry[summary_columns])
 
     if args.experiments:
         selected = args.experiments

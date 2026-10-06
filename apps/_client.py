@@ -3,15 +3,14 @@
 Read path  → DuckDB / Parquet directly when the file is accessible on disk.
              This applies in both local mode AND the Streamlit container (shared
              DATA_ROOT volume), avoiding a HTTP + double-serialisation round trip.
-             Metadata enrichment uses Postgres (service mode) or .metadata.json
-             sidecars (local mode) — same naming conventions in both.
+             Dataset descriptions come from the DuckDB catalog (dataset_registry),
+             which ingest fills from the registry, manifest and parsed dataset.
 Write/management path → REST API (ingest trigger, job status, dataset delete).
              These operations require server-side coordination and go through FastAPI.
 """
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +18,7 @@ import pandas as pd
 import streamlit as st
 
 from mfethuls.config.mode import is_service_mode
+from mfethuls.settings import get_settings
 
 
 def mode() -> str:
@@ -32,12 +32,12 @@ def mode() -> str:
 def api_url() -> str:
     return (
         st.session_state.get("api_url")
-        or os.environ.get("MFETHULS_API_URL", "http://localhost:8000")
+        or get_settings().api_url
     ).rstrip("/")
 
 
 def api_headers() -> Dict[str, str]:
-    key = st.session_state.get("api_key") or os.environ.get("MFETHULS_API_KEY", "")
+    key = st.session_state.get("api_key") or get_settings().api_key or ""
     return {"Authorization": f"Bearer {key}"} if key else {}
 
 
@@ -73,104 +73,25 @@ def health_check() -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
-# Metadata enrichment helpers
-# ---------------------------------------------------------------------------
-
-def _read_metadata_json(storage_path: str) -> Dict[str, Any]:
-    """Read the .metadata.json sidecar next to a Parquet file."""
-    if not storage_path or storage_path.startswith(("s3://", "az://", "https://")):
-        return {}
-    meta_path = os.path.splitext(storage_path)[0] + ".metadata.json"
-    if not os.path.exists(meta_path):
-        return {}
-    try:
-        with open(meta_path, encoding="utf8") as fh:
-            return json.load(fh)
-    except Exception:
-        return {}
-
-
-def _enrich_from_postgres(datasets: List[Dict[str, Any]]) -> bool:
-    """Enrich dataset dicts in-place using the Postgres metadata table.
-
-    Joins on experiment_name — consistent across both Postgres (experiment_name
-    column) and DuckDB dataset_registry (experiment_name column set by worker).
-    Note: dataset_name in Postgres uses _dataset_basename (hex-id based) while
-    DuckDB table_name uses _view_basename (human name based) — they never match,
-    so dataset_name is intentionally not used as the join key.
-
-    Only writes fields for datasets that have a Postgres match; unmatched
-    datasets are left untouched so the .metadata.json fallback can fill them.
-
-    Returns True if Postgres was reachable, False otherwise.
-    """
-    try:
-        from mfethuls.storage import get_postgres_db_url
-        from mfethuls.storage.metadata import PostgresMetadataBackend
-        pg_url = get_postgres_db_url()
-        if not pg_url:
-            return False
-        backend = PostgresMetadataBackend(pg_url)
-        pg_rows = backend.list_datasets(limit=2000)
-        # Index by experiment_name — present in both Postgres and DuckDB registry.
-        pg_by_exp: Dict[str, Dict[str, Any]] = {}
-        for r in pg_rows:
-            exp_name = r.get("experiment_name")
-            if exp_name and exp_name not in pg_by_exp:
-                pg_by_exp[exp_name] = r
-        for d in datasets:
-            pg = pg_by_exp.get(d.get("experiment_name") or "")
-            if not pg:
-                continue  # no match — leave blank so .metadata.json can fill in
-            d["instrument_name"] = pg.get("instrument_name") or ""
-            d["instrument_type"] = pg.get("instrument_type") or ""
-            d["instrument_model"] = pg.get("instrument_model") or ""
-            d["sample_id"] = pg.get("sample_id") or ""
-            d["run_id"] = pg.get("run_id") or ""
-            d["experiment_name"] = pg.get("experiment_name") or d.get("experiment_name") or ""
-            d["raw_data_filename"] = pg.get("raw_data_filename") or d.get("raw_data_filename") or ""
-        return True
-    except Exception:
-        return False
-
-
-def _enrich_from_metadata_json(datasets: List[Dict[str, Any]]) -> None:
-    """Fill empty enrichment fields from .metadata.json sidecars.
-
-    Uses `or`-based assignment so it only replaces empty strings, never
-    overwriting values already populated by Postgres enrichment.
-    """
-    for d in datasets:
-        meta = _read_metadata_json(d.get("storage_path", ""))
-        if not meta:
-            continue
-        d["instrument_name"] = d.get("instrument_name") or meta.get("instrument_name") or ""
-        d["instrument_type"] = d.get("instrument_type") or meta.get("instrument_type") or ""
-        d["instrument_model"] = d.get("instrument_model") or meta.get("instrument_model") or ""
-        d["sample_id"] = d.get("sample_id") or meta.get("sample_id") or ""
-        d["run_id"] = d.get("run_id") or meta.get("run_id") or ""
-        d["experiment_name"] = d.get("experiment_name") or meta.get("experiment_name") or ""
-        d["raw_data_filename"] = d.get("raw_data_filename") or meta.get("raw_data_filename") or ""
-
-
-# ---------------------------------------------------------------------------
 # Datasets
 # ---------------------------------------------------------------------------
 
+_CATALOG_TEXT_FIELDS = (
+    "experiment_id", "experiment_name", "raw_data_filename", "instrument_name",
+    "instrument_type", "instrument_model", "sample_id", "run_id", "measurement_profile",
+)
+
+
 def _normalise_dataset(row: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+    """A catalog row (DuckDB or API /datasets) with empty strings for missing text."""
+    dataset = {
         "name": row.get("name") or row.get("table_name") or "",
         "storage_path": row.get("storage_path") or "",
-        "experiment_name": row.get("experiment_name") or "",
-        "raw_data_filename": row.get("raw_data_filename") or "",
         "registered_at": str(row.get("registered_at") or ""),
-        # enriched fields — populated by _enrich_* below
-        "instrument_name": "",
-        "instrument_type": "",
-        "instrument_model": "",
-        "sample_id": "",
-        "run_id": "",
+        "rows": row.get("rows"),
     }
+    dataset.update({field: row.get(field) or "" for field in _CATALOG_TEXT_FIELDS})
+    return dataset
 
 
 def _local_db_path() -> str | None:
@@ -182,22 +103,13 @@ def _local_db_path() -> str | None:
 
 @st.cache_data(show_spinner=False, ttl=30)
 def list_datasets() -> List[Dict[str, Any]]:
-    # Load base list from DuckDB (direct) or API (fallback).
+    """Ingested datasets from the catalog: DuckDB directly, or the API as fallback."""
     db_path = _local_db_path()
     if db_path:
         from mfethuls.storage import duckdb_session
         with duckdb_session(db_path=db_path, read_only=True) as backend:
-            datasets = [_normalise_dataset(r) for r in backend.list_registered()]
-    else:
-        rows = _get("/datasets")
-        datasets = [_normalise_dataset(r) for r in rows]
-
-    # Enrich with instrument/sample/run info.
-    # Postgres fills matched rows; .metadata.json fills whatever Postgres left blank.
-    _enrich_from_postgres(datasets)
-    _enrich_from_metadata_json(datasets)
-
-    return datasets
+            return [_normalise_dataset(r) for r in backend.list_registered()]
+    return [_normalise_dataset(r) for r in _get("/datasets")]
 
 
 # Rows per API request when loading a whole dataset in service mode.
@@ -279,10 +191,10 @@ def preview_registry(
         df = read_tabular_content_bytes(file_bytes)
     else:
         from mfethuls.experiments import resolve_registry_path, read_tabular_content
-        path = resolve_registry_path(os.environ.get("PATH_TO_REGISTRY"))
+        path = resolve_registry_path(get_settings().registry_path)
         df = read_tabular_content(path)
 
-    data_root = os.environ.get("PATH_TO_DATA")
+    data_root = get_settings().data_root
     return validate_registry_dataframe(df, check_data_paths=bool(data_root), data_root=data_root)
 
 

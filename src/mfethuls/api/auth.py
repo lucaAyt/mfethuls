@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import os
-
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from ..settings import get_settings
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -13,7 +13,7 @@ _bearer = HTTPBearer(auto_error=False)
 def verify_token(
     credentials: HTTPAuthorizationCredentials = Security(_bearer),
 ) -> None:
-    api_key = os.environ.get("MFETHULS_API_KEY")
+    api_key = get_settings().api_key
     if not api_key:
         raise RuntimeError(
             "MFETHULS_API_KEY environment variable is not set. "

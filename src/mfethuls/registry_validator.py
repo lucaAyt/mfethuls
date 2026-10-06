@@ -16,6 +16,7 @@ import pandas as pd
 
 from mfethuls.parsers.registry import _PARSER_REGISTRY
 from mfethuls.schema_normalization import _load_instrument_schema
+from mfethuls.settings import get_settings
 
 if TYPE_CHECKING:
     from mfethuls.experiments import Experiment
@@ -237,7 +238,7 @@ class RegistryValidator:
             return errors, warnings
 
         if check_data_paths:
-            data_root = data_root or os.environ.get("PATH_TO_DATA")
+            data_root = data_root or get_settings().data_root
             if not data_root:
                 warnings.append(
                     ("data_path", "No data_root provided; cannot validate data paths.")

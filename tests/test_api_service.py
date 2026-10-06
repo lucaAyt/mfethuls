@@ -67,44 +67,39 @@ def test_registry_preview_invalid_instrument(client, service_mode):
     assert body["rows"][0]["errors"]
 
 
+# /ingest validates the registry at PATH_TO_REGISTRY on the server, not an upload.
 @patch("mfethuls.api.routes.create_job")
-def test_ingest_returns_202_and_location(mock_create_job, client, service_mode):
+def test_ingest_returns_202_and_location(mock_create_job, client, service_mode, monkeypatch):
+    monkeypatch.setenv("PATH_TO_REGISTRY", str(FIXTURE_CSV))
     mock_create_job.return_value = None
 
-    content = FIXTURE_CSV.read_bytes()
-    response = client.post(
-        "/ingest",
-        files={"file": ("registry.csv", content, "text/csv")},
-    )
+    response = client.post("/ingest")
+
     assert response.status_code == 202
     assert "Location" in response.headers
     body = response.json()
     assert "job_id" in body
     mock_create_job.assert_called_once()
-    args = mock_create_job.call_args[0]
-    registry_path = args[1]
+    registry_path = mock_create_job.call_args[0][1]
     assert str(registry_path).endswith(".parquet")
 
 
 @patch("mfethuls.api.routes.create_job")
-def test_ingest_rejects_invalid_registry(mock_create_job, client, service_mode):
-    content = FIXTURE_INVALID.read_bytes()
-    response = client.post(
-        "/ingest",
-        files={"file": ("registry.csv", content, "text/csv")},
-    )
+def test_ingest_rejects_invalid_registry(mock_create_job, client, service_mode, monkeypatch):
+    monkeypatch.setenv("PATH_TO_REGISTRY", str(FIXTURE_INVALID))
+
+    response = client.post("/ingest")
+
     assert response.status_code == 422
     mock_create_job.assert_not_called()
 
 
 @patch("mfethuls.api.routes.create_job")
-def test_ingest_allow_invalid(mock_create_job, client, service_mode):
+def test_ingest_allow_invalid(mock_create_job, client, service_mode, monkeypatch):
+    monkeypatch.setenv("PATH_TO_REGISTRY", str(FIXTURE_INVALID))
     mock_create_job.return_value = None
 
-    content = FIXTURE_INVALID.read_bytes()
-    response = client.post(
-        "/ingest?allow_invalid=true",
-        files={"file": ("registry.csv", content, "text/csv")},
-    )
+    response = client.post("/ingest?allow_invalid=true")
+
     assert response.status_code == 202
     mock_create_job.assert_called_once()

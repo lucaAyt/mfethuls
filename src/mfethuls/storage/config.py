@@ -6,6 +6,8 @@ import os
 from importlib.metadata import PackageNotFoundError, version
 from typing import Dict, Optional
 
+from ..settings import get_settings
+
 
 def _get_package_version() -> str:
     try:
@@ -15,14 +17,13 @@ def _get_package_version() -> str:
 
 
 def _get_storage_root() -> str:
-    for key in ("PATH_TO_LOCAL_STORAGE", "PATH_TO_STORAGE", "MFETHULS_STORAGE_ROOT"):
-        value = os.environ.get(key)
-        if value:
-            root = os.path.abspath(value)
-            os.makedirs(root, exist_ok=True)
-            return root
+    settings = get_settings()
+    if settings.local_storage:
+        root = os.path.abspath(settings.local_storage)
+        os.makedirs(root, exist_ok=True)
+        return root
 
-    data_root = os.environ.get("PATH_TO_DATA")
+    data_root = settings.data_root
     if data_root:
         root = os.path.abspath(os.path.join(data_root, "_storage"))
     else:
@@ -35,7 +36,7 @@ def _get_storage_root() -> str:
 # Need to check that file exists to decide 
 # whether to initialise or connect
 def _get_duckdb_path() -> str:
-    path = os.environ.get("MFETHULS_DUCKDB_PATH")
+    path = get_settings().duckdb_path
     if not path:
         return os.path.join(_get_storage_root(), "mfethuls.duckdb")
     return path
@@ -53,11 +54,14 @@ def _join_storage_key(*parts: Optional[str]) -> str:
 
 
 def _get_s3_config() -> Dict[str, Optional[str]]:
+    s3 = get_settings().s3
     return {
-        "bucket": os.environ.get("MFETHULS_S3_BUCKET"),
-        "prefix": _normalize_prefix(os.environ.get("MFETHULS_S3_PREFIX")),
-        "region": os.environ.get("MFETHULS_S3_REGION"),
-        "endpoint": os.environ.get("MFETHULS_S3_ENDPOINT"),
+        "bucket": s3.bucket,
+        "prefix": _normalize_prefix(s3.prefix),
+        "region": s3.region,
+        "endpoint": s3.endpoint,
+        "access_key_id": s3.access_key_id,
+        "secret_access_key": s3.secret_access_key,
     }
 
 
@@ -77,11 +81,12 @@ def _get_s3_endpoint_url() -> Optional[str]:
 
 
 def _get_duckdb_s3_config() -> Dict[str, Optional[str]]:
+    s3 = get_settings().s3
     return {
-        "region": os.environ.get("MFETHULS_S3_REGION"),
-        "endpoint": os.environ.get("MFETHULS_S3_ENDPOINT"),
-        "access_key_id": os.environ.get("MFETHULS_S3_ACCESS_KEY"),
-        "secret_access_key": os.environ.get("MFETHULS_S3_SECRET_KEY"),
+        "region": s3.region,
+        "endpoint": s3.endpoint,
+        "access_key_id": s3.access_key_id,
+        "secret_access_key": s3.secret_access_key,
     }
 
 
@@ -102,29 +107,27 @@ def _get_duckdb_s3_endpoint_host(region: Optional[str], endpoint: Optional[str])
 
 
 def _get_azure_blob_config() -> Dict[str, Optional[str]]:
+    azure = get_settings().azure
     return {
-        "connection_string": os.environ.get("MFETHULS_AZURE_CONNECTION_STRING"),
-        "account": os.environ.get("MFETHULS_AZURE_ACCOUNT"),
-        "container": os.environ.get("MFETHULS_AZURE_CONTAINER"),
-        "prefix": _normalize_prefix(os.environ.get("MFETHULS_AZURE_PREFIX")),
-        "key": os.environ.get("MFETHULS_AZURE_KEY"),
-        "sas_token": os.environ.get("MFETHULS_AZURE_SAS_TOKEN"),
+        "connection_string": azure.connection_string,
+        "account": azure.account,
+        "container": azure.container,
+        "prefix": _normalize_prefix(azure.prefix),
+        "key": azure.key,
+        "sas_token": azure.sas_token,
     }
 
 
 def get_postgres_db_url() -> Optional[str]:
-    from ..config.mode import is_service_mode
-    if not is_service_mode():
+    settings = get_settings()
+    if not settings.is_service_mode:
         return None
-    enabled = os.environ.get("MFETHULS_POSTGRES_ENABLED", "").lower()
-    if enabled not in {"1", "true", "yes"}:
+    postgres = settings.postgres
+    if not postgres.enabled:
         return None
 
-    user = os.environ.get("MFETHULS_POSTGRES_USER")
-    password = os.environ.get("MFETHULS_POSTGRES_PASSWORD")
-    host = os.environ.get("MFETHULS_POSTGRES_HOST", "localhost")
-    port = os.environ.get("MFETHULS_POSTGRES_PORT")
-    database = os.environ.get("MFETHULS_POSTGRES_DB")
+    user, password, host = postgres.user, postgres.password, postgres.host
+    port, database = postgres.port, postgres.database
 
     if not (user and password and database):
         import logging

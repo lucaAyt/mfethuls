@@ -2,18 +2,17 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
-import os
 import time
 from typing import Any, Dict, List, Optional
 
 from .config.loader import ingest_experiment_dataset
 from .experiments import clear_experiment_registry, get_experiment, load_experiment_registry
 from .storage.job_store import claim_next_job, get_job, update_job
+from .settings import get_settings
 from .storage import DuckDBQueryBackend, get_postgres_db_url
 
 logger = logging.getLogger(__name__)
 
-_JOB_TIMEOUT_SECONDS = int(os.environ.get("MFETHULS_JOB_TIMEOUT_SECONDS", "1800"))
 
 
 def process_job(job_id: str) -> Optional[Dict[str, Any]]:
@@ -111,16 +110,11 @@ def _process_job_ingest(
                 "experiment_id": exp.experiment_id,
                 "status": status,
             }
+            record = (result or {}).get("catalog_record")
             if storage_path:
                 entry["storage_path"] = storage_path
-                from mfethuls.storage.config import _view_basename
-                parquet_paths.append({
-                    "storage_path": storage_path,
-                    "experiment_id": exp.experiment_id,
-                    "view_name": _view_basename(exp),
-                    "experiment_name": exp.name,
-                    "raw_data_filename": getattr(exp, "raw_data_filename", None),
-                })
+            if record is not None:
+                parquet_paths.append({"experiment_id": exp.experiment_id, "record": record})
 
             dataset_results.append(entry)
 
@@ -148,22 +142,18 @@ def _process_job_ingest(
     try:
         with DuckDBQueryBackend() as qb:
             for item in parquet_paths:
+                record = item["record"]
                 try:
-                    view_name = qb.register_parquet(
-                        item["storage_path"],
-                        table_name=item["view_name"],
-                        experiment_name=item["experiment_name"],
-                        raw_data_filename=item["raw_data_filename"],
-                    )
+                    view_name = qb.register_parquet(record.storage_path, record=record)
                     for entry in dataset_results:
-                        if entry.get("storage_path") == item["storage_path"]:
+                        if entry.get("storage_path") == record.storage_path:
                             entry["dataset_id"] = view_name
                     logger.info(
                         "job_id=%s experiment_id=%s registered view=%s",
                         job_id, item["experiment_id"], view_name,
                     )
                 except Exception:
-                    logger.warning("job_id=%s failed to register %s in DuckDB", job_id, item["storage_path"])
+                    logger.warning("job_id=%s failed to register %s in DuckDB", job_id, record.storage_path)
     except Exception:
         logger.exception("job_id=%s DuckDB batch registration failed", job_id)
 
@@ -188,18 +178,19 @@ def run_worker(poll_interval: float = 2.0, max_jobs: Optional[int] = None) -> No
 
         job_id = job.get("job_id")
         if job_id:
+            timeout_s = get_settings().job_timeout_s
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(process_job, job_id)
                 try:
-                    future.result(timeout=_JOB_TIMEOUT_SECONDS)
+                    future.result(timeout=timeout_s)
                 except concurrent.futures.TimeoutError:
                     logger.error(
-                        "job_id=%s timed out after %ds", job_id, _JOB_TIMEOUT_SECONDS
+                        "job_id=%s timed out after %ds", job_id, timeout_s
                     )
                     update_job(
                         job_id,
                         status="failed",
-                        message=f"job timed out after {_JOB_TIMEOUT_SECONDS}s",
+                        message=f"job timed out after {timeout_s}s",
                     )
             processed += 1
 

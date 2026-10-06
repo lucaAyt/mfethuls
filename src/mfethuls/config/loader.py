@@ -23,10 +23,11 @@ from mfethuls.storage import (
     S3ParquetStorage,
     StorageManager,
 )
-from mfethuls.storage.config import _view_basename
+from mfethuls.storage.catalog import CatalogRecord
 from mfethuls.config.mode import is_service_mode
 from mfethuls.manifest import get_manifest_backend
 from mfethuls.schema_normalization import add_elapsed_time
+from mfethuls.settings import get_settings
 
 if TYPE_CHECKING:
     from mfethuls.storage import DuckDBQueryBackend
@@ -83,8 +84,7 @@ def _resolve_metadata_db_url(db_url: Optional[str]) -> Optional[str]:
     if db_url:
         return db_url
 
-    metadata_db_enabled_env = os.environ.get("MFETHULS_METADATA_DB_ENABLED", "").lower()
-    if metadata_db_enabled_env in {"1", "true", "yes"}:
+    if get_settings().metadata_db_enabled:
         return get_postgres_db_url()
 
     return None
@@ -95,7 +95,7 @@ def get_cached_dataset(exp, cache_backend, experiment_name: str) -> Optional[Dat
         return None
 
     if cache_backend.dataset_in_storage(exp):
-        if os.environ.get("MFETHULS_STORAGE_DEBUG"):
+        if get_settings().storage_debug:
             logger.warning(
                 "Loading Dataset for experiment %s from storage cache in %s",
                 experiment_name,
@@ -109,17 +109,27 @@ def get_cached_dataset(exp, cache_backend, experiment_name: str) -> Optional[Dat
     return None
 
 
-def ensure_registered(exp, data_backend, query_backend: "DuckDBQueryBackend | None") -> Optional[str]:
-    if data_backend is None or query_backend is None:
-        return None
+def catalog_record(exp, data_backend, dataset: Optional[Dataset] = None) -> Optional[CatalogRecord]:
+    """The catalog row for ``exp`` as stored by ``data_backend``."""
 
+    if data_backend is None:
+        return None
     parquet_path, _ = data_backend.dataset_paths(exp)
-    return query_backend.register_parquet(
+    return CatalogRecord.build(
+        exp,
         parquet_path,
-        table_name=_view_basename(exp),
-        experiment_name=exp.name,
-        raw_data_filename=exp.raw_data_filename,
+        dataset_metadata=dataset.metadata if dataset is not None else None,
+        rows=len(dataset.data) if dataset is not None else None,
     )
+
+
+def ensure_registered(
+    exp, data_backend, query_backend: "DuckDBQueryBackend | None", dataset: Optional[Dataset] = None
+) -> Optional[str]:
+    record = catalog_record(exp, data_backend, dataset)
+    if record is None or query_backend is None:
+        return None
+    return query_backend.register_parquet(record.storage_path, record=record)
 
 
 def persist_dataset(
@@ -141,7 +151,7 @@ def persist_dataset(
         query_backend=query_backend,
     )
     parquet_path, meta_path, dataset_id = manager.save_and_persist(exp, dataset)
-    if os.environ.get("MFETHULS_STORAGE_DEBUG"):
+    if get_settings().storage_debug:
         logger.info("Saved Dataset for experiment %s to storage backend", experiment_name)
         if dataset_id:
             logger.info(
@@ -154,7 +164,7 @@ def persist_dataset(
 
 def _assign_experiment_id(exp, db_url: Optional[str]) -> None:
     """Assign experiment_id from the manifest backend (creates on first ingest)."""
-    data_root = os.environ.get("PATH_TO_DATA")
+    data_root = get_settings().data_root
     resolved_db_url = _resolve_metadata_db_url(db_url)
     backend = get_manifest_backend(data_root=data_root, db_url=resolved_db_url)
     raw_filename = exp.raw_data_filename or exp.name
@@ -183,8 +193,7 @@ def ingest_experiment_dataset(
         )
         return {"status": "skipped"}
 
-    disable_storage_env = os.environ.get("MFETHULS_DISABLE_STORAGE", "").lower()
-    effective_use_storage = use_storage and disable_storage_env not in {"1", "true", "yes"}
+    effective_use_storage = use_storage and not get_settings().disable_storage
     if not effective_use_storage:
         return {"status": "skipped"}
 
@@ -206,12 +215,13 @@ def ingest_experiment_dataset(
     if not refresh:
         cached_dataset = get_cached_dataset(exp, cache_backend, experiment_name)
         if cached_dataset is not None:
-            dataset_id = ensure_registered(exp, data_backend, query_backend)
-            parquet_path, _ = data_backend.dataset_paths(exp)
+            dataset_id = ensure_registered(exp, data_backend, query_backend, cached_dataset)
+            record = catalog_record(exp, data_backend, cached_dataset)
             return {
                 "status": "registered",
                 "dataset_id": dataset_id,
-                "storage_path": parquet_path,
+                "storage_path": record.storage_path,
+                "catalog_record": record,
             }
 
     raw_filename = exp.raw_data_filename or exp.name
@@ -244,6 +254,7 @@ def ingest_experiment_dataset(
             "status": "persisted",
             "dataset_id": dataset_id,
             "storage_path": parquet_path,
+            "catalog_record": catalog_record(exp, data_backend, dataset),
         }
     return {"status": "failed"}
 
@@ -284,8 +295,7 @@ def load_experiment_dataset(
     _assign_experiment_id(exp, db_url)
 
     # Allow a global switch to disable storage via environment for debugging.
-    disable_storage_env = os.environ.get("MFETHULS_DISABLE_STORAGE", "").lower()
-    effective_use_storage = use_storage and disable_storage_env not in {"1", "true", "yes"}
+    effective_use_storage = use_storage and not get_settings().disable_storage
 
     data_backend = None
     if effective_use_storage:
@@ -299,7 +309,7 @@ def load_experiment_dataset(
     if effective_use_storage and not refresh:
         cached_dataset = get_cached_dataset(exp, cache_backend, experiment_name)
         if cached_dataset is not None:
-            ensure_registered(exp, data_backend, query_backend)
+            ensure_registered(exp, data_backend, query_backend, cached_dataset)
             return cached_dataset
 
     raw_filename = exp.raw_data_filename or exp.name
