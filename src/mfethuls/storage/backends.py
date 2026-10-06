@@ -392,20 +392,3 @@ class CombinedStorageBackend(DataStorageBackend):
 
     def load_dataset(self, experiment: Experiment) -> Dataset:
         return self.primary.load_dataset(experiment)
-
-
-def dataset_paths(experiment: Experiment) -> Tuple[str, str]:
-    return LocalParquetStorage().dataset_paths(experiment)
-
-
-def dataset_in_storage(experiment: Experiment) -> bool:
-    return LocalParquetStorage().dataset_in_storage(experiment)
-
-
-def save_dataset_to_storage(experiment: Experiment, dataset: Dataset) -> Tuple[str, str]:
-    return LocalParquetStorage().save_dataset(experiment, dataset)
-
-
-def load_dataset_from_storage(experiment: Experiment) -> Dataset:
-    return LocalParquetStorage().load_dataset(experiment)
-

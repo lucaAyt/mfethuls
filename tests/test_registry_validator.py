@@ -88,12 +88,6 @@ class TestRegistryValidator:
         is_valid, errors = validator.validate_experiment(exp)
         assert is_valid
 
-    def test_validate_all_diagnostic(self):
-        validator = RegistryValidator()
-        all_valid, errors_dict = validator.validate_all()
-        assert all_valid, f"Some instruments failed validation: {errors_dict}"
-        assert isinstance(errors_dict, dict)
-
     def test_parse_experiment_fails_with_invalid_instrument(self):
         exp = Experiment(name="test_invalid", instrument_name="nonexistent_instrument")
 

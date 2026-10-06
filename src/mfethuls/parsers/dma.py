@@ -39,8 +39,7 @@ class DmaTaQ800:
     ):
         """Parse DMA TA Q800 data.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -50,9 +49,6 @@ class DmaTaQ800:
             logger=logger,
             parser_label="DMA",
         )
-
-        if experiment_id is None:
-            return df
 
         registry_profile = measurement_profile or (metadata or {}).get("registry_measurement_profile")
         if registry_profile:

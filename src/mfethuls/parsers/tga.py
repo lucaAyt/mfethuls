@@ -35,8 +35,7 @@ class TGAXParser:
     ):
         """Parse TGA data.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -47,9 +46,6 @@ class TGAXParser:
             parser_label="TGA",
             should_parse_raw=lambda path: str(path).casefold().endswith(self.file_extension.casefold()) or str(path).casefold().endswith('.csv'),
         )
-
-        if experiment_id is None:
-            return df
 
         df, schema_report = apply_dataframe_schema(
             df,

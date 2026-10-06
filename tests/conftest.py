@@ -6,7 +6,7 @@ from mfethuls import settings as mfethuls_settings
 
 
 def _is_mfethuls_variable(name: str) -> bool:
-    return name.startswith(("MFETHULS_", "PATH_TO_")) or name.endswith("_FOLDER_NAME")
+    return name.startswith(("MFETHULS_", "PATH_TO_"))
 
 
 def pytest_configure(config):

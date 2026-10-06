@@ -172,6 +172,21 @@ cs = mfethuls.load_samples(
 df = cs.to_dataframe()
 ```
 
+### Inspect the registry
+
+Both functions read the registry file on each call, so edits to it apply straight away. To look at it yourself, or to reuse one copy across calls:
+
+```python
+registry = mfethuls.Registry.load()      # PATH_TO_REGISTRY, or pass a path
+registry.frame                           # the spreadsheet as read
+registry.problems                        # rows that were skipped or have warnings, and why
+[exp.name for exp in registry.for_samples(["S001"])]
+
+cs = mfethuls.load_experiments(["CL_dsc_001"], registry=registry)
+```
+
+Descriptions and extra columns always come from the current registry, also for data loaded from storage.
+
 ### Plot directly
 
 ```python

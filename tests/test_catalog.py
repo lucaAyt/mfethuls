@@ -9,9 +9,8 @@ import duckdb
 import pandas as pd
 import pytest
 
-from mfethuls import experiments as experiments_module
 from mfethuls.config.loader import ingest_experiment_dataset
-from mfethuls.experiments import Experiment, load_experiment_registry
+from mfethuls.experiments import Experiment, Registry
 from mfethuls.storage.catalog import CATALOG_FIELDS, CatalogRecord
 from mfethuls.storage.duckdb_backend import DuckDBQueryBackend
 
@@ -121,11 +120,10 @@ def test_ingest_registers_full_catalog_row(tmp_path, monkeypatch):
     shutil.copytree(EXAMPLES_DIR, examples)
     monkeypatch.setenv("PATH_TO_DATA", str(examples / "data"))
     monkeypatch.setenv("PATH_TO_LOCAL_STORAGE", str(tmp_path / "storage"))
-    monkeypatch.setattr(experiments_module, "_EXPERIMENT_REGISTRY", {})
-    load_experiment_registry(str(examples / "experiments_registry.csv"))
+    registry = Registry.load(str(examples / "experiments_registry.csv"))
 
     with DuckDBQueryBackend(db_path=str(tmp_path / "catalog.duckdb")) as backend:
-        result = ingest_experiment_dataset("LB_dsc_001", refresh=True, query_backend=backend)
+        result = ingest_experiment_dataset("LB_dsc_001", refresh=True, query_backend=backend, registry=registry)
         (row,) = backend.list_registered()
         view_rows = backend.query(f'SELECT count(*) AS n FROM "{row["table_name"]}"')["n"][0]
 
@@ -148,12 +146,12 @@ def test_worker_batch_registers_catalog_records(mock_update_job, mock_get_job, t
     exp = Experiment(name="LB_dsc_001", instrument_name="dsc_mettler_toledo", experiment_id="abc123", sample_id="S001")
     record = CatalogRecord.build(exp, str(storage_path), dataset_metadata={"instrument_type": "dsc"}, rows=3)
 
-    with patch("mfethuls.worker.get_experiment", return_value=exp), patch(
+    with patch(
         "mfethuls.worker.ingest_experiment_dataset",
         return_value={"status": "persisted", "storage_path": str(storage_path), "catalog_record": record},
     ):
         _process_job_ingest(job_id="job1", experiment_names=["LB_dsc_001"], job_registry_path="unused",
-                            storage_mode="local", cloud_provider=None, db_url=None)
+                            storage_mode="local", cloud_provider=None, db_url=None, registry=Registry([exp]))
 
     with DuckDBQueryBackend(db_path=str(tmp_path / "catalog.duckdb"), read_only=True) as backend:
         (row,) = backend.list_registered()

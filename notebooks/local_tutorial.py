@@ -64,8 +64,7 @@ def _(mo):
 
 @app.cell
 def _():
-    from mfethuls import load_experiments, load_samples, plot_experiments, set_plot_backend, use_test_env
-    from mfethuls.experiments import load_experiment_registry
+    from mfethuls import Registry, load_experiments, load_samples, plot_experiments, set_plot_backend, use_test_env
 
     # Point mfethuls at the example data. Remove this line to use your own data.
     use_test_env()
@@ -74,7 +73,7 @@ def _():
     # Use backend="matplotlib" on a single call for a publication figure.
     set_plot_backend("plotly")
     return (
-        load_experiment_registry,
+        Registry,
         load_experiments,
         load_samples,
         plot_experiments,
@@ -97,16 +96,17 @@ def _(mo):
     | `raw_data_filename` | file name of the raw export without extension (`poly1` finds `poly1.txt`) |
 
     mfethuls searches the instrument folder for the raw file, so you don't need to give full paths.
+
+    The registry is read fresh whenever you load data, so edits to the file apply straight away.
     """)
     return
 
 
 @app.cell
-def _(load_experiment_registry):
-    # Read the registry from PATH_TO_REGISTRY and register every valid row.
-    # Invalid rows are skipped with a warning that says what is wrong.
-    df_registry = load_experiment_registry()
-    df_registry
+def _(Registry):
+    # Read the registry from PATH_TO_REGISTRY. Invalid rows are skipped; registry.problems says why.
+    registry = Registry.load()
+    registry.frame
     return
 
 

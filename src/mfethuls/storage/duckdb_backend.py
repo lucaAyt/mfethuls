@@ -207,23 +207,18 @@ class DuckDBQueryBackend:
         table_name: Optional[str] = None,
         overwrite: bool = True,
         persist_view: bool = True,
-        experiment_name: Optional[str] = None,
-        raw_data_filename: Optional[str] = None,
         record: Optional[CatalogRecord] = None,
     ) -> str:
         """Create the view for ``storage_path`` and upsert its catalog row.
 
-        Pass ``record`` for a full catalog row; ``experiment_name`` and
-        ``raw_data_filename`` alone give a minimal row (kept for older callers).
+        ``record`` fills the catalog row; without it only the view and path are stored.
         """
 
         if self.read_only:
             raise RuntimeError("Cannot register parquet on a read-only DuckDB connection")
+        fields = record.fields() if record is not None else {}
         if record is not None:
             table_name = table_name or record.table_name
-            fields = record.fields()
-        else:
-            fields = {"experiment_name": experiment_name, "raw_data_filename": raw_data_filename}
         inferred = table_name or os.path.splitext(os.path.basename(storage_path))[0]
         view_name = self._sanitize_table_name(inferred)
         if self._is_s3_uri(storage_path):
@@ -249,7 +244,29 @@ class DuckDBQueryBackend:
                 """,
                 [view_name, storage_path, *fields.values()],
             )
+            if fields.get("experiment_id"):
+                self._remove_superseded(fields["experiment_id"], keep=view_name)
         return view_name
+
+    def _remove_superseded(self, experiment_id: str, *, keep: str) -> None:
+        """Drop older catalog rows and views of the same experiment under another name.
+
+        The view and file names include sample and run, so correcting either in
+        the registry registers the experiment under a new name. The old Parquet
+        file is user data and stays on disk; it is named in a warning.
+        """
+
+        stale = self._conn.execute(
+            "SELECT table_name, storage_path FROM dataset_registry WHERE experiment_id = ? AND table_name <> ?;",
+            [experiment_id, keep],
+        ).fetchall()
+        for table_name, old_path in stale:
+            self.remove_dataset(table_name)
+            logger.warning(
+                "Experiment %s is now registered as %r; removed the old catalog entry %r. "
+                "Its file %s is no longer used and can be deleted.",
+                experiment_id, keep, table_name, old_path,
+            )
 
     def list_registered(self) -> List[Dict[str, Any]]:
         """All catalog rows, newest first, as dictionaries of every column."""

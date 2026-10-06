@@ -77,19 +77,6 @@ MFETHULS_AZURE_SAS_TOKEN=
 MFETHULS_AZURE_CONTAINER=mfethuls
 MFETHULS_AZURE_PREFIX=mfethuls
 
-##========== INSTRUMENT FOLDER NAMES ==========
-# These map instrument types to folder names in PATH_TO_DATA
-UV_VIS_FOLDER_NAME=UV_Vis
-TGA_FOLDER_NAME=TGA
-FTIR_FOLDER_NAME=FTIR
-DSC_FOLDER_NAME=DSC
-NMR_FOLDER_NAME=NMR
-MS_FOLDER_NAME=MS
-RHEOMETER_FOLDER_NAME=Rheology
-SEC_FOLDER_NAME=SEC
-DMA_FOLDER_NAME=DMA
-SAXS_FOLDER_NAME=SAXS
-
 ##========== RCLONE SYNC (Phase 1b) ==========
 # Used by POST /sync to pull raw data and registry from OneDrive.
 # One-time setup: run 'rclone config' locally, copy rclone.conf to Droplet.

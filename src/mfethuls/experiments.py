@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 import logging
 import os
@@ -90,11 +90,6 @@ class Experiment:
         self.instrument_name = str(self.instrument_name).strip().casefold()
 
 
-# Minimal in-memory registry placeholder.
-# In the future this can be backed by JSON/CSV or a database.
-_EXPERIMENT_REGISTRY: Dict[str, Experiment] = {}
-
-
 def _normalize_optional_str(value: Any) -> Optional[str]:
     """Normalize optional text fields coming from pandas records.
 
@@ -106,25 +101,6 @@ def _normalize_optional_str(value: Any) -> Optional[str]:
         return None
     text = str(value).strip()
     return text or None
-
-
-def register_experiment(exp: Experiment) -> None:
-    """Register an experiment in the in-memory registry.
-
-    For now, this is primarily useful for interactive sessions and tests.
-    A file- or DB-backed registry can be added later.
-    """
-
-    _EXPERIMENT_REGISTRY[exp.name] = exp
-
-
-def clear_experiment_registry() -> None:
-    """Clear all entries from the in-memory registry.
-
-    Called by the worker before each job so that experiments removed from the
-    shared registry between runs are not carried forward as stale entries.
-    """
-    _EXPERIMENT_REGISTRY.clear()
 
 
 @dataclass
@@ -196,24 +172,6 @@ def experiment_from_registry_record(rec: dict) -> RegistryRowResult:
     return RegistryRowResult(experiment=exp, errors=errors, warnings=warnings)
 
 
-def get_experiment(name: str) -> Experiment:
-    """Retrieve an Experiment by its human-friendly name.
-
-    Raises KeyError if the experiment is not known.
-    """
-
-    try:
-        return _EXPERIMENT_REGISTRY[name]
-    except KeyError as exc:
-        raise KeyError(f"Unknown experiment name: {name!r}") from exc
-
-
-def is_experiment_registered(name: str) -> bool:
-    """Return True if an experiment with this name is in the in-memory registry."""
-
-    return name in _EXPERIMENT_REGISTRY
-
-
 def read_tabular_content(path: str) -> pd.DataFrame:
     """Read a CSV/XLSX file into a DataFrame."""
 
@@ -227,89 +185,151 @@ def read_tabular_content(path: str) -> pd.DataFrame:
     return df
 
 
-def load_experiment_registry(
-    path: Optional[str] = None,
-    *,
-    check_data_paths: bool = False,
-    data_root: Optional[str] = None,
-) -> pd.DataFrame:
-    """Load experiments from a CSV/Excel file into the in-memory registry.
+@dataclass
+class RegistryProblem:
+    """A registry row that was skipped (``errors``) or loaded with ``warnings``."""
 
-    The file is expected to contain at least the following columns:
+    name: Optional[str]
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
 
-    - ``name``: human-friendly experiment name (used as lookup key, must be unique)
-    - ``instrument_name``: must match an instrument ``name`` from the
-      instrument configuration JSON.
+    @property
+    def skipped(self) -> bool:
+        return bool(self.errors)
 
-    Optional columns (if present) are interpreted as follows:
 
-    - ``raw_data_filename``: stem of the raw data file as named at the
-        instrument (e.g. "chitosan_jan15"). Defaults to ``name`` when absent.
-        Must be unique per ``instrument_name``.
-    - ``description``: free-text description used to infer a measurement
-        profile (raw registry value) when explicit measurement_profile absent
-    - ``measurement_profile``: raw registry measurement profile name (e.g.
-        "frequency Sweep" or "oscillatory_frequency_sweep").
-        This is stored as ``registry_measurement_profile`` in Experiment.metadata.
-        Canonicalization happens later in the parser layer.
-    - ``sample_id``: strict sample id (e.g. S001)
-    - ``run_id``: strict run id (e.g. R001), defaults to R001 when missing
-    - any other columns are stored in ``Experiment.metadata``.
+class Registry:
+    """The experiments described by one registry spreadsheet.
 
-    The function returns the loaded DataFrame so callers can further filter or
-    inspect the registry in notebooks or scripts.
+    Load it with :meth:`load` (from a CSV/XLSX/Parquet file, by default
+    ``PATH_TO_REGISTRY``) or build it from a table with :meth:`from_frame`, then
+    pass it to the functions that need it. Nothing is kept globally: loading the
+    file again always reflects its current content.
+
+    - ``frame``: the table as read, every row included
+    - ``problems``: rows that were skipped or loaded with warnings, and why
+    - ``get(name)``, ``name in registry``, iteration and ``names`` for the valid rows
     """
 
-    # Resolve to an absolute path for clearer error messages.
-    path = resolve_registry_path(path)
-    df = read_tabular_content(path)
+    def __init__(
+        self,
+        experiments: Iterable[Experiment] = (),
+        *,
+        frame: Optional[pd.DataFrame] = None,
+        path: Optional[str] = None,
+        problems: Optional[List[RegistryProblem]] = None,
+    ) -> None:
+        self._experiments: Dict[str, Experiment] = {exp.name: exp for exp in experiments}
+        self.frame = frame if frame is not None else pd.DataFrame()
+        self.path = path
+        self.problems = problems or []
 
-    required_cols = {"name", "instrument_name"}
-    missing = required_cols.difference(df.columns)
-    if missing:
-        raise ValueError(
-            f"Experiment registry at {path!r} is missing required columns: {sorted(missing)}"
-        )
+    @classmethod
+    def load(
+        cls,
+        path: Optional[str] = None,
+        *,
+        check_data_paths: bool = False,
+        data_root: Optional[str] = None,
+    ) -> "Registry":
+        """Read the registry file at ``path`` (default ``PATH_TO_REGISTRY``)."""
 
-    if "raw_data_filename" not in df.columns:
-        logger.warning(
-            "Registry at %r has no 'raw_data_filename' column — defaulting to 'name' for each row.",
-            path,
-        )
-
-    validator = RegistryValidator()
-    records = df.to_dict(orient="records")
-
-    for rec in records:
-        row_result = experiment_from_registry_record(rec)
-        if row_result.errors:
-            logger.warning(
-                "Skipping registry row %r: %s",
-                rec.get("name"),
-                "; ".join(row_result.errors),
-            )
-            continue
-        if row_result.experiment is None:
-            continue
-
-        extra_errors, extra_warnings = validator.validate_experiment_details(
-            row_result.experiment,
+        resolved = resolve_registry_path(path)
+        return cls.from_frame(
+            read_tabular_content(resolved),
+            path=resolved,
             check_data_paths=check_data_paths,
             data_root=data_root,
         )
-        if extra_errors:
+
+    @classmethod
+    def from_frame(
+        cls,
+        df: pd.DataFrame,
+        *,
+        path: Optional[str] = None,
+        check_data_paths: bool = False,
+        data_root: Optional[str] = None,
+    ) -> "Registry":
+        """Build a registry from a table with the registry columns.
+
+        Required columns: ``name`` and ``instrument_name``. Optional:
+        ``raw_data_filename`` (stem of the raw file; defaults to ``name``),
+        ``sample_id`` (e.g. S001), ``run_id`` (e.g. R001, default R001),
+        ``measurement_profile``, ``description`` (used to infer a profile when
+        none is given). Any other column is kept in ``Experiment.metadata``.
+
+        Invalid rows are skipped and recorded in ``problems``; both skipped rows
+        and warnings are also logged.
+        """
+
+        source = repr(path) if path else "the given table"
+        missing = {"name", "instrument_name"}.difference(df.columns)
+        if missing:
+            raise ValueError(f"Experiment registry at {source} is missing required columns: {sorted(missing)}")
+        if "raw_data_filename" not in df.columns:
             logger.warning(
-                "Skipping registry row %r: %s",
-                rec.get("name"),
-                "; ".join(extra_errors),
+                "Registry at %s has no 'raw_data_filename' column — defaulting to 'name' for each row.", source
             )
-            continue
 
-        for message in row_result.warnings:
-            logger.warning("Registry row %r: %s", rec.get("name"), message)
-        for _, message in extra_warnings:
-            logger.warning("Registry row %r: %s", rec.get("name"), message)
+        validator = RegistryValidator()
+        experiments: List[Experiment] = []
+        problems: List[RegistryProblem] = []
+        for rec in df.to_dict(orient="records"):
+            name = _normalize_optional_str(rec.get("name"))
+            row_result = experiment_from_registry_record(rec)
+            errors, warnings = list(row_result.errors), list(row_result.warnings)
+            if row_result.experiment is not None and not errors:
+                extra_errors, extra_warnings = validator.validate_experiment_details(
+                    row_result.experiment,
+                    check_data_paths=check_data_paths,
+                    data_root=data_root,
+                )
+                errors.extend(extra_errors)
+                warnings.extend(message for _, message in extra_warnings)
 
-        register_experiment(row_result.experiment)
+            if errors:
+                logger.warning("Skipping registry row %r: %s", name, "; ".join(errors))
+            for message in warnings:
+                logger.warning("Registry row %r: %s", name, message)
+            if errors or warnings:
+                problems.append(RegistryProblem(name=name, errors=errors, warnings=warnings))
+            if not errors and row_result.experiment is not None:
+                experiments.append(row_result.experiment)
 
-    return df
+        return cls(experiments, frame=df, path=path, problems=problems)
+
+    def get(self, name: str) -> Experiment:
+        """The experiment called ``name``; ``KeyError`` if it is unknown or its row was skipped."""
+
+        try:
+            return self._experiments[name]
+        except KeyError:
+            where = f" at {self.path!r}" if self.path else ""
+            raise KeyError(
+                f"Unknown experiment name: {name!r}. It is not in the registry{where}, "
+                "or its row was skipped as invalid (see Registry.problems)."
+            ) from None
+
+    def for_samples(self, sample_ids: Iterable[str]) -> List[Experiment]:
+        """Experiments of the given sample ids, in registry order."""
+
+        wanted = {str(sample_id).strip() for sample_id in sample_ids}
+        return [exp for exp in self if exp.sample_id in wanted]
+
+    @property
+    def names(self) -> List[str]:
+        return list(self._experiments)
+
+    def __contains__(self, name: object) -> bool:
+        return name in self._experiments
+
+    def __iter__(self) -> Iterator[Experiment]:
+        return iter(self._experiments.values())
+
+    def __len__(self) -> int:
+        return len(self._experiments)
+
+    def __repr__(self) -> str:
+        source = self.path or "table"
+        return f"Registry({source!r}, {len(self)} experiments, {len(self.problems)} problems)"

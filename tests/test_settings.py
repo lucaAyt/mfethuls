@@ -20,13 +20,12 @@ def test_from_env_parses_values():
             "MFETHULS_MODE": "Server",
             "PATH_TO_DATA": "/data",
             "PATH_TO_REGISTRY": "/registry.csv",
-            "PATH_TO_STORAGE": "/storage",
+            "PATH_TO_LOCAL_STORAGE": "/storage",
             "MFETHULS_DISABLE_STORAGE": "yes",
             "MFETHULS_JOB_TIMEOUT_SECONDS": "60",
             "MFETHULS_POSTGRES_ENABLED": "true",
             "MFETHULS_POSTGRES_USER": "lab",
             "MFETHULS_S3_BUCKET": "bucket",
-            "DSC_FOLDER_NAME": "Calorimetry",
         }
     )
 
@@ -42,13 +41,6 @@ def test_from_env_parses_values():
     assert settings.postgres.enabled is True
     assert settings.postgres.user == "lab"
     assert settings.s3.bucket == "bucket"
-    assert settings.instrument_folders == {"dsc": "Calorimetry"}
-
-
-def test_local_storage_prefers_path_to_local_storage():
-    settings = Settings.from_env({"PATH_TO_LOCAL_STORAGE": "/a", "PATH_TO_STORAGE": "/b"})
-
-    assert settings.local_storage == "/a"
 
 
 def test_get_settings_follows_the_environment_until_configured(monkeypatch):

@@ -1,11 +1,9 @@
 import logging
 import argparse
 
-import mfethuls.parsers
-import mfethuls.factory  # noqa: F401 - loads .env
 from mfethuls import load_experiments, plot_experiments
 from mfethuls.config.mode import use_test_env
-from mfethuls.experiments import load_experiment_registry
+from mfethuls.experiments import Registry
 from mfethuls.storage import get_postgres_db_url
 
 
@@ -21,7 +19,7 @@ def _apply_runtime_env_mode(registry_env: str) -> None:
 
     use_test_env()
 
-def mainX(argv: list[str] | None = None):
+def main(argv: list[str] | None = None):
     """Small demo for manual testing of the experiment/Dataset flow.
 
     This function is intentionally simple and prints shapes / metadata rather
@@ -99,7 +97,8 @@ def mainX(argv: list[str] | None = None):
 
     _apply_runtime_env_mode(args.registry_env)
 
-    df_registry = load_experiment_registry(args.registry)
+    registry = Registry.load(args.registry)
+    df_registry = registry.frame
     print("Loading experiment registry from configured environment/path defaults")
     summary_columns = [c for c in ("name", "instrument_name", "sample_id", "run_id") if c in df_registry.columns]
     print("Registered experiments:\n", df_registry[summary_columns])
@@ -136,6 +135,7 @@ def mainX(argv: list[str] | None = None):
     try:
         comparison = load_experiments(
             selected,
+            registry=registry,
             use_storage=not args.no_storage,
             refresh=args.refresh,
             db_url=db_url,
@@ -181,11 +181,6 @@ def mainX(argv: list[str] | None = None):
         else:
             print("Created comparison plot in memory. Use --plot-output to save it.")
         plt.close(fig)
-
-def main(argv: list[str] | None = None):
-    """Simple debugging entrypoint."""
-
-    mainX(argv)
 
 if __name__ == "__main__":
     main()

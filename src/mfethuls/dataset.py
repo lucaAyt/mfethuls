@@ -18,10 +18,6 @@ class Dataset:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     @property
-    def schema_version(self) -> str:
-        return str(self.metadata.get("schema_version", "1.0"))
-
-    @property
     def experiment_ids(self) -> List[str]:
         ids = self.metadata.get("experiment_ids")
         if isinstance(ids, list):

@@ -34,8 +34,7 @@ class BrukerFTIRParser:
     ):
         """Parse Bruker FTIR data.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -45,9 +44,6 @@ class BrukerFTIRParser:
             logger=logger,
             parser_label="FTIR",
         )
-
-        if experiment_id is None:
-            return df
 
         df, schema_report = apply_dataframe_schema(
             df,

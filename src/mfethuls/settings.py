@@ -72,8 +72,6 @@ class Settings:
     api_key: Optional[str] = None
     api_url: str = "http://localhost:8000"
     job_timeout_s: int = 1800
-    # <TYPE>_FOLDER_NAME overrides for instrument folders, keyed by lower-case type.
-    instrument_folders: Mapping[str, str] = field(default_factory=dict)
     postgres: PostgresSettings = field(default_factory=PostgresSettings)
     s3: S3Settings = field(default_factory=S3Settings)
     azure: AzureSettings = field(default_factory=AzureSettings)
@@ -90,20 +88,11 @@ class Settings:
         get = env.get
 
         mode = (get("MFETHULS_MODE") or "local").strip().lower()
-        local_storage = next(
-            (get(key) for key in ("PATH_TO_LOCAL_STORAGE", "PATH_TO_STORAGE", "MFETHULS_STORAGE_ROOT") if get(key)),
-            None,
-        )
-        folders = {
-            key[: -len("_FOLDER_NAME")].lower(): value
-            for key, value in env.items()
-            if key.endswith("_FOLDER_NAME") and value
-        }
         return cls(
             mode="service" if mode in {"service", "server"} else "local",
             data_root=get("PATH_TO_DATA") or None,
             registry_path=get("PATH_TO_REGISTRY") or None,
-            local_storage=local_storage,
+            local_storage=get("PATH_TO_LOCAL_STORAGE") or None,
             duckdb_path=get("MFETHULS_DUCKDB_PATH") or None,
             disable_storage=_flag(get("MFETHULS_DISABLE_STORAGE")),
             storage_debug=bool(get("MFETHULS_STORAGE_DEBUG")),
@@ -111,7 +100,6 @@ class Settings:
             api_key=get("MFETHULS_API_KEY") or None,
             api_url=get("MFETHULS_API_URL") or "http://localhost:8000",
             job_timeout_s=int(get("MFETHULS_JOB_TIMEOUT_SECONDS") or 1800),
-            instrument_folders=folders,
             postgres=PostgresSettings(
                 enabled=_flag(get("MFETHULS_POSTGRES_ENABLED")),
                 user=get("MFETHULS_POSTGRES_USER") or None,
