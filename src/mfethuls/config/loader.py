@@ -53,13 +53,13 @@ def prepare_instruments(filters=None, experiments=None):
         type_ = entry.get("type")
         model = entry.get("model")
         name = entry.get("name")
-        folder_name = entry.get("folder_name")
+        folder_name = entry["folder_name"]  # required; see tests/test_instrument_config.py
         characterizer = None
 
         if "characterizer" in entry:
             characterizer = create_characterizer(type_, entry["characterizer"])
 
-        data_path = get_data_root_path(folder_name, type_)
+        data_path = get_data_root_path(folder_name)
         instr = create_instrument(type_, name, model, characterizer, data_path)
         instruments[name] = instr
 

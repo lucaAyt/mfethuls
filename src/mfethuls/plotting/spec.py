@@ -104,8 +104,6 @@ class PlotSpec:
     panels: list[Panel]
     layout: Literal["single", "facet"] = "single"
     title: Optional[str] = None
-    # Matplotlib only: use a constrained layout (room for legends outside the axes).
-    constrained: bool = False
 
     @property
     def panel(self) -> Panel:

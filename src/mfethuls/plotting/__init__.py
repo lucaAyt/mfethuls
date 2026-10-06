@@ -1,6 +1,6 @@
 from ..comparison import ComparisonSet, load_experiments, load_samples
 from .backend import get_default_backend, set_default_backend
-from .comparison import ComparisonMode, build_experiments_spec, plot_comparison, plot_experiments
+from .comparison import ComparisonMode, build_experiments_spec, plot_experiments
 from .core import PlotError, build_dataset_spec, plot_dataset
 from .dma import plot_dma
 from .dsc import plot_dsc
@@ -31,7 +31,6 @@ __all__ = [
     "load_experiments",
     "plot_experiments",
     "load_samples",
-    "plot_comparison",
     "plot_dataset",
     "plot_dma",
     "plot_dsc",

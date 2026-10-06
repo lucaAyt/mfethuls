@@ -157,7 +157,7 @@ def build_experiments_spec(
     labels = comparison_set.labels
 
     if not datasets:
-        raise PlotError("plot_comparison requires at least one dataset.")
+        raise PlotError("plot_experiments requires at least one dataset.")
 
     dataset_kwargs = {
         "kind": kind,
@@ -199,7 +199,7 @@ def build_experiments_spec(
         )
 
     if resolved_mode == "stacked" and stacked_offset <= 0:
-        raise PlotError("plot_comparison in stacked mode requires stacked_offset > 0.")
+        raise PlotError("plot_experiments in stacked mode requires stacked_offset > 0.")
 
     if resolved_mode == "facet":
         panels = []
@@ -257,7 +257,7 @@ def build_experiments_spec(
     elif colorbar is not None and len(datasets) > 1:
         overlay.legends = [experiment_legend(labels)]
 
-    return PlotSpec([overlay], constrained=True)
+    return PlotSpec([overlay])
 
 
 def plot_experiments(
@@ -294,34 +294,3 @@ def plot_experiments(
     )
     # A facet always creates its own figure; ax= only applies to overlay and stacked.
     return render(spec, backend=backend, ax=None if spec.layout == "facet" else ax)
-
-
-def plot_comparison(
-    comparison: ComparisonSet | Sequence[Dataset],
-    *,
-    kind: str | None = None,
-    mode: ComparisonMode = "auto",
-    signal: str | None = None,
-    group_by: str | None = None,
-    max_groups: int = 50,
-    stacked_offset: float = 0.0,
-    ax=None,
-    title: str | None = None,
-    strict: bool = True,
-    backend: Backend | None = None,
-):
-    """Compatibility wrapper for plot_experiments."""
-
-    return plot_experiments(
-        comparison,
-        kind=kind,
-        mode=mode,
-        signal=signal,
-        group_by=group_by,
-        max_groups=max_groups,
-        stacked_offset=stacked_offset,
-        ax=ax,
-        title=title,
-        strict=strict,
-        backend=backend,
-    )

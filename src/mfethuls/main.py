@@ -19,7 +19,7 @@ def _apply_runtime_env_mode(registry_env: str) -> None:
 
     use_test_env()
 
-def mainX(argv: list[str] | None = None):
+def main(argv: list[str] | None = None):
     """Small demo for manual testing of the experiment/Dataset flow.
 
     This function is intentionally simple and prints shapes / metadata rather
@@ -181,11 +181,6 @@ def mainX(argv: list[str] | None = None):
         else:
             print("Created comparison plot in memory. Use --plot-output to save it.")
         plt.close(fig)
-
-def main(argv: list[str] | None = None):
-    """Simple debugging entrypoint."""
-
-    mainX(argv)
 
 if __name__ == "__main__":
     main()

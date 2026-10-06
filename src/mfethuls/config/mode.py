@@ -17,10 +17,6 @@ def is_service_mode() -> bool:
     return get_app_mode() == "service"
 
 
-def is_local_mode() -> bool:
-    return get_app_mode() == "local"
-
-
 def use_test_env() -> None:
     """Point mfethuls at the MFETHULS_TEST_* data, registry and storage from .env.
 

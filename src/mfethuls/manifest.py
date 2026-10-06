@@ -93,7 +93,7 @@ def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[
             + "\nRename one to remove ambiguity."
         )
     if file_matches and dir_matched_folders:
-        file_dir, matched = next(iter(file_matches.items()))
+        matched = next(iter(file_matches.values()))
         raise ValueError(
             f"raw_data_filename {raw_data_filename!r} matches both a file and a directory:\n"
             + "\n".join(f"  {p}" for p in sorted(matched))

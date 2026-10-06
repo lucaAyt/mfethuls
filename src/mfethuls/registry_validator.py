@@ -361,34 +361,6 @@ class RegistryValidator:
         parsers = sorted(_PARSER_REGISTRY.keys())
         return ", ".join(f"({t}, {m})" for t, m in parsers) or "(none)"
 
-    def validate_all(self) -> Tuple[bool, Dict[str, List[str]]]:
-        """Run a diagnostic pass over all registered instruments.
-
-        Returns a tuple (all_valid, detailed_errors_dict).
-        """
-        all_errors: Dict[str, List[str]] = {}
-        for entry in self.config:
-            instr_name = entry.get("name", "unknown")
-            instr_type = entry.get("type", "unknown")
-            instr_model = entry.get("model", "unknown")
-
-            # Check parser registration
-            parser_key = (instr_type, instr_model)
-            if parser_key not in _PARSER_REGISTRY:
-                if instr_name not in all_errors:
-                    all_errors[instr_name] = []
-                all_errors[instr_name].append(
-                    f"No parser for ({instr_type}, {instr_model})"
-                )
-
-            # Check schema existence
-            schema = _load_instrument_schema(instr_type)
-            if not schema:
-                if instr_name not in all_errors:
-                    all_errors[instr_name] = []
-                all_errors[instr_name].append(f"No schema for type '{instr_type}'")
-
-        return len(all_errors) == 0, all_errors
 
 def _check_name_uniqueness(df: pd.DataFrame) -> List[str]:
     """Return error messages for duplicate 'name' values in the registry."""

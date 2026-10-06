@@ -149,55 +149,6 @@ def query_dataset(name: str, limit: Optional[int] = None, offset: int = 0) -> pd
     return pd.DataFrame(rows, columns=cols)
 
 
-def delete_dataset(name: str) -> Dict[str, Any]:
-    # Deletes always go through the API — requires a DuckDB write lock on the server.
-    if mode() == "service":
-        import requests
-        resp = requests.delete(f"{api_url()}/dataset/{name}", headers=api_headers(), timeout=15)
-        resp.raise_for_status()
-        return resp.json()
-
-    from mfethuls.storage import _get_duckdb_path, duckdb_session
-    db_path = _get_duckdb_path()
-    with duckdb_session(db_path=db_path, read_only=False) as backend:
-        backend.remove_dataset(name)
-    return {"deleted": name}
-
-
-# ---------------------------------------------------------------------------
-# Registry preview
-# ---------------------------------------------------------------------------
-
-def preview_registry(
-    file_bytes: Optional[bytes] = None,
-    filename: Optional[str] = None,
-) -> Dict[str, Any]:
-    if mode() == "service":
-        if file_bytes:
-            import requests
-            resp = requests.post(
-                f"{api_url()}/registry/preview",
-                headers=api_headers(),
-                files={"file": (filename or "registry.csv", file_bytes)},
-                timeout=30,
-            )
-            resp.raise_for_status()
-            return resp.json()
-        return _get("/registry/preview")
-
-    from mfethuls.registry_validator import validate_registry_dataframe
-    if file_bytes:
-        from mfethuls.api.utils import read_tabular_content_bytes
-        df = read_tabular_content_bytes(file_bytes)
-    else:
-        from mfethuls.experiments import resolve_registry_path, read_tabular_content
-        path = resolve_registry_path(get_settings().registry_path)
-        df = read_tabular_content(path)
-
-    data_root = get_settings().data_root
-    return validate_registry_dataframe(df, check_data_paths=bool(data_root), data_root=data_root)
-
-
 # ---------------------------------------------------------------------------
 # Ingest
 # ---------------------------------------------------------------------------

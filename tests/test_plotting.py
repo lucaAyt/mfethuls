@@ -12,7 +12,6 @@ from mfethuls import plot_experiments as plot_experiments_root
 from mfethuls.plotting import (
     load_experiments,
     plot_dma,
-    plot_comparison,
     plot_dataset,
     plot_dsc,
     plot_fluorescence,
@@ -574,7 +573,7 @@ def test_load_experiments_label_fallbacks(monkeypatch):
     assert result.labels == ["EXP777", "dataset_2"]
 
 
-def test_plot_comparison_auto_overlay_when_shared_x():
+def test_plot_experiments_auto_overlay_when_shared_x():
     ds1 = Dataset(
         data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
         metadata={"experiment_id": "EXP001"},
@@ -589,7 +588,7 @@ def test_plot_comparison_auto_overlay_when_shared_x():
     assert ax.get_title() == "Comparison Overlay"
 
 
-def test_plot_comparison_auto_facet_when_x_not_compatible():
+def test_plot_experiments_auto_facet_when_x_not_compatible():
     ds1 = Dataset(
         data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
         metadata={"experiment_id": "EXP001"},
@@ -608,7 +607,7 @@ def test_plot_comparison_auto_facet_when_x_not_compatible():
     assert axes[1, 0].get_title() == ""
 
 
-def test_plot_comparison_explicit_overlay_rejects_incompatible_x():
+def test_plot_experiments_explicit_overlay_rejects_incompatible_x():
     ds1 = Dataset(
         data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
         metadata={"experiment_id": "EXP001"},
@@ -622,7 +621,7 @@ def test_plot_comparison_explicit_overlay_rejects_incompatible_x():
         plot_experiments([ds1, ds2], mode="overlay")
 
 
-def test_plot_comparison_explicit_stacked_rejects_incompatible_x():
+def test_plot_experiments_explicit_stacked_rejects_incompatible_x():
     ds1 = Dataset(
         data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
         metadata={"experiment_id": "EXP001"},
@@ -636,7 +635,7 @@ def test_plot_comparison_explicit_stacked_rejects_incompatible_x():
         plot_experiments([ds1, ds2], mode="stacked", stacked_offset=0.5)
 
 
-def test_plot_comparison_stacked_requires_positive_offset():
+def test_plot_experiments_stacked_requires_positive_offset():
     ds1 = Dataset(
         data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
         metadata={"experiment_id": "EXP001"},
@@ -648,20 +647,6 @@ def test_plot_comparison_stacked_requires_positive_offset():
 
     with pytest.raises(PlotError):
         plot_experiments([ds1, ds2], mode="stacked", stacked_offset=0.0)
-
-
-def test_plot_comparison_remains_compatible_alias():
-    ds1 = Dataset(
-        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
-        metadata={"experiment_id": "EXP001"},
-    )
-    ds2 = Dataset(
-        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.15, 0.25, 0.35]}),
-        metadata={"experiment_id": "EXP002"},
-    )
-
-    fig, ax = _close(plot_comparison([ds1, ds2], mode="auto", kind="uv_vis"))
-    assert len(ax.lines) == 2
 
 
 def test_plot_experiments_is_available_from_package_root():

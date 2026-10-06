@@ -42,8 +42,7 @@ class FlameOceanOpticsParser:
         instrument type gives it its meaning (``transmittance_pct`` for
         uv_vis, ``emission_counts`` for fluorescence).
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -53,9 +52,6 @@ class FlameOceanOpticsParser:
             logger=logger,
             parser_label="Flame",
         )
-
-        if experiment_id is None:
-            return df
 
         df, schema_report = apply_dataframe_schema(
             df,
@@ -134,8 +130,7 @@ class ShimadzuUVVisParser:
     ):
         """Parse Shimadzu UV-Vis data.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -145,9 +140,6 @@ class ShimadzuUVVisParser:
             logger=logger,
             parser_label="Shimadzu UV",
         )
-
-        if experiment_id is None:
-            return df
 
         df, schema_report = apply_dataframe_schema(
             df,

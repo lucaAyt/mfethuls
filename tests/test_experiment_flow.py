@@ -11,11 +11,7 @@ from mfethuls.experiments import Experiment
 from mfethuls.experiments import Registry
 from mfethuls.factory import parse_experiment
 from mfethuls.config.loader import load_experiment_dataset
-from mfethuls.storage import (
-    dataset_in_storage,
-    load_dataset_from_storage,
-    save_dataset_to_storage,
-)
+from mfethuls.storage import LocalParquetStorage
 
 _FAKE_EXPERIMENT_ID = "abc123def456"
 
@@ -252,14 +248,15 @@ def test_dataset_storage_roundtrip_uses_temp_folder(monkeypatch):
             },
         )
 
-        parquet_path, meta_path = save_dataset_to_storage(exp, ds)
+        storage = LocalParquetStorage()
+        parquet_path, meta_path = storage.save_dataset(exp, ds)
 
         assert os.path.commonpath([tmpdir, parquet_path]) == os.path.abspath(tmpdir)
         assert os.path.exists(parquet_path)
         assert os.path.exists(meta_path)
-        assert dataset_in_storage(exp)
+        assert storage.dataset_in_storage(exp)
 
-        loaded = load_dataset_from_storage(exp)
+        loaded = storage.load_dataset(exp)
         assert isinstance(loaded, Dataset)
         assert loaded.data.equals(df)
         assert loaded.metadata.get("key") == "value"

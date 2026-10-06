@@ -207,23 +207,18 @@ class DuckDBQueryBackend:
         table_name: Optional[str] = None,
         overwrite: bool = True,
         persist_view: bool = True,
-        experiment_name: Optional[str] = None,
-        raw_data_filename: Optional[str] = None,
         record: Optional[CatalogRecord] = None,
     ) -> str:
         """Create the view for ``storage_path`` and upsert its catalog row.
 
-        Pass ``record`` for a full catalog row; ``experiment_name`` and
-        ``raw_data_filename`` alone give a minimal row (kept for older callers).
+        ``record`` fills the catalog row; without it only the view and path are stored.
         """
 
         if self.read_only:
             raise RuntimeError("Cannot register parquet on a read-only DuckDB connection")
+        fields = record.fields() if record is not None else {}
         if record is not None:
             table_name = table_name or record.table_name
-            fields = record.fields()
-        else:
-            fields = {"experiment_name": experiment_name, "raw_data_filename": raw_data_filename}
         inferred = table_name or os.path.splitext(os.path.basename(storage_path))[0]
         view_name = self._sanitize_table_name(inferred)
         if self._is_s3_uri(storage_path):
