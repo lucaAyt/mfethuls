@@ -125,11 +125,10 @@ sequenceDiagram
   end
 
   Worker->>PG: claim_next_job (FOR UPDATE SKIP LOCKED)
-  Worker->>Worker: clear_experiment_registry()
-  Worker->>Worker: load_experiment_registry(PATH_TO_REGISTRY)
+  Worker->>Worker: Registry.load(job registry snapshot)
 
   loop Each experiment — no DuckDB connection held
-    Worker->>ETL: ingest_experiment_dataset(query_backend=None)
+    Worker->>ETL: ingest_experiment_dataset(registry=..., query_backend=None)
     ETL->>Store: write Parquet file
     ETL->>Store: write .metadata.json sidecar
     ETL->>PG: upsert dataset metadata (optional)
@@ -203,7 +202,7 @@ flowchart TD
 
 | Step | Module |
 |------|--------|
-| Registry load | `experiments.py` — `load_experiment_registry`, `experiment_from_registry_record` |
+| Registry load | `experiments.py` — `Registry.load` / `Registry.from_frame`, `experiment_from_registry_record` |
 | Validation | `registry_validator.py` — `validate_registry_dataframe`, `RegistryValidator` |
 | ID assignment | `manifest.py` — `FileManifestBackend` / `PostgresManifestBackend` |
 | Path resolution | `manifest.py` — `find_data_files()` walks instrument folder by `raw_data_filename` stem |
@@ -278,7 +277,7 @@ Each kind of fact about an experiment has one owner. Everything else is derived 
 | **DuckDB `dataset_registry` (the catalog)** | One row per dataset, written on each ingest from a single `CatalogRecord` (`storage/catalog.py`): experiment, instrument name/type/model, sample, run, canonical measurement profile, row count, storage path. The Streamlit app, the API `/datasets` endpoint and `storage.notebook.list_datasets()` read only the catalog. |
 | Postgres `datasets` (service mode, optional) | A mirror of the same record plus provenance, for SQL across the team |
 
-Catalogs created before this layout get the new columns automatically. Rows without an `experiment_id` are filled from their sidecars the next time the database is opened (any open, read-only included). A changed registry description shows in the catalog after the next ingest of that experiment.
+Catalogs created before this layout get the new columns automatically. Rows without an `experiment_id` are filled from their sidecars the next time the database is opened (any open, read-only included). The registry is read fresh wherever it is needed (nothing is kept between calls), and when a stored dataset is loaded its descriptive fields (description, extra columns, sample/run ids in the data) are taken from the current registry, not the ingest snapshot. Correcting a sample or run id registers the experiment under a new view name; the old catalog row and view are removed, and the old Parquet file is named in a warning but kept on disk.
 
 ---
 
@@ -326,7 +325,7 @@ DuckDB uses an OS-level exclusive file lock for write connections. A read connec
 ```
 src/mfethuls/
   settings.py             # Settings: every environment variable / .env value, read in one place
-  experiments.py          # Registry model, load_experiment_registry, clear_experiment_registry
+  experiments.py          # Experiment and Registry (load, from_frame, get, for_samples, problems)
   registry_validator.py   # Pre-parse validation + profile matching
   manifest.py             # experiment_id assignment + find_data_files (os.walk matcher)
   factory.py              # parse_experiment + instrument_data_path_constructor

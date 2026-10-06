@@ -13,7 +13,7 @@ from mfethuls.factory import (
     create_characterizer,
     parse_experiment as _parse_experiment,
 )
-from mfethuls.experiments import get_experiment
+from mfethuls.experiments import Experiment, Registry
 from mfethuls.storage import (
     AzureBlobParquetStorage,
     CombinedStorageBackend,
@@ -90,6 +90,38 @@ def _resolve_metadata_db_url(db_url: Optional[str]) -> Optional[str]:
     return None
 
 
+# Identifier columns parsers write into every data row.
+_ID_COLUMNS = ("experiment_id", "sample_id", "run_id")
+
+
+def apply_registry_fields(dataset: Dataset, exp: Experiment) -> Dataset:
+    """Overwrite the descriptive fields stored at ingest with the registry's current values.
+
+    The registry owns names, sample/run ids, description and extra columns; the
+    stored metadata is a snapshot from ingest time. Registry values win in
+    ``dataset.metadata`` and in the id columns of the data.
+    """
+
+    current = {
+        "experiment_name": exp.name,
+        "experiment_id": exp.experiment_id,
+        "sample_id": exp.sample_id,
+        "run_id": exp.run_id,
+        "instrument_name": exp.instrument_name,
+        "raw_data_filename": exp.raw_data_filename,
+        **exp.metadata,
+    }
+    dataset.metadata.update(current)
+    for column in _ID_COLUMNS:
+        if column in dataset.data.columns and current[column] is not None:
+            dataset.data[column] = current[column]
+    return dataset
+
+
+def _resolve_experiment(experiment_name: str, registry: Optional[Registry]) -> Experiment:
+    return (registry if registry is not None else Registry.load()).get(experiment_name)
+
+
 def get_cached_dataset(exp, cache_backend, experiment_name: str) -> Optional[Dataset]:
     if cache_backend is None:
         return None
@@ -104,6 +136,7 @@ def get_cached_dataset(exp, cache_backend, experiment_name: str) -> Optional[Dat
         dataset = cache_backend.load_dataset(exp)
         # Datasets stored before time_s was derived during normalization.
         dataset.data = add_elapsed_time(dataset.data)
+        apply_registry_fields(dataset, exp)
         return dataset
 
     return None
@@ -183,8 +216,15 @@ def ingest_experiment_dataset(
     cloud_provider: Optional[str] = None,
     db_url: Optional[str] = None,
     query_backend: "DuckDBQueryBackend | None" = None,
+    registry: Optional[Registry] = None,
 ) -> Optional[dict[str, Any]]:
-    exp = get_experiment(experiment_name)
+    """Parse (or reuse) and store one experiment, register it in the catalog, and report the outcome.
+
+    The experiment is looked up in ``registry``; without one, the registry at
+    ``PATH_TO_REGISTRY`` is read.
+    """
+
+    exp = _resolve_experiment(experiment_name, registry)
 
     if exp.instrument_name is None:
         logger.warning(
@@ -267,8 +307,12 @@ def load_experiment_dataset(
     cloud_provider: Optional[str] = None,
     db_url: Optional[str] = None,
     query_backend: "DuckDBQueryBackend | None" = None,
+    registry: Optional[Registry] = None,
 ) -> Optional[Dataset]:
     """Load and parse data for a given experiment name into a Dataset.
+
+    The experiment is looked up in ``registry``; without one, the registry at
+    ``PATH_TO_REGISTRY`` is read.
 
     This is a high-level helper that ties together the Experiment registry,
     instrument configuration, and the existing parser machinery. It keeps the
@@ -283,7 +327,7 @@ def load_experiment_dataset(
     the DB URL is resolved from Postgres env settings via `get_postgres_db_url`.
     """
 
-    exp = get_experiment(experiment_name)
+    exp = _resolve_experiment(experiment_name, registry)
 
     if exp.instrument_name is None:
         logger.warning(

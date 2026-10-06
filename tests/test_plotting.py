@@ -10,7 +10,7 @@ import pytest
 from mfethuls.dataset import Dataset
 from mfethuls import plot_experiments as plot_experiments_root
 from mfethuls.plotting import (
-    load_comparison_set,
+    load_experiments,
     plot_dma,
     plot_comparison,
     plot_dataset,
@@ -521,7 +521,13 @@ def test_plot_uv_vis_logs_when_inferred_grouping_ties(caplog):
     assert "Grouping inference tie detected" in caplog.text
 
 
-def test_load_comparison_set_preserves_order_and_options(monkeypatch):
+def _dsc_registry(*names):
+    from mfethuls import Registry
+
+    return Registry.from_frame(pd.DataFrame([{"name": name, "instrument_name": "dsc"} for name in names]))
+
+
+def test_load_experiments_preserves_order_and_options(monkeypatch):
     calls = []
 
     def _fake_loader(name, use_storage=True, refresh=False, **kwargs):
@@ -532,10 +538,10 @@ def test_load_comparison_set_preserves_order_and_options(monkeypatch):
             metadata={"experiment_name": f"name_{name}", "experiment_id": name},
         )
 
-    monkeypatch.setattr("mfethuls.comparison.is_experiment_registered", lambda name: True)
     monkeypatch.setattr("mfethuls.comparison.load_experiment_dataset", _fake_loader)
 
-    result = load_comparison_set(["EXP003", "EXP001"], use_storage=False, refresh=True)
+    result = load_experiments(["EXP003", "EXP001"], registry=_dsc_registry("EXP003", "EXP001"),
+                                          use_storage=False, refresh=True)
 
     assert isinstance(result, ComparisonSet)
     assert [ds.experiment_id for ds in result.datasets] == ["EXP003", "EXP001"]
@@ -546,7 +552,7 @@ def test_load_comparison_set_preserves_order_and_options(monkeypatch):
     ]
 
 
-def test_load_comparison_set_label_fallbacks(monkeypatch):
+def test_load_experiments_label_fallbacks(monkeypatch):
     queue = [
         Dataset(
             data=pd.DataFrame({"temperature_C": [25.0], "heat_flow_mW": [0.2]}),
@@ -562,10 +568,9 @@ def test_load_comparison_set_label_fallbacks(monkeypatch):
         _ = name, use_storage, refresh, kwargs
         return queue.pop(0)
 
-    monkeypatch.setattr("mfethuls.comparison.is_experiment_registered", lambda name: True)
     monkeypatch.setattr("mfethuls.comparison.load_experiment_dataset", _fake_loader)
 
-    result = load_comparison_set(["exp_a", "exp_b"])
+    result = load_experiments(["exp_a", "exp_b"], registry=_dsc_registry("exp_a", "exp_b"))
     assert result.labels == ["EXP777", "dataset_2"]
 
 

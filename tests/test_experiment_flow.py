@@ -8,7 +8,7 @@ import pandas as pd
 
 from mfethuls.dataset import Dataset
 from mfethuls.experiments import Experiment
-from mfethuls.experiments import get_experiment, load_experiment_registry
+from mfethuls.experiments import Registry
 from mfethuls.factory import parse_experiment
 from mfethuls.config.loader import load_experiment_dataset
 from mfethuls.storage import (
@@ -120,10 +120,11 @@ def _write_registry(tmpdir: str) -> str:
     return path
 
 
-def test_load_experiment_registry_roundtrip():
+def test_registry_load_roundtrip():
     with tempfile.TemporaryDirectory() as tmpdir:
         registry_path = _write_registry(tmpdir)
-        df_registry = load_experiment_registry(registry_path)
+        registry = Registry.load(registry_path)
+        df_registry = registry.frame
 
         assert "name" in df_registry.columns
         assert "raw_data_filename" in df_registry.columns
@@ -136,7 +137,7 @@ def test_load_experiment_registry_roundtrip():
         assert set(df_registry["name"]) == expected_names
 
 
-def test_load_experiment_registry_defaults_from_path_to_registry(monkeypatch):
+def test_registry_load_defaults_from_path_to_registry(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         registry_path = _write_registry(tmpdir)
         default_registry_path = os.path.join(tmpdir, "experiment_registry.csv")
@@ -145,36 +146,38 @@ def test_load_experiment_registry_defaults_from_path_to_registry(monkeypatch):
         monkeypatch.setenv("PATH_TO_REGISTRY", default_registry_path)
         monkeypatch.setenv("PATH_TO_DATA", "ignored-for-registry-default")
 
-        df_registry = load_experiment_registry()
+        registry = Registry.load()
+
+        df_registry = registry.frame
 
         assert "name" in df_registry.columns
         assert "dsc_test_1" in set(df_registry["name"])
 
 
-def test_load_experiment_registry_infers_measurement_profile_from_description():
+def test_registry_load_infers_measurement_profile_from_description():
     with tempfile.TemporaryDirectory() as tmpdir:
         registry_path = _write_registry(tmpdir)
-        load_experiment_registry(registry_path)
+        registry = Registry.load(registry_path)
 
-        exp = get_experiment("rheometer_test_1")
+        exp = registry.get("rheometer_test_1")
         assert exp.metadata.get("description") == "Oscillatory frequency sweep rheology run"
         assert exp.metadata.get("registry_measurement_profile") == "oscillatory_frequency_sweep"
         assert "measurement_profile" not in exp.metadata
         assert exp.metadata.get("measurement_profile") is None
 
 
-def test_load_experiment_registry_infers_dma_measurement_profile_from_description():
+def test_registry_load_infers_dma_measurement_profile_from_description():
     with tempfile.TemporaryDirectory() as tmpdir:
         registry_path = _write_registry(tmpdir)
-        load_experiment_registry(registry_path)
+        registry = Registry.load(registry_path)
 
-        exp = get_experiment("dma_test_1")
+        exp = registry.get("dma_test_1")
         assert exp.metadata.get("description") == "DMA temperature sweep run"
         assert exp.metadata.get("registry_measurement_profile") == "oscillatory_temperature_sweep"
         assert "measurement_profile" not in exp.metadata
 
 
-def test_load_experiment_registry_explicit_measurement_profile_trumps_inference():
+def test_registry_load_explicit_measurement_profile_trumps_inference():
     with tempfile.TemporaryDirectory() as tmpdir:
         registry_path = os.path.join(tmpdir, "experiments_profile_priority.csv")
         pd.DataFrame(
@@ -191,8 +194,8 @@ def test_load_experiment_registry_explicit_measurement_profile_trumps_inference(
             ]
         ).to_csv(registry_path, index=False)
 
-        load_experiment_registry(registry_path)
-        exp = get_experiment("dma_profile_priority")
+        registry = Registry.load(registry_path)
+        exp = registry.get("dma_profile_priority")
         assert exp.metadata.get("registry_measurement_profile") == "oscillatory_frequency_sweep"
         assert "measurement_profile" not in exp.metadata
 
@@ -203,7 +206,8 @@ def test_load_experiment_dataset_returns_dataset_even_when_missing_files(monkeyp
     with tempfile.TemporaryDirectory() as tmpdir:
         monkeypatch.setenv("PATH_TO_DATA", tmpdir)
         registry_path = _write_registry(tmpdir)
-        df_registry = load_experiment_registry(registry_path)
+        registry = Registry.load(registry_path)
+        df_registry = registry.frame
 
         for row in df_registry.itertuples(index=False):
             name = row.name
@@ -212,7 +216,7 @@ def test_load_experiment_dataset_returns_dataset_even_when_missing_files(monkeyp
                 side_effect=lambda exp, db_url: setattr(exp, "experiment_id", _FAKE_EXPERIMENT_ID) or None,
             ):
                 try:
-                    ds = load_experiment_dataset(name)
+                    ds = load_experiment_dataset(name, registry=registry)
                 except Exception as exc:
                     assert isinstance(exc, (KeyError, FileNotFoundError, OSError))
                 else:
@@ -276,7 +280,7 @@ def test_dataset_storage_roundtrip_uses_temp_folder(monkeypatch):
         assert provenance["source"]["source_files"] == ["run1.txt", "run2.txt"]
 
 
-def test_load_experiment_registry_normalizes_instrument_name_case():
+def test_registry_load_normalizes_instrument_name_case():
     with tempfile.TemporaryDirectory() as tmpdir:
         registry_path = os.path.join(tmpdir, "experiments_case_test.csv")
         pd.DataFrame(
@@ -290,12 +294,12 @@ def test_load_experiment_registry_normalizes_instrument_name_case():
             ]
         ).to_csv(registry_path, index=False)
 
-        load_experiment_registry(registry_path)
-        exp = get_experiment("case_test_1")
+        registry = Registry.load(registry_path)
+        exp = registry.get("case_test_1")
         assert exp.instrument_name == "dsc_mettler_toledo"
 
 
-def test_load_experiment_registry_keeps_placeholder_experiments_without_instrument_data(caplog):
+def test_registry_load_keeps_placeholder_experiments_without_instrument_data(caplog):
     with tempfile.TemporaryDirectory() as tmpdir:
         registry_path = os.path.join(tmpdir, "experiments_placeholder_test.csv")
         pd.DataFrame(
@@ -310,20 +314,20 @@ def test_load_experiment_registry_keeps_placeholder_experiments_without_instrume
             ]
         ).to_csv(registry_path, index=False)
 
-        load_experiment_registry(registry_path)
+        registry = Registry.load(registry_path)
 
-        exp = get_experiment("placeholder_exp")
+        exp = registry.get("placeholder_exp")
         assert exp.instrument_name is None
         assert exp.metadata.get("status") == "registered_only"
 
         with caplog.at_level(logging.WARNING):
-            result = load_experiment_dataset("placeholder_exp")
+            result = load_experiment_dataset("placeholder_exp", registry=registry)
 
         assert result is None
         assert any("has no associated instrument data yet" in message for message in caplog.messages)
 
 
-def test_load_experiment_registry_raw_data_filename_defaults_to_name(caplog):
+def test_registry_load_raw_data_filename_defaults_to_name(caplog):
     with tempfile.TemporaryDirectory() as tmpdir:
         registry_path = os.path.join(tmpdir, "experiments_no_filename.csv")
         pd.DataFrame(
@@ -338,9 +342,9 @@ def test_load_experiment_registry_raw_data_filename_defaults_to_name(caplog):
         ).to_csv(registry_path, index=False)
 
         with caplog.at_level(logging.WARNING):
-            load_experiment_registry(registry_path)
+            registry = Registry.load(registry_path)
 
-        exp = get_experiment("exp_no_filename")
+        exp = registry.get("exp_no_filename")
         assert exp.raw_data_filename == "exp_no_filename"
         assert any("raw_data_filename" in m for m in caplog.messages)
 

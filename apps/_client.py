@@ -231,12 +231,11 @@ def local_ingest(
     registry_path: str,
     refresh: bool = False,
 ) -> List[tuple[str, Dict[str, Any]]]:
-    from mfethuls.experiments import load_experiment_registry, clear_experiment_registry
+    from mfethuls.experiments import Registry
     from mfethuls.config.loader import ingest_experiment_dataset
     from mfethuls.storage import DuckDBQueryBackend, _get_duckdb_path
 
-    clear_experiment_registry()
-    load_experiment_registry(registry_path)
+    registry = Registry.load(registry_path)
     db_path = _get_duckdb_path()
     results = []
     with DuckDBQueryBackend(db_path=db_path, read_only=False) as qb:
@@ -244,7 +243,7 @@ def local_ingest(
             try:
                 result = ingest_experiment_dataset(
                     name, refresh=refresh, storage_mode="local",
-                    cloud_provider=None, db_url=None, query_backend=qb,
+                    cloud_provider=None, db_url=None, query_backend=qb, registry=registry,
                 )
                 results.append((name, result or {}))
             except Exception as exc:

@@ -249,7 +249,29 @@ class DuckDBQueryBackend:
                 """,
                 [view_name, storage_path, *fields.values()],
             )
+            if fields.get("experiment_id"):
+                self._remove_superseded(fields["experiment_id"], keep=view_name)
         return view_name
+
+    def _remove_superseded(self, experiment_id: str, *, keep: str) -> None:
+        """Drop older catalog rows and views of the same experiment under another name.
+
+        The view and file names include sample and run, so correcting either in
+        the registry registers the experiment under a new name. The old Parquet
+        file is user data and stays on disk; it is named in a warning.
+        """
+
+        stale = self._conn.execute(
+            "SELECT table_name, storage_path FROM dataset_registry WHERE experiment_id = ? AND table_name <> ?;",
+            [experiment_id, keep],
+        ).fetchall()
+        for table_name, old_path in stale:
+            self.remove_dataset(table_name)
+            logger.warning(
+                "Experiment %s is now registered as %r; removed the old catalog entry %r. "
+                "Its file %s is no longer used and can be deleted.",
+                experiment_id, keep, table_name, old_path,
+            )
 
     def list_registered(self) -> List[Dict[str, Any]]:
         """All catalog rows, newest first, as dictionaries of every column."""

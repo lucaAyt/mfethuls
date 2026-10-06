@@ -6,7 +6,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from .config.loader import ingest_experiment_dataset
-from .experiments import clear_experiment_registry, get_experiment, load_experiment_registry
+from .experiments import Registry
 from .storage.job_store import claim_next_job, get_job, update_job
 from .settings import get_settings
 from .storage import DuckDBQueryBackend, get_postgres_db_url
@@ -29,12 +29,10 @@ def process_job(job_id: str) -> Optional[Dict[str, Any]]:
     try:
         logger.info("job_id=%s starting ingest", job_id)
         update_job(job_id, status="running", progress=5, message="reading registry")
-        clear_experiment_registry()
-        df = load_experiment_registry()
-
-        # Get list of registered experiment names
-        experiment_names = df["name"].dropna().tolist()
-        experiment_names = [str(name) for name in experiment_names]
+        # The job's registry snapshot holds exactly the rows selected for this job.
+        registry = Registry.load(job_registry_path)
+        df = registry.frame
+        experiment_names = [str(name) for name in df["name"].dropna().tolist()]
         if not experiment_names:
             raise ValueError("load_experiments requires at least one experiment name.")
 
@@ -55,6 +53,7 @@ def process_job(job_id: str) -> Optional[Dict[str, Any]]:
             cloud_provider=cloud_provider,
             db_url=get_postgres_db_url(),
             refresh=bool(job.get("refresh", False)),
+            registry=registry,
         )
     except Exception as exc:  # pragma: no cover - worker level catch
         logger.exception("job_id=%s ingest failed", job_id)
@@ -70,6 +69,7 @@ def _process_job_ingest(
     cloud_provider: Optional[str],
     db_url: Optional[str],
     refresh: bool = False,
+    registry: Optional[Registry] = None,
 ) -> Dict[str, Any]:
     dataset_results: List[Dict[str, Any]] = []
     # Collect Parquet paths during parsing; DuckDB registration happens in one
@@ -82,7 +82,8 @@ def _process_job_ingest(
         try:
             if not experiment_name:
                 raise ValueError("missing experiment name")
-            exp = get_experiment(experiment_name)
+            registry = registry if registry is not None else Registry.load(job_registry_path)
+            exp = registry.get(experiment_name)
             logger.info(
                 "job_id=%s row=%d/%d processing experiment_id=%s instrument=%s",
                 job_id,
@@ -103,6 +104,7 @@ def _process_job_ingest(
                 cloud_provider=cloud_provider,
                 db_url=db_url,
                 query_backend=None,
+                registry=registry,
             )
             status = (result or {}).get("status", "skipped")
             storage_path = (result or {}).get("storage_path")

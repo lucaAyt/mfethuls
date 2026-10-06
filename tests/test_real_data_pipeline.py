@@ -10,9 +10,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from mfethuls import experiments as experiments_module
 from mfethuls.config.loader import load_experiment_dataset
-from mfethuls.experiments import load_experiment_registry
+from mfethuls.experiments import Registry
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
 EXAMPLE_NAMES = pd.read_csv(EXAMPLES_DIR / "experiments_registry.csv")["name"].tolist()
@@ -34,9 +33,6 @@ def examples_config(tmp_path, monkeypatch):
     monkeypatch.setenv("MFETHULS_MODE", "local")
     monkeypatch.setenv("MFETHULS_DISABLE_STORAGE", "0")
     monkeypatch.delenv("MFETHULS_DUCKDB_PATH", raising=False)
-    monkeypatch.setattr(experiments_module, "_EXPERIMENT_REGISTRY", {})
-
-    load_experiment_registry(str(registry_path))
     return data_root, registry_path, local_storage
 
 
@@ -44,10 +40,11 @@ def test_examples_registry_loads(examples_config):
     """Every example row is valid and registered."""
 
     _, registry_path, _ = examples_config
-    df_registry = load_experiment_registry(str(registry_path))
+    registry = Registry.load(str(registry_path))
 
-    assert {"name", "instrument_name", "raw_data_filename"}.issubset(df_registry.columns)
-    assert all(experiments_module.is_experiment_registered(name) for name in EXAMPLE_NAMES)
+    assert {"name", "instrument_name", "raw_data_filename"}.issubset(registry.frame.columns)
+    assert registry.names == EXAMPLE_NAMES
+    assert not [problem for problem in registry.problems if problem.skipped]
 
 
 @pytest.mark.parametrize("name", EXAMPLE_NAMES)

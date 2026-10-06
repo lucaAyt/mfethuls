@@ -328,11 +328,11 @@ with st.sidebar.expander("Ingest", expanded=False):
         experiment_names: list[str] = []
         if registry_path:
             try:
-                from mfethuls.experiments import load_experiment_registry
+                from mfethuls.experiments import Registry
 
                 @st.cache_data(show_spinner=False)
                 def _load_reg(path: str) -> pd.DataFrame:
-                    return load_experiment_registry(path)
+                    return Registry.load(path).frame
 
                 exp_df = _load_reg(registry_path)
                 experiment_names = (
