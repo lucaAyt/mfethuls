@@ -6,7 +6,6 @@ Entry point:
 from __future__ import annotations
 
 import io
-import os
 import threading
 import time
 
@@ -28,6 +27,7 @@ from mfethuls.plotting.backend import render
 from mfethuls.plotting.labels import axis_label, legend_name, shared_axis_label
 from mfethuls.plotting.spec import Colorbar, Panel, Trace
 from mfethuls.schema_normalization import add_elapsed_time
+from mfethuls.settings import get_settings
 
 st.set_page_config(page_title="mfethuls", layout="wide", page_icon="🧪")
 
@@ -321,7 +321,7 @@ with st.sidebar.expander("Ingest", expanded=False):
     if client.mode() == "local":
         registry_path = st.text_input(
             "Experiment registry path",
-            value=os.environ.get("PATH_TO_REGISTRY", ""),
+            value=get_settings().registry_path or "",
         )
         refresh_ingest = st.checkbox("Re-parse even if cached", value=False)
 
@@ -533,7 +533,7 @@ with st.sidebar.expander("Query", expanded=False):
 # MAIN CONTENT
 # ===========================================================================
 
-selected_names = [label_to_name[l] for l in selected_labels] if selected_labels else []
+selected_names = [label_to_name[label] for label in selected_labels] if selected_labels else []
 
 if not selected_names:
     st.info("Select one or more experiments from the **Datasets** sidebar to begin.")

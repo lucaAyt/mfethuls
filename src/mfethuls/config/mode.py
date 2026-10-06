@@ -3,24 +3,14 @@
 from __future__ import annotations
 
 import logging
-import os
 
-from dotenv import load_dotenv
+from ..settings import configure, get_settings
 
 logger = logging.getLogger(__name__)
 
-_TEST_ENV_VARS = {
-    "MFETHULS_TEST_DATA_ROOT": "PATH_TO_DATA",
-    "MFETHULS_TEST_REGISTRY": "PATH_TO_REGISTRY",
-    "MFETHULS_TEST_LOCAL_STORAGE": "PATH_TO_LOCAL_STORAGE",
-}
-
 
 def get_app_mode() -> str:
-    value = (os.environ.get("MFETHULS_MODE") or "local").strip().lower()
-    if value in {"service", "server"}:
-        return "service"
-    return "local"
+    return get_settings().mode
 
 
 def is_service_mode() -> bool:
@@ -36,17 +26,10 @@ def use_test_env() -> None:
 
     Call before loading any data. Restart the session to switch back.
     A test variable that is not set is skipped with a warning, so the matching
-    runtime variable keeps its normal value.
+    runtime path keeps its normal value. The environment itself is not changed.
     """
 
-    load_dotenv()
-    for test_key, runtime_key in _TEST_ENV_VARS.items():
-        value = os.environ.get(test_key)
-        if not value:
-            logger.warning(
-                "use_test_env: %s is not set; %s keeps its current value.",
-                test_key,
-                runtime_key,
-            )
-            continue
-        os.environ[runtime_key] = value
+    settings, missing = get_settings().with_test_paths()
+    for variable in missing:
+        logger.warning("use_test_env: %s is not set; the runtime path keeps its current value.", variable)
+    configure(settings)

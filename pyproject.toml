@@ -1,6 +1,6 @@
 [project]
 name = "mfethuls"
-version = "0.1.2"
+version = "0.1.3"
 description = "Composable framework for lab instrument data parsing, characterization and analysis for python people in labs."
 authors = [{name = "Luca Bertossi", email = "lucabertossi@gmail.com"}]
 readme = "README.md"
@@ -46,8 +46,18 @@ service = [
     "uvicorn>=0.30.0",
 ]
 dev = [
+    "httpx>=0.27.0",
     "pytest>=9.0.3",
+    "ruff>=0.6.0",
 ]
+
+[tool.ruff]
+line-length = 120
+extend-exclude = ["notebooks", "__marimo__"]
+
+[tool.ruff.lint]
+# Errors only (syntax, undefined names, unused imports); no style rules.
+select = ["E4", "E7", "E9", "F"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

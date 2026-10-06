@@ -9,6 +9,7 @@ import os
 import pandas as pd
 
 from .registry_validator import RegistryValidator
+from .settings import get_settings
 
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ def resolve_registry_path(path: Optional[str] = None) -> str:
     if path:
         return os.path.abspath(path)
 
-    registry_path = os.environ.get("PATH_TO_REGISTRY")
+    registry_path = get_settings().registry_path
     if registry_path:
         return os.path.abspath(registry_path)
 

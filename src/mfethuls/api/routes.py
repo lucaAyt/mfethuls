@@ -17,8 +17,8 @@ from fastapi.responses import JSONResponse
 from ..config.mode import is_service_mode
 from ..registry_validator import validate_registry_dataframe
 from ..experiments import resolve_registry_path, read_tabular_content
+from ..settings import get_settings
 from ..storage.job_store import create_job, get_job as get_job_record, list_jobs as list_job_records
-from .schemas import QueryRequest
 from .utils import duckdb_session, get_api_storage_root, read_tabular_content_bytes
 
 router = APIRouter()
@@ -47,10 +47,10 @@ async def registry_preview(file: UploadFile | None = File(None)) -> Dict[str, An
     if file:
         df = await _read_registry_upload_async(file)
     else:
-        registry_path = resolve_registry_path(os.environ.get("PATH_TO_REGISTRY"))
+        registry_path = resolve_registry_path(get_settings().registry_path)
         df = read_tabular_content(registry_path)
 
-    data_root = os.environ.get("PATH_TO_DATA")
+    data_root = get_settings().data_root
     return validate_registry_dataframe(
         df,
         check_data_paths=bool(data_root),
@@ -69,14 +69,14 @@ async def ingest(
     """Start ingestion job. Registry must exist at PATH_TO_REGISTRY on the server."""
 
     _ensure_service_mode()
-    registry_path = resolve_registry_path(os.environ.get("PATH_TO_REGISTRY"))
+    registry_path = resolve_registry_path(get_settings().registry_path)
     df = read_tabular_content(registry_path)
 
     if experiments:
         names = [n.strip() for n in experiments.split(",") if n.strip()]
         df = df[df["name"].isin(names)].reset_index(drop=True)
 
-    data_root = os.environ.get("PATH_TO_DATA")
+    data_root = get_settings().data_root
     validation = validate_registry_dataframe(
         df,
         check_data_paths=bool(data_root),
@@ -159,14 +159,14 @@ async def get_job(job_id: str) -> Dict[str, Any]:
 async def list_datasets() -> List[Dict[str, Any]]:
     _ensure_service_mode()
     with duckdb_session(read_only=True) as backend:
+        # Every catalog column (experiment, instrument, sample, run, profile, rows).
         return [
             {
+                **row,
                 "dataset_id": row["table_name"],
                 "name": row["table_name"],
                 "storage_mode": "local",
                 "queryable": True,
-                "storage_path": row["storage_path"],
-                "registered_at": row["registered_at"],
             }
             for row in backend.list_registered()
         ]

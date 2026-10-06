@@ -1,7 +1,5 @@
 import os
 
-from dotenv import load_dotenv
-
 from mfethuls.parsers import get_parser
 from mfethuls.instruments.generic import GenericInstrument
 from mfethuls.characterizers.dsc import DSCProfiling
@@ -9,18 +7,16 @@ from mfethuls.characterizers.tga import TGACharacterizer
 from mfethuls.dataset import Dataset
 from mfethuls.experiments import Experiment
 from mfethuls.registry_validator import RegistryValidator, RegistryValidationError
-
-# Load environment variables from .env
-load_dotenv()
+from mfethuls.settings import get_settings
 
 
-# Prefer explicit folder name from config/instrument_params.json. Fallback is .env 
+# Prefer explicit folder name from config/instrument_params.json; fallback is a
+# <TYPE>_FOLDER_NAME variable, then the instrument type itself.
 def get_data_root_path(folder_name=None, instrument_type=None):
-    data_root = os.environ.get("PATH_TO_DATA")
+    settings = get_settings()
     if folder_name:
-        return os.path.join(data_root, folder_name)
-    env_key = f'{instrument_type.upper()}_FOLDER_NAME'
-    return os.path.join(data_root, os.environ.get(env_key, instrument_type))
+        return os.path.join(settings.data_root, folder_name)
+    return os.path.join(settings.data_root, settings.instrument_folders.get(instrument_type.lower(), instrument_type))
 
 
 def instrument_data_path_constructor(path, *args):

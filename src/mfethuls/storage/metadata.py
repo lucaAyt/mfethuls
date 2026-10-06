@@ -8,15 +8,15 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from .config import _get_package_version
+from .types import DatasetMetadata, MetadataBackend
+
 
 def _get_create_engine():
     import sys
 
     storage_module = sys.modules.get("mfethuls.storage")
     return getattr(storage_module, "create_engine", create_engine)
-
-from .config import _get_package_version
-from .types import DatasetMetadata, MetadataBackend
 
 
 class PostgresMetadataBackend(MetadataBackend):

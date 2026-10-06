@@ -1,4 +1,3 @@
-import os
 
 from mfethuls.storage import S3ParquetStorage
 

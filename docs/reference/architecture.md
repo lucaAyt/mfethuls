@@ -250,7 +250,7 @@ flowchart LR
   end
 
   subgraph duckdb [DuckDB — MFETHULS_DUCKDB_PATH]
-    REGT[dataset_registry table\ntable_name, storage_path, experiment_name, registered_at]
+    REGT[dataset_registry — the catalog\nexperiment, instrument, sample, run,\nprofile, rows, storage_path]
     V1["VIEW named after experiment\ne.g. CL_dsc_001_S001_R001"]
     REGT --> V1
   end
@@ -264,7 +264,21 @@ flowchart LR
   P1 -.->|optional| DATASETS
 ```
 
-**Parquet files are the source of truth.** DuckDB views are derived from them and can be rebuilt at any time by re-registering. The `dataset_registry` table inside DuckDB is the only mutable state that is hard to reconstruct — everything else (Parquet, Postgres metadata) survives a DuckDB file deletion.
+**Parquet files are the source of truth for measurements.** DuckDB views are derived from them and can be rebuilt at any time by re-registering.
+
+### Who owns which metadata
+
+Each kind of fact about an experiment has one owner. Everything else is derived from it and never edited by hand:
+
+| Owner | Holds |
+|---|---|
+| Registry CSV/XLSX | Descriptive fields: name, instrument, sample, run, measurement profile, description, extra columns |
+| Manifest (`.mfethuls_manifest.json`, or the Postgres `experiments` table in service mode) | Identity: `experiment_id` ↔ (instrument, raw file) |
+| Parquet + `.metadata.json` sidecar | Measurements; the sidecar records what was true at parse time (parser, schema version, schema report) |
+| **DuckDB `dataset_registry` (the catalog)** | One row per dataset, written on each ingest from a single `CatalogRecord` (`storage/catalog.py`): experiment, instrument name/type/model, sample, run, canonical measurement profile, row count, storage path. The Streamlit app, the API `/datasets` endpoint and `storage.notebook.list_datasets()` read only the catalog. |
+| Postgres `datasets` (service mode, optional) | A mirror of the same record plus provenance, for SQL across the team |
+
+Catalogs created before this layout get the new columns automatically. Rows without an `experiment_id` are filled from their sidecars the next time the database is opened (any open, read-only included). A changed registry description shows in the catalog after the next ingest of that experiment.
 
 ---
 
@@ -311,6 +325,7 @@ DuckDB uses an OS-level exclusive file lock for write connections. A read connec
 
 ```
 src/mfethuls/
+  settings.py             # Settings: every environment variable / .env value, read in one place
   experiments.py          # Registry model, load_experiment_registry, clear_experiment_registry
   registry_validator.py   # Pre-parse validation + profile matching
   manifest.py             # experiment_id assignment + find_data_files (os.walk matcher)
@@ -329,7 +344,8 @@ src/mfethuls/
   storage/
     backends.py           # Local, S3, Azure Parquet backends
     config.py             # _dataset_basename, _view_basename helpers
-    duckdb_backend.py     # DuckDB catalog — register, query, remove datasets
+    catalog.py            # CatalogRecord — the one dataset row written to the catalog (and Postgres)
+    duckdb_backend.py     # DuckDB catalog — register, query, remove datasets; migrates and backfills older catalogs
     metadata.py           # PostgresMetadataBackend
     job_store.py          # Postgres job queue (FIFO, FOR UPDATE SKIP LOCKED)
     manager.py            # StorageManager composition layer

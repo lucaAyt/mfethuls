@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from typing import Any, Dict, List, Optional
 
+from ..settings import get_settings
 from . import get_postgres_db_url
 
 try:
@@ -17,7 +17,7 @@ _SCHEMA_READY = False
 
 
 def _get_job_db_url() -> str:
-    url = os.environ.get("MFETHULS_JOB_DB_URL") or get_postgres_db_url()
+    url = get_settings().postgres.job_db_url or get_postgres_db_url()
     if not url:
         raise RuntimeError("Postgres is required for the job store. Set MFETHULS_JOB_DB_URL or enable MFETHULS_POSTGRES_*. ")
     return url
