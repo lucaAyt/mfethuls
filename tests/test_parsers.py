@@ -1,3 +1,6 @@
+import shutil
+from pathlib import Path
+
 import pytest
 import pandas as pd
 
@@ -227,3 +230,29 @@ def test_dma_parser_subset_measurement_profile_maps_to_canonical(monkeypatch):
     # Registry value "frequency sweep" should be canonicalized to "oscillatory_frequency_sweep"
     assert dataset.metadata.get("registry_measurement_profile") == "frequency sweep"
     assert dataset.metadata.get("measurement_profile") == "oscillatory_frequency_sweep"
+
+
+EXAMPLE_DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
+
+
+@pytest.mark.parametrize(
+    "key,example,renamed",
+    [
+        (("dsc", "mettler_toledo"), "DSC/poly1.txt", "test.txt"),
+        (("tga", "tgaX"), "TGA/poly1.txt", "test.txt"),
+        (("ftir", "bruker"), "FTIR/poly1.csv", "spec.csv"),
+    ],
+)
+def test_parser_name_keeps_full_file_stem(tmp_path, key, example, renamed):
+    """The name column is the file stem, not the name with extension characters stripped.
+
+    ``"test.txt".rstrip(".txt")`` gives ``"tes"`` and ``"spec.csv".rstrip(".csv")``
+    gives ``"spe"``, which these file names would expose.
+    """
+    path = tmp_path / renamed
+    shutil.copy(EXAMPLE_DATA / example, path)
+
+    df = get_parser(*key).parse_raw_data(str(path))
+
+    assert set(df["name"]) == {path.stem}
+

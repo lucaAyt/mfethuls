@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -126,6 +127,6 @@ class DmaTaQ800:
 
         # Make up columns by combining 1st and 2nd lines
         df = pd.DataFrame(lines, columns=column_names).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
-        df.loc[:, 'name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
+        df.loc[:, 'name'] = [f'{Path(path).stem}'] * df.shape[0]
 
         return df

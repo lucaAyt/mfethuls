@@ -6,7 +6,7 @@ from typing import Any, Optional, Tuple
 import matplotlib.pyplot as plt
 
 from ..dataset import Dataset
-from .style import apply_axes_style
+from .style import apply_axes_style, new_figure
 
 
 LOGGER = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ class PlotError(ValueError):
 def _figure_and_axis(ax=None):
     if ax is not None:
         return ax.figure, ax
-    fig, new_ax = plt.subplots()
+    fig, new_ax = new_figure()
     return fig, new_ax
 
 
@@ -354,6 +354,7 @@ def plot_dataset(
             ax=ax,
             title=title,
             strict=strict,
+            linestyle=kwargs.get("linestyle", "-"),
         )
     if resolved_kind == "ms":
         return plot_ms(

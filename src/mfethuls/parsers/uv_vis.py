@@ -1,6 +1,7 @@
 import os
 import logging
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -87,7 +88,7 @@ class FlameOceanOpticsParser:
 
     def parse_raw_data(self, path):
         # Get milliseconds from timestamp in filename if data was saved with timestamp suffix
-        filenname_suffix = os.path.basename(path).split('_')[-1].rstrip(self.file_extension)
+        filenname_suffix = Path(path).stem.split('_')[-1]
         milliseconds = timedelta(milliseconds=float(filenname_suffix.split('-')[-1])) if '-' in filenname_suffix \
             else timedelta(0)
 
@@ -181,7 +182,7 @@ class ShimadzuUVVisParser:
         df = pd.read_csv(path, header=1, sep='\t').apply(pd.to_numeric, errors='coerce')
 
         # Additional 'meta' data: You can use underscore for titration meta data. Delete post if not needed in output
-        titrant_info = os.path.basename(os.path.normpath(path)).split('_')[-1].rstrip(self.file_extension).lstrip('0')
+        titrant_info = Path(path).stem.split('_')[-1].lstrip('0')
         df.loc[:, 'titrant'] = titrant_info if not titrant_info == '' else '0'  # I DNA
         df.loc[:, 'name'] = [f'{os.path.basename(os.path.dirname(path))}'] * df.shape[0]
 

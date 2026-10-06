@@ -3,6 +3,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+from matplotlib.legend import Legend
 import pandas as pd
 import pytest
 
@@ -76,6 +77,39 @@ def test_plot_uv_vis_rejects_fluorescence_data():
         plot_uv_vis(dataset)
 
 
+def test_builtin_plots_have_transparent_background():
+    dataset = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.4, 0.2]}),
+        metadata={"experiment_id": "EXP001"},
+    )
+
+    fig, ax = _close(plot_uv_vis(dataset))
+    assert fig.patch.get_alpha() == 0.0
+    assert ax.get_facecolor()[3] == 0.0
+
+
+def test_facet_figure_height_scales_with_panel_count():
+    def _dataset(name, x, y):
+        return Dataset(
+            data=pd.DataFrame({x: [1.0, 2.0, 3.0], y: [0.1, 0.2, 0.3]}),
+            metadata={"experiment_id": name, "experiment_name": name},
+        )
+
+    datasets = [
+        _dataset("a", "wavelength_nm", "absorbance_a_u"),
+        _dataset("b", "wavenumber_cm_inv", "transmittance_pct"),
+        _dataset("c", "temperature_C", "heat_flow_mW"),
+    ]
+
+    fig_two, _ = _close(plot_experiments(datasets[:2], mode="facet"))
+    fig_three, _ = _close(plot_experiments(datasets, mode="facet"))
+
+    width_two, height_two = fig_two.get_size_inches()
+    width_three, height_three = fig_three.get_size_inches()
+    assert width_two == width_three
+    assert height_three / height_two == pytest.approx(3 / 2)
+
+
 def test_plot_dsc_uses_canonical_columns():
     dataset = Dataset(
         data=pd.DataFrame({"temperature_C": [25, 50, 75], "heat_flow_mW": [0.0, 1.2, 0.8]}),
@@ -130,7 +164,7 @@ def test_plot_dsc_omits_cycle_boundary_labels_from_legend():
     )
 
     fig, ax = _close(plot_dsc(dataset))
-    assert len(ax.lines) == 3
+    assert len(ax.lines) == 1  # boundary segments are not drawn
     legend = ax.get_legend()
     assert legend is not None
     legend_labels = [text.get_text() for text in legend.get_texts()]
@@ -139,7 +173,7 @@ def test_plot_dsc_omits_cycle_boundary_labels_from_legend():
 
 
 def test_plot_dsc_omits_boundary_profiles_in_comparison_overlay():
-    """Verify DSC boundary profiles (_nolegend_ markers) remain suppressed in comparison overlays."""
+    """Verify DSC boundary profiles are neither drawn nor listed in comparison overlays."""
     ds1 = Dataset(
         data=pd.DataFrame(
             {
@@ -182,20 +216,43 @@ def test_plot_dsc_omits_boundary_profiles_in_comparison_overlay():
     )
 
     fig, ax = _close(plot_experiments([ds1, ds2], mode="overlay", kind="dsc"))
-    # Should have 6 lines (3 from each dataset: "Heating start", "Heating", "Cooling end")
-    # But only "Heating" should appear in legend (start and end are _nolegend_)
-    assert len(ax.lines) == 6
-    legend = ax.get_legend()
-    assert legend is not None
-    legend_labels = [text.get_text() for text in legend.get_texts()]
-    # Should only contain the two "Heating" profiles (one per dataset), not boundary profiles
-    assert "EXP_DSC_A | Heating" in legend_labels
-    assert "EXP_DSC_B | Heating" in legend_labels
-    # Should NOT contain blank labels or boundary profiles
-    assert "" not in legend_labels
-    assert not any("start" in label for label in legend_labels)
-    assert not any("end" in label for label in legend_labels)
-    assert len(legend_labels) == 2  # Only the two "Heating" profiles
+    # Only the "Heating" segment of each dataset is drawn; "start"/"end" boundaries are skipped
+    assert len(ax.lines) == 2
+    # Two legends: segments (colour) and experiments (line style)
+    legends = [artist for artist in ax.artists if isinstance(artist, Legend)] + [ax.get_legend()]
+    texts = {legend.get_title().get_text(): [t.get_text() for t in legend.get_texts()] for legend in legends}
+    assert texts == {"Segment": ["Heating"], "Experiment": ["EXP_DSC_A", "EXP_DSC_B"]}
+
+    # Same segment colour for both experiments, different line styles
+    assert ax.lines[0].get_color() == ax.lines[1].get_color()
+    assert ax.lines[0].get_linestyle() != ax.lines[1].get_linestyle()
+
+
+def test_plot_dsc_colours_segments_by_type_and_cycle():
+    dataset = Dataset(
+        data=pd.DataFrame(
+            {
+                "temperature_C": list(range(12)),
+                "heat_flow_mW": [0.1] * 12,
+                "profile": ["Isothermal_0"] * 2 + ["Heating_0"] * 2 + ["Cooling_0"] * 2
+                + ["Heating_start"] * 2 + ["Heating_1"] * 2 + ["Cooling_1"] * 2,
+            }
+        ),
+        metadata={"experiment_id": "EXP_DSC_C"},
+    )
+
+    fig, ax = _close(plot_dsc(dataset))
+    colors = {line.get_label(): line.get_color() for line in ax.lines}
+
+    assert "Heating_start" not in colors
+    # Later cycles get a darker shade of the same colour
+    for early, late in [("Heating_0", "Heating_1"), ("Cooling_0", "Cooling_1")]:
+        assert sum(colors[late][:3]) < sum(colors[early][:3])
+    # Heating is red-dominant, cooling blue-dominant, isothermal grey
+    assert colors["Heating_1"][0] > colors["Heating_1"][2]
+    assert colors["Cooling_1"][2] > colors["Cooling_1"][0]
+    r, g, b, _ = colors["Isothermal_0"]
+    assert max(r, g, b) - min(r, g, b) < 0.01
 
 
 def test_plot_ftir_chooses_absorbance_and_reverses_axis():

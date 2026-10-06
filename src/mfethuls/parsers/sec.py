@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -82,7 +83,7 @@ class AgilentSec:
     def parse_raw_data(self, path):
         df = pd.read_csv(path, sep=self.delimiter, names=['time (min)', 'value'], header=None) \
                .apply(pd.to_numeric, errors='coerce')
-        name = f'{os.path.basename(os.path.normpath(path)).casefold().rstrip(self.file_extension)}'.replace('.dx_', '_')
+        name = f'{Path(path).stem.casefold()}'.replace('.dx_', '_')
         detector_name = self._infer_detector_name(path)
         df.loc[:, 'name'] = [name] * df.shape[0]
         df.loc[:, 'detector_name'] = [detector_name] * df.shape[0]

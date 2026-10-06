@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -88,7 +89,7 @@ class BrukerMS:
                .reset_index(drop=True) \
                .dropna(axis=0, how='any')
                
-        name = f'{os.path.basename(os.path.normpath(path)).casefold().rstrip(self.file_extension)}'
+        name = f'{Path(path).stem.casefold()}'
         df.loc[:, 'name'] = [name] * df.shape[0]
 
         peak_mz = self._read_peak_mz_from_raw_file(path)

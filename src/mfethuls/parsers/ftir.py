@@ -1,5 +1,6 @@
 import os
 import logging
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -80,6 +81,6 @@ class BrukerFTIRParser:
 
     def parse_raw_data(self, path):
         df = pd.read_csv(path, skiprows=lambda x: x in [0, 0], sep=self.delimiter).astype(float)
-        df.loc[:, 'name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
+        df.loc[:, 'name'] = [f'{Path(path).stem}'] * df.shape[0]
 
         return df

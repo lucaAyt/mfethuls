@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -113,14 +114,14 @@ class TGAXParser:
                 return pd.DataFrame(columns=cols)
 
             df = pd.DataFrame(lines[1:], columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
-            df["name"] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
+            df["name"] = [f'{Path(path).stem}'] * df.shape[0]
             
             # Calculate mass percentage as not in original data
             _calculate_mass_percentage(df, weight_column="Weight [mg]")
         
         else:
             
-            filename = f'{os.path.basename(os.path.normpath(path)).rstrip(".csv")}'
+            filename = f'{Path(path).stem}'
             df = pd.read_csv(path).assign(name=filename)
             _calculate_mass_percentage(df)
             logger.warning(f"Parsed CSV file:\n{df}")

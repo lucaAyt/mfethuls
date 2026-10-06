@@ -3,16 +3,20 @@ from __future__ import annotations
 import logging
 from typing import Literal, Sequence
 
-import matplotlib.pyplot as plt
-
 from ..dataset import Dataset
 from ..comparison import ComparisonSet
 from .core import PlotError, _resolve_plot_kind, plot_dataset
+from .dsc import DSC_EXPERIMENT_LINESTYLES, add_dsc_overlay_legend
+from .style import new_figure
 
 
 LOGGER = logging.getLogger(__name__)
 
 ComparisonMode = Literal["auto", "overlay", "stacked", "facet"]
+
+# Facet figure size in inches: fixed width for inline display, fixed height per panel.
+_FACET_WIDTH_IN = 7.0
+_FACET_PANEL_HEIGHT_IN = 2.8
 
 
 def _label_for_dataset(dataset: Dataset, index: int) -> str:
@@ -202,7 +206,13 @@ def plot_experiments(
         raise PlotError("plot_comparison in stacked mode requires stacked_offset > 0.")
 
     if resolved_mode == "facet":
-        fig, axes = plt.subplots(len(datasets), 1, squeeze=False)
+        fig, axes = new_figure(
+            len(datasets),
+            1,
+            squeeze=False,
+            figsize=(_FACET_WIDTH_IN, _FACET_PANEL_HEIGHT_IN * len(datasets)),
+            layout="constrained",
+        )
         flat_axes = list(axes.ravel())
         for idx, (dataset, label) in enumerate(zip(datasets, labels)):
             plot_dataset(
@@ -212,8 +222,6 @@ def plot_experiments(
             )
             flat_axes[idx].set_title("")
 
-        if len(flat_axes) > 1:
-            fig.subplots_adjust(hspace=0.45)
         if title:
             fig.suptitle(title)
         return fig, axes
@@ -221,14 +229,20 @@ def plot_experiments(
     if ax is not None:
         fig, axis = ax.figure, ax
     else:
-        fig, axis = plt.subplots()
+        fig, axis = new_figure(layout="constrained")
+
+    # DSC overlays: colour shows the segment, line style shows the experiment.
+    all_dsc = all(resolved == "dsc" for resolved in resolved_kinds)
 
     for idx, (dataset, label) in enumerate(zip(datasets, labels)):
         start = len(axis.lines)
+        overlay_kwargs = dict(dataset_kwargs)
+        if all_dsc:
+            overlay_kwargs["linestyle"] = DSC_EXPERIMENT_LINESTYLES[idx % len(DSC_EXPERIMENT_LINESTYLES)]
         plot_dataset(
             dataset,
             ax=axis,
-            **dataset_kwargs,
+            **overlay_kwargs,
         )
 
         # TODO: x-axis being reverted back after stacking NMR plots
@@ -240,7 +254,10 @@ def plot_experiments(
 
     axis.set_title(title or ("Comparison Stacked" if resolved_mode == "stacked" else "Comparison Overlay"))
     if axis.lines:
-        axis.legend()
+        if all_dsc:
+            add_dsc_overlay_legend(axis, labels)
+        else:
+            axis.legend()
     if shared_x:
         axis.set_xlabel(shared_x)
 
