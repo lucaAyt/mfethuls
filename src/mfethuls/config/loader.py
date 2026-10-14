@@ -25,7 +25,8 @@ from mfethuls.storage import (
 )
 from mfethuls.storage.catalog import CatalogRecord
 from mfethuls.config.mode import is_service_mode
-from mfethuls.manifest import get_manifest_backend
+from mfethuls.manifest import content_hash, get_manifest_backend
+from mfethuls.parsers.registry import reads
 from mfethuls.schema_normalization import add_elapsed_time
 from mfethuls.settings import get_settings
 
@@ -195,17 +196,39 @@ def persist_dataset(
     return parquet_path, meta_path, dataset_id
 
 
+def _manifest_backend(db_url: Optional[str]):
+    return get_manifest_backend(data_root=get_settings().data_root, db_url=_resolve_metadata_db_url(db_url))
+
+
 def _assign_experiment_id(exp, db_url: Optional[str]) -> None:
     """Assign experiment_id from the manifest backend (creates on first ingest)."""
-    data_root = get_settings().data_root
-    resolved_db_url = _resolve_metadata_db_url(db_url)
-    backend = get_manifest_backend(data_root=data_root, db_url=resolved_db_url)
+    backend = _manifest_backend(db_url)
     raw_filename = exp.raw_data_filename or exp.name
     exp.experiment_id = backend.get_or_create_experiment_id(
         instrument_name=exp.instrument_name,
         raw_data_filename=raw_filename,
         experiment_name=exp.name,
     )
+
+
+def _data_files(instrument, files: list[str], experiment_name: str) -> list[str]:
+    """The files the instrument's parser reads; others next to the data (plots, notes) are skipped."""
+    data = [f for f in files if reads(instrument.parser, f)]
+    skipped = [os.path.basename(f) for f in files if f not in data]
+    if skipped:
+        logger.warning("Experiment %r: not reading %s (not data for %s).",
+                       experiment_name, ", ".join(skipped), instrument.name)
+    return data
+
+
+def _record_content_hash(exp, raw_filename: str, files: list[str], db_url: Optional[str]) -> None:
+    """Store the hash of the raw files just parsed on the experiment's manifest entry."""
+    if files:
+        _manifest_backend(db_url).record_content_hash(
+            instrument_name=exp.instrument_name,
+            raw_data_filename=raw_filename,
+            content_hash=content_hash(files),
+        )
 
 
 def ingest_experiment_dataset(
@@ -278,9 +301,10 @@ def ingest_experiment_dataset(
         ) from exc
 
     # Remap from {raw_data_filename: files} → {experiment_id: files} for parsers
-    dict_data_paths = {exp.experiment_id: raw_dict.get(raw_filename, [])}
+    dict_data_paths = {exp.experiment_id: _data_files(instrument, raw_dict.get(raw_filename, []), experiment_name)}
 
     dataset = _parse_experiment(exp, dict_data_paths, instrument)
+    _record_content_hash(exp, raw_filename, dict_data_paths[exp.experiment_id], db_url)
     parquet_path, _, dataset_id = persist_dataset(
         exp,
         dataset,
@@ -369,10 +393,11 @@ def load_experiment_dataset(
             f"is not present in the current instrument configuration."
         ) from exc
 
-    dict_data_paths = {exp.experiment_id: raw_dict.get(raw_filename, [])}
+    dict_data_paths = {exp.experiment_id: _data_files(instrument, raw_dict.get(raw_filename, []), experiment_name)}
 
     # Delegate parsing + Dataset construction to the factory helper.
     dataset = _parse_experiment(exp, dict_data_paths, instrument)
+    _record_content_hash(exp, raw_filename, dict_data_paths[exp.experiment_id], db_url)
 
     # Persist to local storage for future fast loading, and optionally persist
     # metadata to Postgres via StorageManager. Never fail the call if

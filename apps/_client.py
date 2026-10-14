@@ -109,6 +109,8 @@ def list_datasets() -> List[Dict[str, Any]]:
         from mfethuls.storage import duckdb_session
         with duckdb_session(db_path=db_path, read_only=True) as backend:
             return [_normalise_dataset(r) for r in backend.list_registered()]
+    if mode() == "local":
+        return []  # nothing ingested yet; there is no API to ask in local mode
     return [_normalise_dataset(r) for r in _get("/datasets")]
 
 
@@ -152,6 +154,26 @@ def query_dataset(name: str, limit: Optional[int] = None, offset: int = 0) -> pd
 # ---------------------------------------------------------------------------
 # Ingest
 # ---------------------------------------------------------------------------
+
+@st.cache_data(show_spinner=False, ttl=600)
+def registry_frame(path: str) -> pd.DataFrame:
+    """The registry table at ``path`` (cached; cleared when rows are added)."""
+    from mfethuls.experiments import Registry
+    return Registry.load(path).frame
+
+
+@st.cache_data(show_spinner=False, ttl=600)
+def count_new_data(registry_path: str, data_root: str) -> int:
+    """How many items under ``data_root`` the registry does not describe yet (cached)."""
+    from mfethuls.discovery import discover_unregistered
+    from mfethuls.experiments import Registry
+    return sum(1 for item in discover_unregistered(Registry.load(registry_path), data_root) if not item.issue)
+
+
+def clear_registry_caches() -> None:
+    registry_frame.clear()
+    count_new_data.clear()
+
 
 def list_registry_experiments() -> List[str]:
     """Return experiment names from the server-side registry (via /registry/preview)."""

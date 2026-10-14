@@ -25,6 +25,8 @@ Your goal: get these into mfethuls, compare the heat flow curves, and extract th
 
 ## Step 1 — Add experiments to the registry
 
+> **Shortcut:** once the app is running (step 2), the **Ingest** section in the sidebar lists raw data that is not in the registry yet. **Review & register** proposes the rows (instrument, file name, run) and only asks for what the files can't tell, such as the sample. See [Registering new data from the app](../reference/registry.md#registering-new-data-from-the-app). The steps below show the manual route.
+
 Open `experiments_template.csv` (included in the repo root) in Excel. Delete the placeholder rows and add your two experiments:
 
 ```

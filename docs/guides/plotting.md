@@ -70,6 +70,7 @@ fig, ax = plot_ftir(dataset, signal="transmittance_pct")
 
 When a dataset holds several curves on the same x values (e.g. a series of spectra), mfethuls finds the column that separates them and draws one line per value, or you can name it with `group_by=`.
 
+- An experiment made of several files (a titration, a series) has a `source_file` column, so each file is its own line, labelled by file name.
 - Up to 10 lines: a normal legend.
 - More than 10 lines of a **numeric** column (e.g. `time_s`): a continuous colour bar instead of a legend. Overlays of several such experiments share one colour bar and use line style to mark the experiment.
 

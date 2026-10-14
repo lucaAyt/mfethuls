@@ -40,9 +40,12 @@ class PostgresMetadataBackend(MetadataBackend):
             registry_measurement_profile TEXT,
             raw_registry_row JSONB,
             registered_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+            content_hash TEXT,
             UNIQUE (instrument_name, raw_data_filename)
         );
         """
+        # Tables created before content_hash existed.
+        add_content_hash = "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS content_hash TEXT;"
 
         create_datasets = """
         CREATE TABLE IF NOT EXISTS datasets (
@@ -90,6 +93,7 @@ class PostgresMetadataBackend(MetadataBackend):
 
         with self.engine.connect() as conn:
             conn.execute(text(create_experiments))
+            conn.execute(text(add_content_hash))
             conn.execute(text(create_datasets))
             conn.commit()
 

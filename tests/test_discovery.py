@@ -1,0 +1,313 @@
+"""Finding raw data that the registry does not describe yet."""
+
+from pathlib import Path
+
+import pandas as pd
+
+from mfethuls import Registry
+from mfethuls.discovery import REGISTRY_COLUMNS, discover_unregistered, proposed_rows
+
+DSC_MODELS = ["dsc", "dsc_perkin_elmer", "dsc_mettler_toledo", "dsc_default"]
+
+
+def _touch(path: Path, text: str = "data") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf8")
+    return path
+
+
+def _registry(*rows: dict) -> Registry:
+    return Registry.from_frame(pd.DataFrame(list(rows), columns=["name", "instrument_name", "raw_data_filename"]))
+
+
+def _items(tmp_path, registry=None):
+    return {item.key: item for item in discover_unregistered(registry or _registry(), str(tmp_path))}
+
+
+def test_top_level_files_are_found_unless_registered_for_that_instrument(tmp_path):
+    _touch(tmp_path / "DSC" / "poly1.txt")
+    _touch(tmp_path / "DSC" / "poly2.txt")
+    _touch(tmp_path / "TGA" / "poly1.txt")
+    registry = _registry({"name": "LB_dsc_001", "instrument_name": "dsc_mettler_toledo", "raw_data_filename": "poly1"})
+
+    # poly1 is registered for DSC only; the TGA file of the same name is still new.
+    assert set(_items(tmp_path, registry)) == {"DSC/poly2", "TGA/poly1"}
+
+
+def test_shared_folder_offers_every_instrument_and_single_instrument_is_prefilled(tmp_path):
+    _touch(tmp_path / "DSC" / "poly1.txt")
+    _touch(tmp_path / "TGA" / "poly1.txt")
+    items = _items(tmp_path)
+
+    rows = proposed_rows(items.values(), _registry()).set_index("_folder")
+
+    assert items["DSC/poly1"].instruments == DSC_MODELS
+    assert pd.isna(rows.loc["DSC", "instrument_name"])
+    assert rows.loc["TGA", "instrument_name"] == "tga"
+
+
+def test_run_files_in_a_subfolder_default_to_one_row_per_file(tmp_path):
+    _touch(tmp_path / "DSC" / "poly1" / "poly1_run2.txt")
+    _touch(tmp_path / "DSC" / "poly1" / "poly1_run1.txt")
+    (item,) = _items(tmp_path).values()
+
+    assert item.layout == "folder" and item.split_by_default
+    assert list(item.runs) == ["poly1_run1", "poly1_run2"]
+
+    rows = proposed_rows([item], _registry())
+    assert rows[["raw_data_filename", "run_id", "_folder"]].values.tolist() == [
+        ["poly1_run1", "R001", "DSC/poly1"],
+        ["poly1_run2", "R002", "DSC/poly1"],
+    ]
+
+    whole = proposed_rows([item], _registry(), split=set())
+    assert whole[["raw_data_filename", "run_id"]].values.tolist() == [["poly1", "R001"]]
+
+
+def test_series_folder_defaults_to_one_experiment(tmp_path):
+    for i in range(3):
+        _touch(tmp_path / "Fluorescence" / "poly3" / f"poly3__{i}.txt")
+    _touch(tmp_path / "NMR" / "EXP015" / "1" / "fid")
+    _touch(tmp_path / "NMR" / "EXP015" / "1" / "pdata" / "1" / "1r")
+    items = _items(tmp_path)
+
+    assert set(items) == {"Fluorescence/poly3", "NMR/EXP015"}  # Bruker subfolders are not experiments
+    assert not items["Fluorescence/poly3"].split_by_default
+    assert len(items["Fluorescence/poly3"].files) == 3
+
+    rows = proposed_rows(items.values(), _registry()).set_index("raw_data_filename")
+    assert rows.loc["poly3", "instrument_name"] == "fluorescence_insitu"
+    assert rows.loc["EXP015", "instrument_name"] == "nmr"
+
+
+def test_uv_vis_single_spectrum_and_titration_folder(tmp_path):
+    _touch(tmp_path / "UV_Vis" / "compoundA.txt")
+    for step in ("step01", "step02", "step03"):
+        _touch(tmp_path / "UV_Vis" / "titration_A" / f"{step}.txt")
+    items = _items(tmp_path)
+
+    single, titration = items["UV_Vis/compoundA"], items["UV_Vis/titration_A"]
+    assert single.layout == "file" and single.suggested == "uv_vis"
+    # A folder in UV_Vis is kept whole by default (the Flame records series) ...
+    assert titration.layout == "folder" and not titration.split_by_default
+    assert titration.suggested == "uv_insitu"
+    rows = proposed_rows(items.values(), _registry())
+    assert sorted(rows["raw_data_filename"]) == ["compoundA", "titration_A"]
+
+    # ... but can still be registered one spectrum per row, on the Shimadzu.
+    per_file = proposed_rows([titration], _registry(), split={"UV_Vis/titration_A"})
+    assert per_file[["raw_data_filename", "instrument_name", "run_id"]].values.tolist() == [
+        ["step01", "uv_vis", "R001"],
+        ["step02", "uv_vis", "R002"],
+        ["step03", "uv_vis", "R003"],
+    ]
+
+
+def test_ignores_hidden_parquet_manifest_and_other_extensions(tmp_path):
+    _touch(tmp_path / "DSC" / ".hidden.txt")
+    _touch(tmp_path / "DSC" / "cached.parquet")
+    _touch(tmp_path / "DSC" / ".gitkeep")
+    _touch(tmp_path / "DSC" / "notes.docx")
+    _touch(tmp_path / "DSC" / ".cache" / "poly9.txt")
+    _touch(tmp_path / ".mfethuls_manifest.json")
+
+    assert _items(tmp_path) == {}
+
+
+def test_same_name_in_two_folders_cannot_be_registered_per_file(tmp_path):
+    _touch(tmp_path / "DSC" / "2025" / "poly1.txt")
+    _touch(tmp_path / "DSC" / "2025" / "poly3.txt")
+    _touch(tmp_path / "DSC" / "2026" / "poly1.txt")
+    _touch(tmp_path / "DSC" / "2026" / "poly2.txt")
+    items = _items(tmp_path)
+
+    assert "several folders" in items["DSC/2025"].run_issues["poly1"]
+    rows = proposed_rows(items.values(), _registry())
+    assert sorted(rows["raw_data_filename"]) == ["poly2", "poly3"]  # poly1 is left out in both folders
+    # Registering the folders whole is still possible.
+    assert sorted(proposed_rows(items.values(), _registry(), split=set())["raw_data_filename"]) == ["2025", "2026"]
+
+
+def test_top_level_file_with_a_namesake_in_a_subfolder_is_reported(tmp_path):
+    _touch(tmp_path / "TGA" / "poly1.txt")
+    _touch(tmp_path / "TGA" / "old" / "poly1.txt")
+    items = _items(tmp_path)
+
+    assert "several folders" in items["TGA/poly1"].issue
+    assert proposed_rows(items.values(), _registry()).empty
+
+
+def test_folder_around_a_single_file_is_proposed_as_that_file(tmp_path):
+    _touch(tmp_path / "DSC" / "LUB055" / "LUB055.txt")
+    items = _items(tmp_path)
+
+    assert set(items) == {"DSC/LUB055"}
+    assert items["DSC/LUB055"].layout == "file"
+    assert list(proposed_rows(items.values(), _registry())["raw_data_filename"]) == ["LUB055"]
+
+
+def test_run_named_like_its_folder_is_registered_by_file_name(tmp_path):
+    _touch(tmp_path / "DSC" / "LUB055" / "LUB055.txt")
+    _touch(tmp_path / "DSC" / "LUB055" / "LUB055_b.txt")
+    items = _items(tmp_path)
+
+    rows = proposed_rows(items.values(), _registry())  # DSC folders split per file by default
+    assert rows[["name", "raw_data_filename"]].values.tolist() == [["LUB055", "LUB055.txt"], ["LUB055_b", "LUB055_b"]]
+    whole = proposed_rows(items.values(), _registry(), split=set())
+    assert list(whole["raw_data_filename"]) == ["LUB055"]
+
+    # Once registered by file name, that run is not proposed again.
+    registry = _registry({"name": "LUB055", "instrument_name": "dsc", "raw_data_filename": "LUB055.txt"})
+    assert list(_items(tmp_path, registry)["DSC/LUB055"].runs) == ["LUB055_b"]
+
+
+def test_files_no_instrument_reads_are_ignored_and_listed(tmp_path):
+    _touch(tmp_path / "DSC" / "LUB055" / "LUB055.txt")
+    _touch(tmp_path / "DSC" / "LUB055" / "LUB055_plot.svg")
+    _touch(tmp_path / "DSC" / "batch" / "poly1.txt")
+    _touch(tmp_path / "DSC" / "batch" / "poly2.csv")  # DSC parsers that read .csv make this data
+    _touch(tmp_path / "DSC" / "batch" / "notes.docx")
+    _touch(tmp_path / "DSC" / "poly3.txt")
+    _touch(tmp_path / "DSC" / "poly3.png")
+    _touch(tmp_path / "DSC" / "plots" / "overview.svg")  # no data at all: not proposed
+    items = _items(tmp_path)
+
+    assert set(items) == {"DSC/LUB055", "DSC/batch", "DSC/poly3"}
+    assert items["DSC/LUB055"].layout == "file"  # the plot does not make it a multi-file folder
+    assert items["DSC/LUB055"].ignored == [str(Path("LUB055") / "LUB055_plot.svg")]
+    assert list(items["DSC/batch"].runs) == ["poly1", "poly2"]
+    assert items["DSC/batch"].ignored == [str(Path("batch") / "notes.docx")]
+    assert items["DSC/poly3"].ignored == ["poly3.png"]
+    assert not any(item.issue for item in items.values())
+
+
+def test_registered_folders_and_runs_are_skipped(tmp_path):
+    _touch(tmp_path / "Fluorescence" / "poly3" / "a.txt")
+    _touch(tmp_path / "DSC" / "poly1" / "poly1_run1.txt")
+    _touch(tmp_path / "DSC" / "poly1" / "poly1_run2.txt")
+    registry = _registry(
+        {"name": "fl", "instrument_name": "fluorescence_insitu", "raw_data_filename": "poly3"},
+        {"name": "run1", "instrument_name": "dsc", "raw_data_filename": "poly1_run1"},
+    )
+    items = _items(tmp_path, registry)
+
+    assert set(items) == {"DSC/poly1"}
+    assert list(items["DSC/poly1"].runs) == ["poly1_run2"]
+
+
+def test_invalid_and_placeholder_rows_still_count_as_registered(tmp_path):
+    _touch(tmp_path / "DSC" / "typo_row.txt")
+    _touch(tmp_path / "DSC" / "placeholder.txt")
+    registry = _registry(
+        {"name": "typo_row", "instrument_name": "dsc_no_such_model", "raw_data_filename": None},
+        {"name": "placeholder", "instrument_name": None, "raw_data_filename": None},
+    )
+    assert [p.name for p in registry.problems if p.skipped] == ["typo_row"]
+
+    # The placeholder row covers its file; the misspelt instrument is not a DSC model.
+    assert set(_items(tmp_path, registry)) == {"DSC/typo_row"}
+
+
+def test_proposed_names_are_unique_and_columns_follow_the_registry(tmp_path):
+    _touch(tmp_path / "TGA" / "poly1.txt")
+    _touch(tmp_path / "FTIR" / "poly1.csv")
+    registry = Registry.from_frame(
+        pd.DataFrame([{"name": "poly1", "instrument_name": "dsc", "raw_data_filename": "other", "operator": "LB"}])
+    )
+
+    rows = proposed_rows(discover_unregistered(registry, str(tmp_path)), registry)
+
+    assert sorted(rows["name"]) == ["poly1_2", "poly1_3"]
+    assert list(rows.columns) == REGISTRY_COLUMNS + ["operator", "_folder", "_modified"]
+
+
+def _proposals_for(tmp_path, registry):
+    return proposed_rows(discover_unregistered(registry, str(tmp_path)), registry)
+
+
+def test_validate_proposed_requires_instrument_and_found_data(tmp_path):
+    from mfethuls.discovery import validate_proposed
+
+    _touch(tmp_path / "DSC" / "poly2.txt")
+    registry = _registry()
+    rows = _proposals_for(tmp_path, registry)
+
+    (missing_instrument,) = validate_proposed(registry, rows, str(tmp_path))
+    assert not missing_instrument["valid"]
+    assert any(e["message"] == "Choose the instrument." for e in missing_instrument["errors"])
+
+    rows.loc[0, "instrument_name"] = "dsc_mettler_toledo"
+    (ready,) = validate_proposed(registry, rows, str(tmp_path))
+    assert ready["valid"], ready["errors"]
+
+    rows.loc[0, "raw_data_filename"] = "not_on_disk"
+    (missing_data,) = validate_proposed(registry, rows, str(tmp_path))
+    assert any(e["field"] == "data_path" for e in missing_data["errors"])
+
+
+def test_validate_proposed_checks_against_existing_rows_and_bad_ids(tmp_path):
+    from mfethuls.discovery import validate_proposed
+
+    _touch(tmp_path / "TGA" / "poly2.txt")
+    registry = _registry({"name": "poly2", "instrument_name": "dsc", "raw_data_filename": "other"})
+    rows = _proposals_for(tmp_path, registry)
+    rows.loc[0, "name"] = "poly2"  # clashes with the existing row
+    rows.loc[0, "sample_id"] = "S1"  # malformed
+
+    (result,) = validate_proposed(registry, rows, str(tmp_path))
+
+    messages = " ".join(e["message"] for e in result["errors"])
+    assert "'poly2' is used by more than one row" in messages
+    assert "Invalid sample_id: 'S1'" in messages
+
+
+def test_folder_whose_runs_are_all_registered_is_not_new(tmp_path):
+    _touch(tmp_path / "DSC" / "polyX" / "polyX_run1.txt")
+    _touch(tmp_path / "DSC" / "polyX" / "polyX_run2.txt")
+    registry = _registry(
+        {"name": "r1", "instrument_name": "dsc", "raw_data_filename": "polyX_run1"},
+        {"name": "r2", "instrument_name": "dsc", "raw_data_filename": "polyX_run2"},
+    )
+
+    assert _items(tmp_path, registry) == {}
+
+
+def _aged(path: Path, days_old: float) -> Path:
+    import os
+    import time
+
+    stamp = time.time() - days_old * 86400
+    os.utime(path, (stamp, stamp))
+    return path
+
+
+def _filter_fixture(tmp_path):
+    _aged(_touch(tmp_path / "DSC" / "old_run.txt"), 90)
+    _aged(_touch(tmp_path / "TGA" / "recent.txt"), 2)
+    _aged(_touch(tmp_path / "DSC" / "projectA" / "chitosan_run1.txt"), 10)
+    _aged(_touch(tmp_path / "DSC" / "projectA" / "chitosan_run2.txt"), 12)
+    return discover_unregistered(_registry(), str(tmp_path))
+
+
+def test_filter_new_data_without_filters_returns_everything_newest_first(tmp_path):
+    from mfethuls.discovery import filter_new_data
+
+    items = filter_new_data(_filter_fixture(tmp_path))
+
+    assert [item.key for item in items] == ["TGA/recent", "DSC/projectA", "DSC/old_run"]
+
+
+def test_filter_new_data_by_age_folder_and_text(tmp_path):
+    from datetime import datetime, timedelta
+
+    from mfethuls.discovery import filter_new_data
+
+    items = _filter_fixture(tmp_path)
+    month_ago = datetime.now() - timedelta(days=30)
+
+    assert [i.key for i in filter_new_data(items, modified_since=month_ago)] == ["TGA/recent", "DSC/projectA"]
+    assert [i.key for i in filter_new_data(items, folders={"DSC"})] == ["DSC/projectA", "DSC/old_run"]
+    # Matches a file inside the subfolder, case-insensitively.
+    assert [i.key for i in filter_new_data(items, text="CHITOSAN")] == ["DSC/projectA"]
+    assert [i.key for i in filter_new_data(items, text="run")] == ["DSC/projectA", "DSC/old_run"]
+    assert filter_new_data(items, folders={"DSC"}, modified_since=month_ago, text="old") == []

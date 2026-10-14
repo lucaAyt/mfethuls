@@ -19,6 +19,9 @@ LOGGER = logging.getLogger(__name__)
 # otherwise a viridis-shaded legend.
 _MAX_LEGEND_GROUPS = 10
 
+# Columns that, in a series, label the same files as time_s does.
+_SERIES_LABELS = {"timestamp", "source_file"}
+
 __all__ = ["PlotError", "build_dataset_spec", "plot_dataset"]
 
 
@@ -109,10 +112,10 @@ def _resolve_grouping_column(
     if best_column is None or best_score <= 0:
         return None
 
-    # time_s is derived from timestamp (see add_elapsed_time), so they always tie;
-    # the numeric one can drive a continuous colour scale.
-    if {"timestamp", "time_s"} <= set(tied_best_columns):
-        tied_best_columns.remove("timestamp")
+    # In a series, timestamp, source_file and time_s label the same files, so they tie;
+    # time_s (derived from timestamp) is numeric and can drive a continuous colour scale.
+    if "time_s" in tied_best_columns:
+        tied_best_columns = [c for c in tied_best_columns if c not in _SERIES_LABELS]
         best_column = tied_best_columns[0]
 
     if len(tied_best_columns) > 1:

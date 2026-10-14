@@ -7,7 +7,7 @@ import pandas as pd
 
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.ingestion import collect_dataframe_from_paths
-from mfethuls.parsers.registry import register_parser
+from mfethuls.parsers.registry import reads, register_parser
 from mfethuls.schema_normalization import apply_dataframe_schema
 
 
@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 @register_parser('tga', 'tgaX')
 class TGAXParser:
+    extra_extensions = ('.csv',)
+
     def __init__(self, file_extension='.txt', delimiter='\s+'):
         self.file_extension = file_extension
         self.delimiter = delimiter
@@ -44,7 +46,7 @@ class TGAXParser:
             parse_raw=self.parse_raw_data,
             logger=logger,
             parser_label="TGA",
-            should_parse_raw=lambda path: str(path).casefold().endswith(self.file_extension.casefold()) or str(path).casefold().endswith('.csv'),
+            should_parse_raw=lambda path: reads(self, path),
         )
 
         df, schema_report = apply_dataframe_schema(

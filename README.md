@@ -104,6 +104,7 @@ docker compose up --build -d
 **Workflow in the Streamlit dashboard:**
 
 1. **Ingest sidebar → Sync from OneDrive** — pulls raw data and registry via rclone
+   - **New data found → Review & register** — rows proposed from the raw files, validated as you type; download them to add to the OneDrive registry (in local mode they are saved to the registry directly)
 2. **Select experiments** — multiselect from the registry
 3. **Ingest experiments** — live progress bar polls until done
 4. **Datasets sidebar** — select experiments to preview, filter, and plot. Plots use every data point by default.

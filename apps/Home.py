@@ -6,6 +6,7 @@ Entry point:
 from __future__ import annotations
 
 import io
+import os
 import threading
 import time
 
@@ -21,6 +22,7 @@ import streamlit as st
 from plotly.colors import convert_colors_to_same_type
 
 import _client as client
+from _register import register_dialog
 from mfethuls.dataset import Dataset
 from mfethuls.plotting import PlotError, PlotSpec, build_experiments_spec, plotly_config
 from mfethuls.plotting.backend import render
@@ -293,6 +295,46 @@ def _finite_bounds(values: pd.Series):
     return lo, hi
 
 
+def _new_data_prompt(registry_path: str, *, service_mode: bool) -> None:
+    """Sidebar note about unregistered raw data, opening the "Register new data" dialog."""
+    data_root = get_settings().data_root
+    if not data_root or not os.path.exists(registry_path):
+        return
+    message = st.session_state.pop("register_message", None)
+    if message:
+        st.success(message)
+    try:
+        count = client.count_new_data(registry_path, data_root)
+    except Exception as exc:
+        st.caption(f"Could not scan the data folder: {exc}")
+        return
+    if count:
+        st.info(f"**{count}** new data item{'s' if count != 1 else ''} found in the data folder.")
+    open_col, rescan_col = st.columns([3, 1], vertical_alignment="bottom")
+    if open_col.button("Review & register", icon=":material/playlist_add:", disabled=not count, width="stretch"):
+        register_dialog(
+            registry_path, data_root, service_mode=service_mode,
+            on_saved=lambda names, ingest: _after_register(registry_path, names, ingest),
+        )
+    if rescan_col.button("", icon=":material/refresh:", help="Scan the data folder again", width="stretch"):
+        client.count_new_data.clear()
+        st.rerun()
+
+
+def _after_register(registry_path: str, names: list[str], ingest: bool) -> None:
+    """Refresh after rows were added to the registry, and ingest them if asked."""
+    client.clear_registry_caches()
+    message = f"Added {len(names)} experiment{'s' if len(names) != 1 else ''} to the registry."
+    if ingest:
+        with st.spinner(f"Ingesting {len(names)} experiment(s)…"):
+            results = client.local_ingest(names, registry_path)
+        failed = [name for name, result in results if result.get("status") == "error"]
+        message += f" Ingested {len(names) - len(failed)}." + (f" Failed: {', '.join(failed)}." if failed else "")
+        client.list_datasets.clear()
+        client.query_dataset.clear()
+    st.session_state["register_message"] = message
+
+
 def _storage_label(path: str) -> str:
     return "☁️ cloud" if path.startswith(("s3://", "az://", "https://")) else "📁 local"
 
@@ -327,14 +369,9 @@ with st.sidebar.expander("Ingest", expanded=False):
 
         experiment_names: list[str] = []
         if registry_path:
+            _new_data_prompt(registry_path, service_mode=False)
             try:
-                from mfethuls.experiments import Registry
-
-                @st.cache_data(show_spinner=False)
-                def _load_reg(path: str) -> pd.DataFrame:
-                    return Registry.load(path).frame
-
-                exp_df = _load_reg(registry_path)
+                exp_df = client.registry_frame(registry_path)
                 experiment_names = (
                     exp_df.get("name", pd.Series(dtype=str))
                     .dropna()
@@ -388,8 +425,13 @@ with st.sidebar.expander("Ingest", expanded=False):
                 try:
                     client.trigger_sync()
                     st.session_state["registry_experiments"] = client.list_registry_experiments()
+                    client.clear_registry_caches()
                 except Exception as exc:
                     st.error(f"Sync failed: {exc}")
+
+        # The registry belongs to OneDrive: the dialog offers new rows as a download only.
+        if get_settings().registry_path:
+            _new_data_prompt(get_settings().registry_path, service_mode=True)
 
         refresh_ingest = st.checkbox("Re-ingest even if cached", value=False)
 

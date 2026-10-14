@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Iterator, List, Optional
 
+import csv
 import logging
 import os
+import shutil
+from copy import copy
 
 import pandas as pd
 
@@ -161,14 +164,18 @@ def experiment_from_registry_record(rec: dict) -> RegistryRowResult:
     if measurement_profile is not None:
         metadata["registry_measurement_profile"] = measurement_profile
 
-    exp = Experiment(
-        name=name,
-        instrument_name=instrument_name,
-        raw_data_filename=raw_data_filename,
-        sample_id=sample_id,
-        run_id=run_id,
-        metadata=metadata,
-    )
+    try:
+        exp = Experiment(
+            name=name,
+            instrument_name=instrument_name,
+            raw_data_filename=raw_data_filename,
+            sample_id=sample_id,
+            run_id=run_id,
+            metadata=metadata,
+        )
+    except ValueError as exc:  # malformed sample_id / run_id
+        errors.append(str(exc))
+        return RegistryRowResult(experiment=None, errors=errors, warnings=warnings)
     return RegistryRowResult(experiment=exp, errors=errors, warnings=warnings)
 
 
@@ -333,3 +340,88 @@ class Registry:
     def __repr__(self) -> str:
         source = self.path or "table"
         return f"Registry({source!r}, {len(self)} experiments, {len(self.problems)} problems)"
+
+
+def _cell(value: Any) -> Any:
+    """A value as written to the registry file: missing values become empty cells."""
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return value
+
+
+def _append_csv(path: str, rows: pd.DataFrame, target: str) -> None:
+    # Existing lines are copied as text so their values keep their exact format.
+    with open(path, encoding="utf-8-sig", newline="") as handle:
+        existing = list(csv.reader(handle))
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    bom = raw.startswith(b"\xef\xbb\xbf")
+    line_end = "\r\n" if b"\r\n" in raw else "\n"  # keep the file's own line endings
+    header = existing[0] if existing else []
+    header = header + [column for column in rows.columns if column not in header]
+    with open(target, "w", encoding="utf-8-sig" if bom else "utf-8", newline="") as handle:
+        writer = csv.writer(handle, lineterminator=line_end)
+        writer.writerow(header)
+        for line in existing[1:]:
+            writer.writerow(line + [""] * (len(header) - len(line)))
+        for record in rows.to_dict(orient="records"):
+            writer.writerow(["" if _cell(record.get(column)) is None else record[column] for column in header])
+
+
+def _append_xlsx(path: str, rows: pd.DataFrame, target: str) -> None:
+    # openpyxl edits the workbook in place: formatting, widths and other sheets are kept.
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(path)
+    sheet = workbook.worksheets[0]  # the sheet Registry.load reads
+    header = [cell.value for cell in sheet[1]]
+    while header and header[-1] is None:
+        header.pop()
+    for column in rows.columns:
+        if column not in header:
+            header.append(column)
+            new_cell = sheet.cell(row=1, column=len(header), value=column)
+            if len(header) > 1:
+                new_cell.font = copy(sheet.cell(row=1, column=len(header) - 1).font)
+    for record in rows.to_dict(orient="records"):
+        sheet.append([_cell(record.get(column)) for column in header])
+    workbook.save(target)
+
+
+def append_rows(path: Optional[str], rows: pd.DataFrame) -> "Registry":
+    """Append ``rows`` to the registry file at ``path`` (default ``PATH_TO_REGISTRY``).
+
+    Existing rows and columns are kept as they are; columns the file lacks are added
+    at the end, and helper columns starting with ``_`` are dropped. The previous
+    version is kept next to the file as ``<name>.bak<ext>``. The new file is written
+    to a temporary file first and swapped in, so a failure leaves the registry
+    unchanged. Returns the reloaded registry.
+    """
+
+    path = resolve_registry_path(path)
+    rows = rows[[column for column in rows.columns if not str(column).startswith("_")]]
+    base, ext = os.path.splitext(path)
+    writers = {".csv": _append_csv, ".xlsx": _append_xlsx}
+    if ext.lower() not in writers:
+        raise ValueError(f"Cannot add rows to {path!r}: only .csv and .xlsx registries can be written.")
+
+    temporary = f"{base}.tmp{ext}"
+    try:
+        writers[ext.lower()](path, rows, temporary)
+        shutil.copy2(path, f"{base}.bak{ext}")
+        os.replace(temporary, path)
+    except PermissionError as exc:
+        raise PermissionError(
+            f"Could not save {os.path.basename(path)}: it is open in another program. "
+            "Close it (e.g. in Excel) and save again. The registry was not changed."
+        ) from exc
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
+    logger.info("Added %d row(s) to the registry at %s", len(rows), path)
+    return Registry.load(path)

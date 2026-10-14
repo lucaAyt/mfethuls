@@ -28,3 +28,13 @@ def test_instrument_names_are_unique():
 def test_every_parser_is_used_by_an_instrument():
     configured = {(entry["type"], entry["model"]) for entry in INSTRUMENTS}
     assert sorted(set(_PARSER_REGISTRY) - configured) == []
+
+
+@pytest.mark.parametrize("instrument", INSTRUMENTS, ids=[entry["name"] for entry in INSTRUMENTS])
+def test_instrument_declares_its_data_layout(instrument):
+    from mfethuls.parsers.registry import get_parser
+
+    assert instrument.get("data_layout") in {"file", "folder"}
+    if instrument["data_layout"] == "file":
+        # Discovery finds one-file-per-experiment data by the parser's extension.
+        assert getattr(get_parser(instrument["type"], instrument["model"]), "file_extension", None)

@@ -438,7 +438,7 @@ def test_plot_uv_vis_respects_explicit_group_by():
     assert len(ax.lines) == 2
     legend = ax.get_legend()
     assert legend is not None
-    assert legend.get_title().get_text() == "source_file"
+    assert legend.get_title().get_text() == "File"
 
 
 def test_plot_uv_vis_uses_gradient_palette_for_dense_groups():

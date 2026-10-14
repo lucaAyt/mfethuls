@@ -7,7 +7,7 @@ import pandas as pd
 
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.ingestion import collect_dataframe_from_paths
-from mfethuls.parsers.registry import register_parser
+from mfethuls.parsers.registry import reads, register_parser
 from mfethuls.schema_normalization import apply_dataframe_schema
 
 
@@ -106,6 +106,8 @@ class DSCPriorParser:
 
 @register_parser('dsc', 'perkin_elmer')
 class DSCPerkinElmerParser:
+    extra_extensions = ('.csv',)
+
     def __init__(self, file_extension='.txt', parse_char_start='\tTime', parse_char_end='Shiiit', delimiter='\t'):
         self.file_extension = file_extension
         self.parse_char_start = parse_char_start
@@ -136,7 +138,7 @@ class DSCPerkinElmerParser:
             parse_raw=self.parse_raw_data,
             logger=logger,
             parser_label="DSC(perkin_elmer)",
-            should_parse_raw=lambda path: str(path).casefold().endswith(self.file_extension.casefold()) or str(path).casefold().endswith('.csv'),
+            should_parse_raw=lambda path: reads(self, path),
         )
 
         df, schema_report = apply_dataframe_schema(
@@ -322,6 +324,8 @@ class DSCMettlerToledoParser:
     
 @register_parser('dsc', 'default')
 class DSCDefault:
+    extra_extensions = ('.csv',)
+
     def __init__(self, file_extension='.txt', parse_char_start='\tTime', parse_char_end='Shiiit', delimiter='\t'):
         self.file_extension = file_extension
         self.parse_char_start = parse_char_start
@@ -352,7 +356,7 @@ class DSCDefault:
             parse_raw=self.parse_raw_data,
             logger=logger,
             parser_label="DSC(perkin_elmer)",
-            should_parse_raw=lambda path: str(path).casefold().endswith(self.file_extension.casefold()) or str(path).casefold().endswith('.csv'),
+            should_parse_raw=lambda path: reads(self, path),
         )
 
         df, schema_report = apply_dataframe_schema(

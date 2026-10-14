@@ -67,6 +67,7 @@ COLUMN_LABELS: dict[str, ColumnLabel] = {
     "viscosity_pa_s": ColumnLabel("Viscosity", r"Pa$\cdot$s", symbol=r"$\eta$"),
     # Grouping columns
     "profile": ColumnLabel("Segment"),
+    "source_file": ColumnLabel("File"),
 }
 
 

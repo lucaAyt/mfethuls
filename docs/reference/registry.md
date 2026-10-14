@@ -120,8 +120,40 @@ PATH_TO_DATA/
 **Rules:**
 - The filename stem must match `raw_data_filename` exactly (case-sensitive on Linux). Every file with that stem is collected, e.g. both `poly1.txt` and `poly1.csv`.
 - If the same filename stem exists in more than one subfolder, ingest raises an error — rename one of the files to remove the ambiguity.
-- A name must match **either** a file **or** a folder, not both. If `poly1.txt` and a folder `poly1/` both exist under the instrument folder, ingest raises an error — rename one of them.
+- A name must match **either** a file **or** a folder, not both. If `poly1.txt` and a folder `poly1/` both exist in different places under the instrument folder, ingest raises an error — rename one of them. A file inside a folder of the same name (`LUB055/LUB055.txt`) is not a conflict: `LUB055` means the folder. To mean only that file (one run of a folder registered per file), give its file name with the extension: `LUB055.txt`.
+- Only files the instrument reads are data (its file extension, e.g. `.txt` for DSC, plus `.csv` for some DSC and TGA models). Other files next to the data, such as a plot saved in the experiment folder, are skipped at ingest with a warning naming them. Notes are better kept in the registry `description`.
+- An experiment may be renamed: change `name` in the registry and ingest again. The experiment keeps its internal ID, because the ID is tied to the instrument and `raw_data_filename`. Renaming the raw data file makes it a new experiment.
 - If no matching file is found at ingest time, the row produces a **warning** (not an error) — the experiment can be ingested later once the file is present.
+
+When an experiment has several files (a folder per experiment, or several files with the same stem), each data row gets a `source_file` column with the stem of the file it came from. A titration or time series therefore stays separable: the built-in plots draw one line per file.
+
+---
+
+## Registering new data from the app
+
+Instead of typing rows by hand, let the Streamlit app find raw data that is not in the registry yet. In the sidebar, the **Ingest** section shows "**N new data items found in the data folder**". Click **Review & register**.
+
+**Narrowing the list:** the dialog starts with data **modified in the last 30 days**, newest first (or with everything, if nothing is that recent). Above the table you can change the period (7 days, 30 days, 3 months, All), pick **Instruments** to show only some instrument folders, and **Search** by file or folder name. Searching also looks at the files inside a subfolder, so a project folder is found by the name of a file in it. Changing a filter clears ticks and edits in the table.
+
+**What is proposed:**
+- **A file directly in an instrument folder** (`DSC/poly2.txt`) is one experiment; its `raw_data_filename` is the stem.
+- **A subfolder holding a single file** (`DSC/LUB055/LUB055.txt`) is proposed as that file.
+- **A subfolder** (`UV_Vis/titration_A/`, `DSC/poly1/`) is proposed once, and you decide whether it is:
+  - **one experiment**: the whole folder, e.g. a titration or a time series (`raw_data_filename` = the folder name), or
+  - **one experiment per file**: each file is a run of the same sample, numbered R001, R002, … in file-name order.
+
+  Pick the folders to split in **Folders to register as one experiment per file**. The default depends on the instrument: folders of series instruments (Flame UV-Vis/fluorescence, NMR) stay whole, folders of single-file instruments (DSC, TGA, FTIR, …) are split.
+- **Pre-filled:** `raw_data_filename`, `run_id`, the instrument when only one fits the folder, and the `name` (the file or folder name, made unique). When a folder is split and one of its files is named like the folder, that row's `raw_data_filename` is the file name with its extension (`LUB055.txt`), since the bare name means the whole folder.
+- **You choose** which rows to register by ticking **Register**; nothing is ticked at first.
+- **You fill in:** `sample_id`, the instrument where several share a folder (e.g. the DSC models in `DSC/`), `measurement_profile` for DMA and rheometer data, and any other columns your registry has.
+
+**Validation** runs as you type, with the same checks as ingest. It also requires the instrument to be chosen and the raw data to be found exactly once. Rows with problems are marked ✗ with the reason. Data that cannot be registered as found (for example the same file name in two folders) is listed under **Not proposed**, with the reason. Files next to the data that no instrument reads, such as plots, are listed under **Files that will not be read**. They don't stop a row from being registered, and a folder holding only such files isn't proposed.
+
+**Saving:**
+- **Local mode:** **Save to registry** appends the rows to your CSV or XLSX registry. Existing rows, formatting and other sheets are kept, and the previous version is saved next to it as `<name>.bak.csv` / `<name>.bak.xlsx`. **Save & ingest** also ingests the new experiments. If the registry is open in Excel, close it and save again.
+- **Service mode:** the registry lives on OneDrive and the server never changes it. Download the rows (`.csv` or `.xlsx`), add them to the registry on OneDrive, then press **Sync from OneDrive**.
+
+Which instruments share a folder, and whether they record series, is set per instrument in `config/instrument_params.json` (`folder_name`, `data_layout`).
 
 ---
 

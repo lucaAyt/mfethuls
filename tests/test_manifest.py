@@ -11,6 +11,7 @@ import pytest
 from mfethuls.manifest import (
     FileManifestBackend,
     MANIFEST_FILENAME,
+    content_hash,
     find_data_files,
     generate_experiment_id,
     get_manifest_backend,
@@ -81,20 +82,47 @@ def test_file_manifest_different_instruments_get_different_ids():
         assert eid_dsc != eid_tga
 
 
-def test_file_manifest_raises_on_experiment_name_mismatch():
+def test_file_manifest_keeps_the_id_and_records_a_changed_name():
+    """The registry decides the name; the ID stays tied to the raw data."""
     with tempfile.TemporaryDirectory() as tmpdir:
         backend = FileManifestBackend(tmpdir)
-        backend.get_or_create_experiment_id(
+        eid = backend.get_or_create_experiment_id(
             instrument_name="dsc",
             raw_data_filename="chitosan_jan15",
             experiment_name="original_name",
         )
-        with pytest.raises(ValueError, match="experiment_name"):
-            backend.get_or_create_experiment_id(
-                instrument_name="dsc",
-                raw_data_filename="chitosan_jan15",
-                experiment_name="changed_name",
-            )
+        renamed = backend.get_or_create_experiment_id(
+            instrument_name="dsc",
+            raw_data_filename="chitosan_jan15",
+            experiment_name="changed_name",
+        )
+        assert renamed == eid
+        (entry,) = backend.all_mappings()
+        assert entry["experiment_name"] == "changed_name"
+
+
+def test_file_manifest_records_content_hash():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        backend = FileManifestBackend(tmpdir)
+        backend.get_or_create_experiment_id(instrument_name="dsc", raw_data_filename="poly1", experiment_name="p1")
+        assert backend.all_mappings()[0]["content_hash"] is None
+
+        backend.record_content_hash(instrument_name="dsc", raw_data_filename="poly1", content_hash="abc")
+        assert backend.all_mappings()[0]["content_hash"] == "abc"
+
+
+def test_content_hash_ignores_file_names_but_not_contents():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def write(name, text):
+            path = os.path.join(tmpdir, name)
+            with open(path, "w") as fh:
+                fh.write(text)
+            return path
+
+        a, b = write("a.txt", "1"), write("b.txt", "2")
+        renamed = [write("x.txt", "2"), write("y.txt", "1")]
+        assert content_hash([a, b]) == content_hash(renamed)
+        assert content_hash([a, b]) != content_hash([a, write("c.txt", "3")])
 
 
 def test_file_manifest_atomic_write_leaves_no_temp_file():
@@ -236,7 +264,7 @@ def test_find_data_files_matches_directory_name():
 
 
 def test_find_data_files_raises_on_file_and_directory():
-    """A matching file AND a matching folder is ambiguous and raises ValueError."""
+    """A matching file AND a matching folder elsewhere is ambiguous and raises ValueError."""
     with tempfile.TemporaryDirectory() as tmpdir:
         open(os.path.join(tmpdir, "sample_A.txt"), "w").close()
         folder = os.path.join(tmpdir, "sample_A")
@@ -245,6 +273,22 @@ def test_find_data_files_raises_on_file_and_directory():
 
         with pytest.raises(ValueError, match="both a file and a directory"):
             find_data_files(tmpdir, "sample_A")
+
+
+def test_find_data_files_file_inside_its_namesake_folder_is_the_folder():
+    """LUB055/LUB055.txt: the name means the folder; the file name means the file."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        folder = os.path.join(tmpdir, "LUB055")
+        os.makedirs(folder)
+        for name in ["LUB055.txt", "LUB055_b.txt"]:
+            open(os.path.join(folder, name), "w").close()
+
+        parent, files = find_data_files(tmpdir, "LUB055")
+        assert parent == folder
+        assert [os.path.basename(f) for f in files] == ["LUB055.txt", "LUB055_b.txt"]
+
+        _, files = find_data_files(tmpdir, "LUB055.txt")
+        assert [os.path.basename(f) for f in files] == ["LUB055.txt"]
 
 
 def test_find_data_files_raises_on_ambiguous_directory():

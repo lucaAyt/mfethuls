@@ -135,3 +135,35 @@ def test_corrected_sample_id_replaces_catalog_entry(examples, tmp_path, caplog):
     assert old_view_exists == 0
     assert Path(old["storage_path"]).exists()  # user data is not deleted
     assert old["table_name"] in caplog.text and "can be deleted" in caplog.text
+
+
+def test_renamed_experiment_keeps_its_id_and_replaces_catalog_entry(examples, tmp_path):
+    with DuckDBQueryBackend(db_path=str(tmp_path / "catalog.duckdb")) as backend:
+        ingest_experiment_dataset("LB_dsc_001", refresh=True, query_backend=backend,
+                                  registry=Registry.load(str(examples)))
+        (old,) = backend.list_registered()
+
+        frame = pd.read_csv(examples)
+        frame.loc[frame["name"] == "LB_dsc_001", "name"] = "LB_dsc_renamed"
+        renamed = Registry.from_frame(frame, path=str(examples))
+        ingest_experiment_dataset("LB_dsc_renamed", query_backend=backend, registry=renamed)
+        rows = backend.list_registered()
+
+    assert [row["experiment_name"] for row in rows] == ["LB_dsc_renamed"]
+    assert rows[0]["experiment_id"] == old["experiment_id"]
+
+
+def test_malformed_sample_id_skips_the_row_instead_of_failing():
+    registry = Registry.from_frame(
+        pd.DataFrame(
+            [
+                {"name": "ok", "instrument_name": "tga", "sample_id": "S001"},
+                {"name": "typo", "instrument_name": "tga", "sample_id": "S1"},
+            ]
+        )
+    )
+
+    assert registry.names == ["ok"]
+    (problem,) = registry.problems
+    assert problem.name == "typo" and problem.skipped
+    assert "Invalid sample_id" in problem.errors[0]
