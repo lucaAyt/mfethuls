@@ -166,7 +166,7 @@ def test_invalid_rows_still_protect_their_data(lab):
 
 def test_new_rows_are_pending_and_unknown_stored_data_is_removed(lab):
     data_root, storage_root, frame = lab
-    (data_root / "DSC" / "poly9.txt").write_text((data_root / "DSC" / "poly1.txt").read_text())
+    shutil.copyfile(data_root / "DSC" / "poly1.txt", data_root / "DSC" / "poly9.txt")  # raw data: copy bytes, not text
     stray = storage_root / "dsc" / "0123456789ab"
     stray.mkdir(parents=True)
     (stray / "0123456789ab_S001_R001.parquet").write_bytes(b"")
@@ -183,7 +183,7 @@ def test_new_rows_are_pending_and_unknown_stored_data_is_removed(lab):
 
 def test_identical_raw_data_is_reported_as_duplicates(lab):
     data_root, _, frame = lab
-    (data_root / "DSC" / "poly9.txt").write_text((data_root / "DSC" / "poly1.txt").read_text())
+    shutil.copyfile(data_root / "DSC" / "poly1.txt", data_root / "DSC" / "poly9.txt")  # raw data: copy bytes, not text
     extra = pd.concat([frame, pd.DataFrame([{"name": "LB_dsc_009", "instrument_name": "dsc_mettler_toledo",
                                              "sample_id": "S009", "raw_data_filename": "poly9"}])])
     registry = Registry.from_frame(extra)
