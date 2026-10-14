@@ -11,6 +11,7 @@ import pytest
 from mfethuls.manifest import (
     FileManifestBackend,
     MANIFEST_FILENAME,
+    ManifestError,
     content_hash,
     find_data_files,
     generate_experiment_id,
@@ -133,8 +134,53 @@ def test_file_manifest_atomic_write_leaves_no_temp_file():
             raw_data_filename="test_run",
             experiment_name="exp_a",
         )
-        tmp_file = os.path.join(tmpdir, MANIFEST_FILENAME + ".tmp")
-        assert not os.path.exists(tmp_file)
+        assert [f for f in os.listdir(tmpdir) if f.endswith(".tmp")] == []
+
+
+def test_corrupt_manifest_raises_and_is_left_untouched():
+    """Starting over would assign new IDs to every experiment, so a broken manifest stops ingest."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, MANIFEST_FILENAME)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write('{"mappings": [{"experiment_id": "abc"')  # cut off mid-write
+
+        backend = FileManifestBackend(tmpdir)
+        with pytest.raises(ManifestError, match="not valid JSON"):
+            backend.get_or_create_experiment_id(instrument_name="dsc", raw_data_filename="x", experiment_name="x")
+        with open(path, encoding="utf-8") as fh:
+            assert fh.read() == '{"mappings": [{"experiment_id": "abc"'
+
+
+def test_file_manifest_forget_and_relink():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        backend = FileManifestBackend(tmpdir)
+        keep = backend.get_or_create_experiment_id(instrument_name="dsc", raw_data_filename="a", experiment_name="A")
+        gone = backend.get_or_create_experiment_id(instrument_name="dsc", raw_data_filename="b", experiment_name="B")
+
+        assert backend.forget(experiment_id=gone) is True
+        assert backend.forget(experiment_id=gone) is False
+        backend.relink(experiment_id=keep, raw_data_filename="a_renamed")
+        assert backend.get_or_create_experiment_id(
+            instrument_name="dsc", raw_data_filename="a_renamed", experiment_name="A"
+        ) == keep
+        assert [e["experiment_id"] for e in backend.all_mappings()] == [keep]
+        with pytest.raises(KeyError):
+            backend.relink(experiment_id=gone, raw_data_filename="b")
+
+
+def test_concurrent_writers_do_not_lose_entries():
+    """Without the lock, two read-modify-write cycles overlapping drop one writer's entry."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def add(i):
+            FileManifestBackend(tmpdir).get_or_create_experiment_id(
+                instrument_name="dsc", raw_data_filename=f"run{i}", experiment_name=f"run{i}"
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(add, range(40)))
+        assert len(FileManifestBackend(tmpdir).all_mappings()) == 40
 
 
 def test_file_manifest_roundtrip_survives_new_backend_instance():

@@ -272,12 +272,12 @@ Each kind of fact about an experiment has one owner. Everything else is derived 
 | Owner | Holds |
 |---|---|
 | Registry CSV/XLSX | Descriptive fields: name, instrument, sample, run, measurement profile, description, extra columns |
-| Manifest (`.mfethuls_manifest.json`, or the Postgres `experiments` table in service mode) | Identity: `experiment_id` ↔ (instrument, raw file) |
+| Manifest (`.mfethuls_manifest.json`, or the Postgres `experiments` table in service mode) | Identity: `experiment_id` ↔ (instrument, raw file), the latest name, and a `content_hash` of the raw data files. The file is changed under a lock and replaced atomically; an unreadable manifest stops ingest instead of starting over. |
 | Parquet + `.metadata.json` sidecar | Measurements; the sidecar records what was true at parse time (parser, schema version, schema report) |
 | **DuckDB `dataset_registry` (the catalog)** | One row per dataset, written on each ingest from a single `CatalogRecord` (`storage/catalog.py`): experiment, instrument name/type/model, sample, run, canonical measurement profile, row count, storage path. The Streamlit app, the API `/datasets` endpoint and `storage.notebook.list_datasets()` read only the catalog. |
 | Postgres `datasets` (service mode, optional) | A mirror of the same record plus provenance, for SQL across the team |
 
-Catalogs created before this layout get the new columns automatically. Rows without an `experiment_id` are filled from their sidecars the next time the database is opened (any open, read-only included). The registry is read fresh wherever it is needed (nothing is kept between calls), and when a stored dataset is loaded its descriptive fields (description, extra columns, sample/run ids in the data) are taken from the current registry, not the ingest snapshot. Correcting a sample or run id registers the experiment under a new view name; the old catalog row and view are removed, and the old Parquet file is named in a warning but kept on disk.
+Catalogs created before this layout get the new columns automatically. Rows without an `experiment_id` are filled from their sidecars the next time the database is opened (any open, read-only included). The registry is read fresh wherever it is needed (nothing is kept between calls), and when a stored dataset is loaded its descriptive fields (description, extra columns, sample/run ids in the data) are taken from the current registry, not the ingest snapshot. Correcting a sample or run id registers the experiment under a new view name; the old catalog row and view are removed, and the old Parquet file is named in a warning but kept on disk. `reconcile.py` (the app's **Clean up**) removes such leftovers, and the derived records of experiments removed from the registry; see [Cleaning up after registry changes](registry.md#cleaning-up-after-registry-changes).
 
 ---
 
@@ -328,6 +328,7 @@ src/mfethuls/
   experiments.py          # Experiment and Registry (load, from_frame, get, for_samples, problems)
   registry_validator.py   # Pre-parse validation + profile matching
   manifest.py             # experiment_id assignment + find_data_files (os.walk matcher)
+  reconcile.py            # plan/apply: bring manifest, catalog and storage in line with the registry
   factory.py              # parse_experiment + instrument_data_path_constructor
   schema_normalization.py # Column aliasing + dtype coercion
   dataset.py              # Dataset dataclass

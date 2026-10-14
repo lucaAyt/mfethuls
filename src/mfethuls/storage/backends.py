@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -131,6 +131,30 @@ class LocalParquetStorage(DataStorageBackend):
 
         return Dataset(data=data, metadata=metadata)
 
+    def stored_files(self) -> Dict[Tuple[str, str], List[str]]:
+        found: Dict[Tuple[str, str], List[str]] = {}
+        for instrument in sorted(os.listdir(self.root)):
+            instrument_dir = os.path.join(self.root, instrument)
+            if not os.path.isdir(instrument_dir):
+                continue
+            for experiment_id in sorted(os.listdir(instrument_dir)):
+                experiment_dir = os.path.join(instrument_dir, experiment_id)
+                if os.path.isdir(experiment_dir):
+                    found[(instrument, experiment_id)] = sorted(
+                        os.path.join(experiment_dir, name) for name in os.listdir(experiment_dir)
+                    )
+        return found
+
+    def remove_files(self, paths: List[str]) -> None:
+        for path in paths:
+            path = os.path.abspath(path)
+            if os.path.commonpath([path, self.root]) != self.root or not os.path.isfile(path):
+                continue
+            os.remove(path)
+            experiment_dir = os.path.dirname(path)
+            if not os.listdir(experiment_dir):
+                os.rmdir(experiment_dir)
+
 
 class S3ParquetStorage(DataStorageBackend):
     """S3-backed storage for datasets and metadata JSON files."""
@@ -243,6 +267,32 @@ class S3ParquetStorage(DataStorageBackend):
         metadata.setdefault("instrument_name", experiment.instrument_name)
 
         return Dataset(data=data, metadata=metadata)
+
+
+    def stored_files(self) -> Dict[Tuple[str, str], List[str]]:
+        found: Dict[Tuple[str, str], List[str]] = {}
+        prefix = f"{self.prefix}/" if self.prefix else ""
+        token = None
+        while True:
+            kwargs = {"Bucket": self.bucket, "Prefix": prefix}
+            if token:
+                kwargs["ContinuationToken"] = token
+            page = self.client.list_objects_v2(**kwargs)
+            for obj in page.get("Contents", []):
+                parts = obj["Key"][len(prefix):].split("/")
+                if len(parts) == 3:
+                    found.setdefault((parts[0], parts[1]), []).append(f"s3://{self.bucket}/{obj['Key']}")
+            if not page.get("IsTruncated"):
+                break
+            token = page.get("NextContinuationToken")
+        return {key: sorted(paths) for key, paths in found.items()}
+
+    def remove_files(self, paths: List[str]) -> None:
+        bucket_uri = f"s3://{self.bucket}/"
+        keys = [path[len(bucket_uri):] for path in paths if path.startswith(bucket_uri)]
+        for start in range(0, len(keys), 1000):  # delete_objects takes at most 1000 keys
+            batch = keys[start:start + 1000]
+            self.client.delete_objects(Bucket=self.bucket, Delete={"Objects": [{"Key": key} for key in batch]})
 
 
 class AzureBlobParquetStorage(DataStorageBackend):
@@ -392,3 +442,13 @@ class CombinedStorageBackend(DataStorageBackend):
 
     def load_dataset(self, experiment: Experiment) -> Dataset:
         return self.primary.load_dataset(experiment)
+
+    def stored_files(self) -> Dict[Tuple[str, str], List[str]]:
+        found = {key: list(paths) for key, paths in self.primary.stored_files().items()}
+        for key, paths in self.secondary.stored_files().items():
+            found.setdefault(key, []).extend(paths)
+        return found
+
+    def remove_files(self, paths: List[str]) -> None:
+        self.primary.remove_files(paths)
+        self.secondary.remove_files(paths)

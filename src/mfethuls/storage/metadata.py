@@ -97,6 +97,13 @@ class PostgresMetadataBackend(MetadataBackend):
             conn.execute(text(create_datasets))
             conn.commit()
 
+    def remove_experiment(self, experiment_id: str) -> int:
+        """Delete the ``datasets`` rows of an experiment; returns how many there were."""
+
+        with self.engine.begin() as conn:
+            result = conn.execute(text("DELETE FROM datasets WHERE experiment_id = :id;"), {"id": experiment_id})
+        return result.rowcount
+
     def persist_metadata(self, metadata: DatasetMetadata) -> Optional[int]:
         insert_sql = text(
             "INSERT INTO datasets ("

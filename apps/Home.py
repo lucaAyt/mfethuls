@@ -339,6 +339,68 @@ def _storage_label(path: str) -> str:
     return "☁️ cloud" if path.startswith(("s3://", "az://", "https://")) else "📁 local"
 
 
+_RECONCILE_LABELS = {"relink": "Relink", "forget": "Forget", "refresh": "Refresh", "remove_files": "Remove files"}
+
+
+def _cleanup_section(registry_path: str) -> None:
+    """Check ingested data against the registry, show the plan, and apply it on confirmation."""
+    st.caption(
+        "Compares what was ingested with the registry: forgets experiments removed from it, "
+        "updates renamed or corrected ones and deletes stored files nothing uses. Raw data is never touched."
+    )
+    message = st.session_state.pop("reconcile_message", None)
+    if message:
+        (st.warning if message.startswith("⚠") else st.success)(message)
+    if st.button("Check", icon=":material/fact_check:", disabled=not registry_path, width="stretch"):
+        try:
+            st.session_state["reconcile_plan"] = client.reconcile_plan(registry_path)
+        except Exception as exc:
+            st.error(f"Could not check: {exc}")
+    plan = st.session_state.get("reconcile_plan")
+    if not plan:
+        return
+
+    if plan["actions"]:
+        counts = " · ".join(f"{_RECONCILE_LABELS[k]} {n}" for k, n in plan["counts"].items() if n)
+        st.markdown(f"**{counts}**")
+        st.dataframe(
+            pd.DataFrame([
+                {"action": _RECONCILE_LABELS[a["kind"]], "experiment": a["name"] or a["experiment_id"],
+                 "why": a["reason"], "files": len(a["paths"]) or ""}
+                for a in plan["actions"]
+            ]),
+            hide_index=True, width="stretch",
+        )
+    else:
+        st.success("Everything ingested matches the registry.")
+    if plan["pending"]:
+        st.caption(f"Never ingested ({len(plan['pending'])}): {', '.join(plan['pending'])}")
+    for names in plan["duplicates"]:
+        st.caption(f"Identical raw data: {', '.join(names)}")
+    if not plan["actions"]:
+        return
+
+    confirmed = True
+    if plan["blocked"]:
+        st.warning(plan["blocked_reason"])
+        confirmed = st.checkbox(f"Yes, forget {plan['forgets']} experiments")
+    if st.button("Apply", type="primary", disabled=not confirmed, width="stretch"):
+        try:
+            with st.spinner("Cleaning up…"):
+                results = client.reconcile_apply(registry_path, plan["fingerprint"], force=plan["blocked"])
+        except Exception as exc:
+            st.session_state["reconcile_message"] = f"⚠ Not applied: {exc}"
+        else:
+            failed = [r for r in results if r["status"] == "error"]
+            text = f"Applied {len(results) - len(failed)} of {len(results)} changes."
+            if failed:
+                text = "⚠ " + text + " Failed: " + "; ".join(
+                    f"{r['name'] or r['experiment_id']} ({r['error']})" for r in failed)
+            st.session_state["reconcile_message"] = text
+        st.session_state.pop("reconcile_plan", None)
+        st.rerun()
+
+
 # ===========================================================================
 # SIDEBAR
 # ===========================================================================
@@ -510,6 +572,12 @@ with st.sidebar.expander("Ingest", expanded=False):
             except Exception as exc:
                 st.error(f"Could not fetch job status: {exc}")
                 st.session_state["ingest_job_id"] = None
+
+# ---------------------------------------------------------------------------
+# Clean up expander
+# ---------------------------------------------------------------------------
+with st.sidebar.expander("Clean up", expanded=False):
+    _cleanup_section(registry_path if client.mode() == "local" else (get_settings().registry_path or ""))
 
 # ---------------------------------------------------------------------------
 # Datasets expander

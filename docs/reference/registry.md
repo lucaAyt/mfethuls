@@ -157,6 +157,27 @@ Which instruments share a folder, and whether they record series, is set per ins
 
 ---
 
+## Cleaning up after registry changes
+
+The registry is the source of truth. Ingesting builds everything else from it: the manifest (each experiment's internal ID), the catalog the app lists, the stored Parquet files and, in service mode, the Postgres tables. When you remove, rename or correct rows, those can fall out of step. **Clean up** brings them back in line. Your raw data is never touched.
+
+In the app, open **Clean up** in the sidebar and press **Check**. It lists what it would do, and nothing changes until you press **Apply**:
+
+| Action | When | What happens |
+|---|---|---|
+| **Forget** | A row was removed from the registry | Its catalog entry, stored files and manifest entry are deleted. Re-adding the row later ingests it as a new experiment. |
+| **Refresh** | A row's `name`, `sample_id` or `run_id` changed, or it is missing from the catalog | It is ingested again: from the stored copy when the data is unchanged, otherwise from the raw file. It keeps its internal ID. |
+| **Relink** | A raw file was renamed and the row's `raw_data_filename` updated | Recognised by identical file contents, so the experiment keeps its ID and stored data instead of being forgotten and ingested anew. |
+| **Remove files** | Stored files nothing uses (old versions after a sample or run change) | Deleted. |
+
+Check also lists rows that were never ingested, and experiments whose raw data is identical.
+
+**Safety:** rows that are in the registry but invalid (a typo in `sample_id`, say) still protect their data. A plan that would forget more than 10% of your experiments (at least 3) needs an extra confirmation, because a registry file that only partly synced from OneDrive looks just like deleted rows. **Apply** only does what **Check** showed: if anything changed in between, it asks you to check again.
+
+From the command line: `python -m mfethuls.reconcile` shows the plan, and `python -m mfethuls.reconcile --apply` carries it out (`--force` for a large forget). In service mode the app uses the API (`GET` and `POST /reconcile`).
+
+---
+
 ## Example registry
 
 A realistic multi-instrument registry for one research batch:
@@ -196,7 +217,7 @@ CL_pending,,,,,Planned — not yet run,,
 
 **When raw_data_filename differs from name:** if your instrument's export file has a name that doesn't match the registry entry (e.g. the instrument auto-generates filenames), set `raw_data_filename` to the file stem. Otherwise, leave it blank and keep the file named after the registry `name`.
 
-**Don't delete old rows:** mfethuls skips re-ingesting experiments whose data has not changed. Deleting a row won't remove the dataset from the catalog unless you explicitly call `DELETE /dataset/{name}`. Leave old rows in place.
+**Removing or renaming rows:** edit the registry, then run **Clean up** (see [Cleaning up after registry changes](#cleaning-up-after-registry-changes)) so the app's dataset list follows. Renaming keeps an experiment's internal ID; removing a row forgets its ingested data, never the raw files.
 
 **Validate before you ingest:** use `POST /registry/preview` (service mode) to catch formatting errors before starting a long ingest job. See [reference/api.md](api.md) for the request format.
 

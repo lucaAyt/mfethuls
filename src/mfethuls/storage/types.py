@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, Tuple, TypedDict
+from typing import Dict, List, Optional, Tuple, TypedDict
 
 from ..dataset import Dataset
 from ..experiments import Experiment
@@ -21,6 +21,14 @@ class DataStorageBackend:
         raise NotImplementedError()
 
     def load_dataset(self, experiment: Experiment) -> Dataset:
+        raise NotImplementedError()
+
+    def stored_files(self) -> Dict[Tuple[str, str], List[str]]:
+        """Every stored file, by ``(instrument_name, experiment_id)`` (datasets are stored per experiment)."""
+        raise NotImplementedError()
+
+    def remove_files(self, paths: List[str]) -> None:
+        """Delete stored files; paths this backend does not hold are skipped."""
         raise NotImplementedError()
 
 

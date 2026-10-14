@@ -39,6 +39,18 @@ class _FakeS3Client:
             raise _FakeClientError(f"missing object: {Bucket}/{Key}")
         return {"Body": io.BytesIO(self.objects[(Bucket, Key)])}
 
+    def list_objects_v2(self, Bucket, Prefix="", ContinuationToken=None, page_size=2):  # noqa: N803
+        keys = sorted(key for bucket, key in self.objects if bucket == Bucket and key.startswith(Prefix))
+        start = int(ContinuationToken or 0)
+        page = keys[start:start + page_size]  # small pages, to exercise continuation
+        more = start + page_size < len(keys)
+        return {"Contents": [{"Key": key} for key in page], "IsTruncated": more,
+                "NextContinuationToken": str(start + page_size) if more else None}
+
+    def delete_objects(self, Bucket, Delete):  # noqa: N803
+        for obj in Delete["Objects"]:
+            self.objects.pop((Bucket, obj["Key"]), None)
+
 
 class _FakeBlobDownload:
     def __init__(self, data: bytes) -> None:
@@ -208,6 +220,26 @@ def test_s3_parquet_storage_roundtrip(monkeypatch):
     assert loaded.metadata["key"] == "value"
     assert loaded.metadata["provenance"]["storage"]["backend"] == "s3"
     assert loaded.metadata["provenance"]["storage"]["parquet_path"] == parquet_path
+
+
+def test_s3_storage_lists_files_per_experiment_and_removes_them(monkeypatch):
+    fake_client = _FakeS3Client()
+    monkeypatch.setattr(storage_module, "boto3", SimpleNamespace(client=lambda service_name, **kwargs: fake_client))
+    monkeypatch.setattr(storage_module, "ClientError", _FakeClientError)
+    monkeypatch.setenv("MFETHULS_S3_BUCKET", "test-bucket")
+    monkeypatch.setenv("MFETHULS_S3_PREFIX", "datasets")
+    monkeypatch.setenv("MFETHULS_S3_REGION", "us-east-1")
+    backend = S3ParquetStorage()
+    parquet_path, meta_path = backend.save_dataset(_build_experiment(), _build_dataset())
+    fake_client.put_object(Bucket="test-bucket", Key="datasets/uv_vis/EXP900/old.parquet", Body=b"")
+    fake_client.put_object(Bucket="other-bucket", Key="datasets/uv_vis/EXP900/x.parquet", Body=b"")
+
+    old = "s3://test-bucket/datasets/uv_vis/EXP900/old.parquet"
+    assert backend.stored_files() == {("uv_vis", "EXP900"): sorted([parquet_path, meta_path, old])}
+
+    backend.remove_files([old, "s3://other-bucket/datasets/uv_vis/EXP900/x.parquet", "/local/file.parquet"])
+    assert backend.stored_files() == {("uv_vis", "EXP900"): sorted([parquet_path, meta_path])}
+    assert ("other-bucket", "datasets/uv_vis/EXP900/x.parquet") in fake_client.objects
 
 
 def test_azure_blob_parquet_storage_roundtrip(monkeypatch):

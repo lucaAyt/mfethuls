@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 
 from ..config.mode import is_service_mode
 from ..registry_validator import validate_registry_dataframe
-from ..experiments import resolve_registry_path, read_tabular_content
+from ..experiments import Registry, resolve_registry_path, read_tabular_content
 from ..settings import get_settings
 from ..storage.job_store import create_job, get_job as get_job_record, list_jobs as list_job_records
 from .utils import duckdb_session, get_api_storage_root, read_tabular_content_bytes
@@ -153,6 +153,39 @@ async def get_job(job_id: str) -> Dict[str, Any]:
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     return job
+
+
+@router.get("/reconcile")
+async def reconcile_plan(storage_mode: str = "local", cloud_provider: Optional[str] = None) -> Dict[str, Any]:
+    """What reconcile would change to bring ingested data in line with the server registry."""
+
+    from mfethuls.reconcile import open_stores, plan
+
+    _ensure_service_mode()
+    registry = Registry.load(get_settings().registry_path)
+    with open_stores(storage_mode=storage_mode, cloud_provider=cloud_provider) as stores:
+        return plan(registry, stores).to_dict()
+
+
+@router.post("/reconcile")
+async def reconcile_apply(
+    fingerprint: str = Query(..., description="Fingerprint of the reviewed plan (GET /reconcile)"),
+    force: bool = Query(False, description="Apply even if it forgets many experiments"),
+    storage_mode: str = "local",
+    cloud_provider: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Apply the reviewed reconcile plan. 409 if the plan changed since it was reviewed or is blocked."""
+
+    from mfethuls.reconcile import PlanChanged, ReconcileBlocked, apply_reviewed, open_stores
+
+    _ensure_service_mode()
+    registry = Registry.load(get_settings().registry_path)
+    with open_stores(storage_mode=storage_mode, cloud_provider=cloud_provider) as stores:
+        try:
+            results = apply_reviewed(registry, stores, fingerprint=fingerprint, force=force)
+        except (PlanChanged, ReconcileBlocked) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"results": results}
 
 
 @router.get("/datasets")

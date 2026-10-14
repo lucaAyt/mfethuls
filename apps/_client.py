@@ -226,6 +226,48 @@ def local_ingest(
 
 
 # ---------------------------------------------------------------------------
+# Reconcile (clean up ingested data against the registry)
+# ---------------------------------------------------------------------------
+
+def reconcile_plan(registry_path: str) -> Dict[str, Any]:
+    """What reconcile would change; the server's registry is used in service mode."""
+    if mode() == "service":
+        return _get("/reconcile")
+    from mfethuls.experiments import Registry
+    from mfethuls.reconcile import open_stores, plan
+
+    registry = Registry.load(registry_path)
+    with open_stores() as stores:
+        return plan(registry, stores).to_dict()
+
+
+def reconcile_apply(registry_path: str, fingerprint: str, force: bool = False) -> List[Dict[str, Any]]:
+    """Apply the reviewed plan. Raises RuntimeError if it changed since the check or is blocked."""
+    if mode() == "service":
+        import requests
+
+        resp = requests.post(f"{api_url()}/reconcile", headers=api_headers(), timeout=600,
+                             params={"fingerprint": fingerprint, "force": force})
+        if resp.status_code == 409:
+            raise RuntimeError(resp.json().get("detail"))
+        resp.raise_for_status()
+        results = resp.json()["results"]
+    else:
+        from mfethuls.experiments import Registry
+        from mfethuls.reconcile import PlanChanged, ReconcileBlocked, apply_reviewed, open_stores
+
+        registry = Registry.load(registry_path)
+        with open_stores() as stores:
+            try:
+                results = apply_reviewed(registry, stores, fingerprint=fingerprint, force=force)
+            except (PlanChanged, ReconcileBlocked) as exc:
+                raise RuntimeError(str(exc)) from exc
+    list_datasets.clear()
+    query_dataset.clear()
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Jobs (service mode only)
 # ---------------------------------------------------------------------------
 

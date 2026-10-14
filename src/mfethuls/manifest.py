@@ -18,16 +18,23 @@ import json
 import logging
 import os
 import re
+import tempfile
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from filelock import FileLock
 
 logger = logging.getLogger(__name__)
 
 MANIFEST_FILENAME = ".mfethuls_manifest.json"
 _SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9_\-\.]+$")
+
+
+class ManifestError(RuntimeError):
+    """The manifest cannot be read; it is left untouched."""
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -176,6 +183,14 @@ class ManifestBackend(ABC):
         """Store the :func:`content_hash` of an experiment's raw files on its entry."""
 
     @abstractmethod
+    def forget(self, *, experiment_id: str) -> bool:
+        """Remove the entry of ``experiment_id``; ``True`` if there was one."""
+
+    @abstractmethod
+    def relink(self, *, experiment_id: str, raw_data_filename: str) -> None:
+        """Point the entry of ``experiment_id`` at renamed raw data, keeping the ID."""
+
+    @abstractmethod
     def all_mappings(self) -> List[Dict[str, Any]]:
         """Every recorded experiment: ``instrument_name``, ``raw_data_filename``,
         ``experiment_id``, ``experiment_name`` and ``content_hash`` (``None`` until parsed)."""
@@ -186,9 +201,17 @@ class ManifestBackend(ABC):
 class FileManifestBackend(ManifestBackend):
     """Local-mode manifest stored as JSON at PATH_TO_DATA/.mfethuls_manifest.json.
 
-    Writes are atomic (write-to-temp + os.replace) so concurrent single-machine
-    ingestion is safe.
+    Every change is read-modify-write under a lock file (``.mfethuls_manifest.json.lock``),
+    so processes on this machine (the app, a notebook, the CLI) do not overwrite each
+    other's entries. The lock does not reach other machines syncing the same folder.
+
+    The file is replaced atomically: the new content goes to a temporary file that
+    is flushed to disk and then swapped in, so readers see the old or the new
+    manifest, never half of one. A manifest that cannot be read raises
+    :class:`ManifestError` instead of starting over, which would lose every ID.
     """
+
+    LOCK_TIMEOUT_S = 60
 
     def __init__(self, data_root: str) -> None:
         self.data_root = data_root
@@ -200,16 +223,38 @@ class FileManifestBackend(ManifestBackend):
         with open(self._manifest_path, encoding="utf-8") as fh:
             try:
                 data = json.load(fh)
-            except json.JSONDecodeError:
-                logger.warning("Manifest file at %r is corrupted — starting fresh.", self._manifest_path)
-                return {"version": "1.0", "mappings": []}
+            except json.JSONDecodeError as exc:
+                raise ManifestError(
+                    f"The manifest at {self._manifest_path!r} is not valid JSON ({exc}). It holds the ID of "
+                    "every ingested experiment, so nothing was changed. Restore it from a backup or the "
+                    "folder's version history (e.g. OneDrive), or fix the JSON by hand."
+                ) from exc
+        if not isinstance(data, dict) or not isinstance(data.get("mappings", []), list):
+            raise ManifestError(f"The manifest at {self._manifest_path!r} has no 'mappings' list.")
         return data
 
     def _write_atomic(self, manifest: Dict[str, Any]) -> None:
-        tmp_path = self._manifest_path + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as fh:
-            json.dump(manifest, fh, indent=2)
-        os.replace(tmp_path, self._manifest_path)
+        fd, tmp_path = tempfile.mkstemp(dir=self.data_root, prefix=MANIFEST_FILENAME + ".", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(manifest, fh, indent=2)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_path, self._manifest_path)
+        except BaseException:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
+
+    def _update(self, change: Callable[[Dict[str, Any]], Tuple[Any, bool]]) -> Any:
+        """Apply ``change(manifest) -> (result, changed)`` under the lock; write if changed."""
+
+        with FileLock(self._manifest_path + ".lock", timeout=self.LOCK_TIMEOUT_S):
+            manifest = self._read()
+            result, changed = change(manifest)
+            if changed:
+                self._write_atomic(manifest)
+        return result
 
     @staticmethod
     def _find(manifest: Dict[str, Any], instrument_name: str, raw_data_filename: str) -> Optional[Dict[str, Any]]:
@@ -225,39 +270,55 @@ class FileManifestBackend(ManifestBackend):
         raw_data_filename: str,
         experiment_name: str,
     ) -> str:
-        manifest = self._read()
-        entry = self._find(manifest, instrument_name, raw_data_filename)
-        if entry is not None:
-            if entry.get("experiment_name") != experiment_name:
+        def change(manifest):
+            entry = self._find(manifest, instrument_name, raw_data_filename)
+            if entry is not None:
+                renamed = entry.get("experiment_name") != experiment_name
                 entry["experiment_name"] = experiment_name
-                self._write_atomic(manifest)
-            return entry["experiment_id"]
+                return entry["experiment_id"], renamed
+            experiment_id = generate_experiment_id()
+            manifest.setdefault("mappings", []).append(
+                {
+                    "instrument_name": instrument_name,
+                    "raw_data_filename": raw_data_filename,
+                    "experiment_id": experiment_id,
+                    "experiment_name": experiment_name,
+                    "first_ingested": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            logger.debug("Assigned new experiment_id=%s for (%s, %s)", experiment_id, instrument_name, raw_data_filename)
+            return experiment_id, True
 
-        experiment_id = generate_experiment_id()
-        manifest.setdefault("mappings", []).append(
-            {
-                "instrument_name": instrument_name,
-                "raw_data_filename": raw_data_filename,
-                "experiment_id": experiment_id,
-                "experiment_name": experiment_name,
-                "first_ingested": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-        self._write_atomic(manifest)
-        logger.debug(
-            "Assigned new experiment_id=%s for (%s, %s)",
-            experiment_id,
-            instrument_name,
-            raw_data_filename,
-        )
-        return experiment_id
+        return self._update(change)
 
     def record_content_hash(self, *, instrument_name: str, raw_data_filename: str, content_hash: str) -> None:
-        manifest = self._read()
-        entry = self._find(manifest, instrument_name, raw_data_filename)
-        if entry is not None and entry.get("content_hash") != content_hash:
+        def change(manifest):
+            entry = self._find(manifest, instrument_name, raw_data_filename)
+            if entry is None or entry.get("content_hash") == content_hash:
+                return None, False
             entry["content_hash"] = content_hash
-            self._write_atomic(manifest)
+            return None, True
+
+        self._update(change)
+
+    def forget(self, *, experiment_id: str) -> bool:
+        def change(manifest):
+            kept = [e for e in manifest.get("mappings", []) if e.get("experiment_id") != experiment_id]
+            removed = len(kept) != len(manifest.get("mappings", []))
+            manifest["mappings"] = kept
+            return removed, removed
+
+        return self._update(change)
+
+    def relink(self, *, experiment_id: str, raw_data_filename: str) -> None:
+        def change(manifest):
+            for entry in manifest.get("mappings", []):
+                if entry.get("experiment_id") == experiment_id:
+                    entry["raw_data_filename"] = raw_data_filename
+                    return None, True
+            raise KeyError(f"No manifest entry with experiment_id {experiment_id!r}")
+
+        self._update(change)
 
     def all_mappings(self) -> List[Dict[str, Any]]:
         return [{"content_hash": None, **entry} for entry in self._read().get("mappings", [])]
@@ -340,6 +401,24 @@ class PostgresManifestBackend(ManifestBackend):
                     "raw_data_filename": raw_data_filename,
                 },
             )
+
+    def forget(self, *, experiment_id: str) -> bool:
+        from sqlalchemy import text
+
+        with self.engine.begin() as conn:
+            result = conn.execute(text("DELETE FROM experiments WHERE experiment_id = :id;"), {"id": experiment_id})
+        return result.rowcount > 0
+
+    def relink(self, *, experiment_id: str, raw_data_filename: str) -> None:
+        from sqlalchemy import text
+
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                text("UPDATE experiments SET raw_data_filename = :raw WHERE experiment_id = :id;"),
+                {"raw": raw_data_filename, "id": experiment_id},
+            )
+        if result.rowcount == 0:
+            raise KeyError(f"No manifest entry with experiment_id {experiment_id!r}")
 
     def all_mappings(self) -> List[Dict[str, Any]]:
         from sqlalchemy import text

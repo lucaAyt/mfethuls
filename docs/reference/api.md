@@ -296,6 +296,42 @@ Remove a dataset from the DuckDB catalog and drop its view.
 
 ---
 
+### `GET /reconcile`
+
+What reconcile would change to bring ingested data in line with the server registry (`PATH_TO_REGISTRY`). Changes nothing. See [Cleaning up after registry changes](registry.md#cleaning-up-after-registry-changes).
+
+**Query parameters:** `storage_mode` (`local`, `cloud`, `both`; default `local`), `cloud_provider`.
+
+**Response `200`:**
+```json
+{
+  "fingerprint": "3f9a1c0b7e2d4a65",
+  "actions": [
+    {"kind": "forget", "reason": "tga/poly2 is no longer in the registry", "name": "LB_tga_002",
+     "experiment_id": "a1b2c3d4e5f6", "instrument_name": "tga", "raw_data_filename": null,
+     "table_names": ["LB_tga_002_S002_R001"], "paths": ["/data/storage/tga/a1b2c3d4e5f6/a1b2c3d4e5f6_S002_R001.parquet"]}
+  ],
+  "counts": {"relink": 0, "forget": 1, "refresh": 0, "remove_files": 0},
+  "pending": [],
+  "duplicates": [],
+  "known": 7, "max_forget": 3, "forgets": 1, "blocked": false, "blocked_reason": null
+}
+```
+
+---
+
+### `POST /reconcile`
+
+Apply the plan reviewed with `GET /reconcile`. The plan is computed again and applied only if its `fingerprint` matches.
+
+**Query parameters:** `fingerprint` (required), `force` (apply a blocked plan that forgets many experiments), `storage_mode`, `cloud_provider`.
+
+**Response `200`:** `{"results": [{"kind": "forget", "name": "LB_tga_002", "experiment_id": "a1b2c3d4e5f6", "status": "done"}]}`. A `status` of `error` carries an `error` message; the other actions still run.
+
+**Response `409`:** the plan changed since it was reviewed, or it is blocked and `force` was not given.
+
+---
+
 ## Error format
 
 All errors follow FastAPI's standard format:
