@@ -6,26 +6,12 @@ from typing import Optional, Tuple
 
 from ..dataset import Dataset
 from ..experiments import Experiment
-from .backends import AzureBlobParquetStorage, CombinedStorageBackend, LocalParquetStorage, S3ParquetStorage
+from .backends import LocalParquetStorage
 from .catalog import CatalogRecord
 from .config import _dataset_basename, _get_package_version
 from .provenance import _build_provenance_metadata
 from .types import DataStorageBackend, DatasetMetadata, MetadataBackend
 from .duckdb_backend import DuckDBQueryBackend
-
-
-def _get_storage_backend_label(data_backend: DataStorageBackend) -> str:
-    if isinstance(data_backend, CombinedStorageBackend):
-        return _get_storage_backend_label(data_backend.primary)
-    if isinstance(data_backend, S3ParquetStorage):
-        return "s3"
-    if isinstance(data_backend, AzureBlobParquetStorage):
-        return "azure_blob"
-    return "local_filesystem"
-
-
-def _is_cloud_backend(data_backend: DataStorageBackend) -> bool:
-    return isinstance(data_backend, (S3ParquetStorage, AzureBlobParquetStorage))
 
 
 def _prepare_registration_metadata(
@@ -37,7 +23,7 @@ def _prepare_registration_metadata(
     local_storage_path: Optional[str] = None,
     cloud_storage_path: Optional[str] = None,
 ) -> DatasetMetadata:
-    """Postgres ``datasets`` row: the catalog record plus storage and provenance details."""
+    """The metadata-sink record: the catalog record plus storage and provenance details."""
 
     metadata = dataset.metadata if isinstance(dataset.metadata, dict) else {}
     provenance = _build_provenance_metadata(
@@ -89,24 +75,7 @@ class StorageManager:
         self, experiment: Experiment, dataset: Dataset
     ) -> Tuple[str, str, Optional[int]]:
         parquet_path, meta_path = self.data_backend.save_dataset(experiment, dataset)
-        local_storage_path: Optional[str] = None
-        cloud_storage_path: Optional[str] = None
-
-        if isinstance(self.data_backend, CombinedStorageBackend):
-            primary_path, _ = self.data_backend.primary.dataset_paths(experiment)
-            secondary_path, _ = self.data_backend.secondary.dataset_paths(experiment)
-            if _is_cloud_backend(self.data_backend.primary):
-                cloud_storage_path = primary_path
-            else:
-                local_storage_path = primary_path
-            if _is_cloud_backend(self.data_backend.secondary):
-                cloud_storage_path = secondary_path
-            else:
-                local_storage_path = secondary_path
-        elif _is_cloud_backend(self.data_backend):
-            cloud_storage_path = parquet_path
-        else:
-            local_storage_path = parquet_path
+        locations = self.data_backend.locations(experiment)
 
         # One record feeds both the DuckDB catalog and the Postgres mirror.
         record = CatalogRecord.build(
@@ -118,15 +87,14 @@ class StorageManager:
 
         dataset_id: Optional[int] = None
         if self.metadata_backend is not None:
-            storage_backend = _get_storage_backend_label(self.data_backend)
             metadata = _prepare_registration_metadata(
                 record,
                 experiment,
                 dataset,
                 meta_path,
-                storage_backend=storage_backend,
-                local_storage_path=local_storage_path,
-                cloud_storage_path=cloud_storage_path,
+                storage_backend=self.data_backend.label,
+                local_storage_path=locations.get("local"),
+                cloud_storage_path=locations.get("cloud"),
             )
             dataset_id = self.metadata_backend.persist_metadata(metadata)
         if self.query_backend is not None:

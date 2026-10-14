@@ -85,7 +85,7 @@ The profile value is flexible — mfethuls accepts common synonyms and normalise
 "temperature"             → oscillatory_temperature_sweep
 ```
 
-If you are unsure, use `POST /registry/preview` (service mode) to validate the registry without starting an ingest — see [reference/api.md](api.md).
+If you are unsure, check the registry before ingesting: rows that do not validate are listed with the reason in the app's **Register new data** dialog, and `Registry.load(path).problems` lists them in Python.
 
 ---
 
@@ -150,8 +150,8 @@ Instead of typing rows by hand, let the Streamlit app find raw data that is not 
 **Validation** runs as you type, with the same checks as ingest. It also requires the instrument to be chosen and the raw data to be found exactly once. Rows with problems are marked ✗ with the reason. Data that cannot be registered as found (for example the same file name in two folders) is listed under **Not proposed**, with the reason. Files next to the data that no instrument reads, such as plots, are listed under **Files that will not be read**. They don't stop a row from being registered, and a folder holding only such files isn't proposed.
 
 **Saving:**
-- **Local mode:** **Save to registry** appends the rows to your CSV or XLSX registry. Existing rows, formatting and other sheets are kept, and the previous version is saved next to it as `<name>.bak.csv` / `<name>.bak.xlsx`. **Save & ingest** also ingests the new experiments. If the registry is open in Excel, close it and save again.
-- **Service mode:** the registry lives on OneDrive and the server never changes it. Download the rows (`.csv` or `.xlsx`), add them to the registry on OneDrive, then press **Sync from OneDrive**.
+- **Save to registry** appends the rows to your CSV or XLSX registry. Existing rows, formatting and other sheets are kept, and the previous version is saved next to it as `<name>.bak.csv` / `<name>.bak.xlsx`. **Save & ingest** also ingests the new experiments. If the registry is open in Excel, close it and save again.
+- When the registry is kept elsewhere (for example on OneDrive for a team server), the app does not write it: download the rows (`.csv` or `.xlsx`) and add them to the registry there.
 
 Which instruments share a folder, and whether they record series, is set per instrument in `config/instrument_params.json` (`folder_name`, `data_layout`).
 
@@ -159,7 +159,7 @@ Which instruments share a folder, and whether they record series, is set per ins
 
 ## Cleaning up after registry changes
 
-The registry is the source of truth. Ingesting builds everything else from it: the manifest (each experiment's internal ID), the catalog the app lists, the stored Parquet files and, in service mode, the Postgres tables. When you remove, rename or correct rows, those can fall out of step. **Clean up** brings them back in line. Your raw data is never touched.
+The registry is the source of truth. Ingesting builds everything else from it: the manifest (each experiment's internal ID), the catalog the app lists and the stored Parquet files. When you remove, rename or correct rows, those can fall out of step. **Clean up** brings them back in line. Your raw data is never touched.
 
 In the app, open **Clean up** in the sidebar and press **Check**. It lists what it would do, and nothing changes until you press **Apply**:
 
@@ -174,7 +174,7 @@ Check also lists rows that were never ingested, and experiments whose raw data i
 
 **Safety:** rows that are in the registry but invalid (a typo in `sample_id`, say) still protect their data. A plan that would forget more than 10% of your experiments (at least 3) needs an extra confirmation, because a registry file that only partly synced from OneDrive looks just like deleted rows. **Apply** only does what **Check** showed: if anything changed in between, it asks you to check again.
 
-From the command line: `python -m mfethuls.reconcile` shows the plan, and `python -m mfethuls.reconcile --apply` carries it out (`--force` for a large forget). In service mode the app uses the API (`GET` and `POST /reconcile`).
+From the command line: `python -m mfethuls.reconcile` shows the plan, and `python -m mfethuls.reconcile --apply` carries it out (`--force` for a large forget).
 
 ---
 
@@ -219,6 +219,6 @@ CL_pending,,,,,Planned — not yet run,,
 
 **Removing or renaming rows:** edit the registry, then run **Clean up** (see [Cleaning up after registry changes](#cleaning-up-after-registry-changes)) so the app's dataset list follows. Renaming keeps an experiment's internal ID; removing a row forgets its ingested data, never the raw files.
 
-**Validate before you ingest:** use `POST /registry/preview` (service mode) to catch formatting errors before starting a long ingest job. See [reference/api.md](api.md) for the request format.
+**Validate before you ingest:** `Registry.load(path).problems` lists rows that would be skipped and why, so you can catch formatting errors before starting a long ingest.
 
 **Custom columns are fine:** any column beyond the standard set is stored as experiment metadata. Use them freely for concentration, solvent, temperature, batch number, etc.

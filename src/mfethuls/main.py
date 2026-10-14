@@ -2,9 +2,8 @@ import logging
 import argparse
 
 from mfethuls import load_experiments, plot_experiments
-from mfethuls.config.mode import use_test_env
+from mfethuls.settings import use_test_env
 from mfethuls.experiments import Registry
-from mfethuls.storage import get_postgres_db_url
 
 
 def _apply_runtime_env_mode(registry_env: str) -> None:
@@ -83,16 +82,6 @@ def main(argv: list[str] | None = None):
         "--plot-output",
         help="Optional path to save the plot instead of only creating it in memory.",
     )
-    parser.add_argument(
-        "--persist-metadata",
-        action="store_true",
-        help="Persist dataset metadata in Postgres. Uses MFETHULS_POSTGRES_URL from .env, or --db-url if provided.",
-    )
-    parser.add_argument(
-        "--db-url",
-        help="Postgres database URL (overrides .env). Format: 'postgresql://user:pass@host/dbname'.",
-    )
-
     args = parser.parse_args(argv)
 
     _apply_runtime_env_mode(args.registry_env)
@@ -112,33 +101,12 @@ def main(argv: list[str] | None = None):
 
     print("Selected experiments:", selected)
 
-    # Determine database URL: CLI flags override .env config
-    db_url = None
-
-    # First, try loading from .env (MFETHULS_POSTGRES_ENABLED + MFETHULS_POSTGRES_URL)
-    env_db_url = get_postgres_db_url()
-
-    # CLI flags can override or disable .env config
-    if args.persist_metadata:
-        # User explicitly requested DB registration via CLI
-        if args.db_url:
-            db_url = args.db_url
-        elif env_db_url:
-            db_url = env_db_url
-        else:
-            print("ERROR: --persist-metadata requires either --db-url CLI flag or MFETHULS_POSTGRES_URL in .env")
-            return
-    elif env_db_url:
-        # Use .env config if not explicitly disabled
-        db_url = env_db_url
-
     try:
         comparison = load_experiments(
             selected,
             registry=registry,
             use_storage=not args.no_storage,
             refresh=args.refresh,
-            db_url=db_url,
         )
     except Exception as exc:  # noqa: BLE001
         print(f"  Failed to load experiments: {exc!r}")

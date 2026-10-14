@@ -12,6 +12,7 @@ from mfethuls.config.loader import apply_registry_fields, ingest_experiment_data
 from mfethuls.dataset import Dataset
 from mfethuls.experiments import Experiment
 from mfethuls.storage.duckdb_backend import DuckDBQueryBackend
+from mfethuls.stores import local_stores
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
 
@@ -117,12 +118,12 @@ def test_cached_load_uses_current_registry_description(examples):
 
 def test_corrected_sample_id_replaces_catalog_entry(examples, tmp_path, caplog):
     with DuckDBQueryBackend(db_path=str(tmp_path / "catalog.duckdb")) as backend:
-        ingest_experiment_dataset("LB_dsc_001", refresh=True, query_backend=backend,
+        ingest_experiment_dataset("LB_dsc_001", refresh=True, stores=local_stores(catalog=backend),
                                   registry=Registry.load(str(examples)))
         (old,) = backend.list_registered()
 
         with caplog.at_level(logging.WARNING, logger="mfethuls.storage.duckdb_backend"):
-            ingest_experiment_dataset("LB_dsc_001", query_backend=backend,
+            ingest_experiment_dataset("LB_dsc_001", stores=local_stores(catalog=backend),
                                       registry=_edited_registry(examples, "LB_dsc_001", sample_id="S009"))
         rows = backend.list_registered()
         old_view_exists = backend.query(
@@ -139,14 +140,14 @@ def test_corrected_sample_id_replaces_catalog_entry(examples, tmp_path, caplog):
 
 def test_renamed_experiment_keeps_its_id_and_replaces_catalog_entry(examples, tmp_path):
     with DuckDBQueryBackend(db_path=str(tmp_path / "catalog.duckdb")) as backend:
-        ingest_experiment_dataset("LB_dsc_001", refresh=True, query_backend=backend,
+        ingest_experiment_dataset("LB_dsc_001", refresh=True, stores=local_stores(catalog=backend),
                                   registry=Registry.load(str(examples)))
         (old,) = backend.list_registered()
 
         frame = pd.read_csv(examples)
         frame.loc[frame["name"] == "LB_dsc_001", "name"] = "LB_dsc_renamed"
         renamed = Registry.from_frame(frame, path=str(examples))
-        ingest_experiment_dataset("LB_dsc_renamed", query_backend=backend, registry=renamed)
+        ingest_experiment_dataset("LB_dsc_renamed", stores=local_stores(catalog=backend), registry=renamed)
         rows = backend.list_registered()
 
     assert [row["experiment_name"] for row in rows] == ["LB_dsc_renamed"]

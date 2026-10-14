@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
+import logging
 from typing import Iterator, Mapping, Optional
 
 _TRUE = {"1", "true", "yes"}
@@ -29,56 +30,13 @@ def _flag(value: Optional[str]) -> bool:
 
 
 @dataclass(frozen=True)
-class PostgresSettings:
-    enabled: bool = False
-    user: Optional[str] = None
-    password: Optional[str] = None
-    host: str = "localhost"
-    port: Optional[str] = None
-    database: Optional[str] = None
-    job_db_url: Optional[str] = None
-
-
-@dataclass(frozen=True)
-class S3Settings:
-    bucket: Optional[str] = None
-    prefix: Optional[str] = None
-    region: Optional[str] = None
-    endpoint: Optional[str] = None
-    access_key_id: Optional[str] = None
-    secret_access_key: Optional[str] = None
-
-
-@dataclass(frozen=True)
-class AzureSettings:
-    connection_string: Optional[str] = None
-    account: Optional[str] = None
-    container: Optional[str] = None
-    prefix: Optional[str] = None
-    key: Optional[str] = None
-    sas_token: Optional[str] = None
-
-
-@dataclass(frozen=True)
 class Settings:
-    mode: str = "local"
     data_root: Optional[str] = None
     registry_path: Optional[str] = None
     local_storage: Optional[str] = None
     duckdb_path: Optional[str] = None
     disable_storage: bool = False
     storage_debug: bool = False
-    metadata_db_enabled: bool = False
-    api_key: Optional[str] = None
-    api_url: str = "http://localhost:8000"
-    job_timeout_s: int = 1800
-    postgres: PostgresSettings = field(default_factory=PostgresSettings)
-    s3: S3Settings = field(default_factory=S3Settings)
-    azure: AzureSettings = field(default_factory=AzureSettings)
-
-    @property
-    def is_service_mode(self) -> bool:
-        return self.mode == "service"
 
     @classmethod
     def from_env(cls, environ: Optional[Mapping[str, str]] = None) -> "Settings":
@@ -87,44 +45,13 @@ class Settings:
         env = os.environ if environ is None else environ
         get = env.get
 
-        mode = (get("MFETHULS_MODE") or "local").strip().lower()
         return cls(
-            mode="service" if mode in {"service", "server"} else "local",
             data_root=get("PATH_TO_DATA") or None,
             registry_path=get("PATH_TO_REGISTRY") or None,
             local_storage=get("PATH_TO_LOCAL_STORAGE") or None,
             duckdb_path=get("MFETHULS_DUCKDB_PATH") or None,
             disable_storage=_flag(get("MFETHULS_DISABLE_STORAGE")),
             storage_debug=bool(get("MFETHULS_STORAGE_DEBUG")),
-            metadata_db_enabled=_flag(get("MFETHULS_METADATA_DB_ENABLED")),
-            api_key=get("MFETHULS_API_KEY") or None,
-            api_url=get("MFETHULS_API_URL") or "http://localhost:8000",
-            job_timeout_s=int(get("MFETHULS_JOB_TIMEOUT_SECONDS") or 1800),
-            postgres=PostgresSettings(
-                enabled=_flag(get("MFETHULS_POSTGRES_ENABLED")),
-                user=get("MFETHULS_POSTGRES_USER") or None,
-                password=get("MFETHULS_POSTGRES_PASSWORD") or None,
-                host=get("MFETHULS_POSTGRES_HOST") or "localhost",
-                port=get("MFETHULS_POSTGRES_PORT") or None,
-                database=get("MFETHULS_POSTGRES_DB") or None,
-                job_db_url=get("MFETHULS_JOB_DB_URL") or None,
-            ),
-            s3=S3Settings(
-                bucket=get("MFETHULS_S3_BUCKET") or None,
-                prefix=get("MFETHULS_S3_PREFIX") or None,
-                region=get("MFETHULS_S3_REGION") or None,
-                endpoint=get("MFETHULS_S3_ENDPOINT") or None,
-                access_key_id=get("MFETHULS_S3_ACCESS_KEY") or None,
-                secret_access_key=get("MFETHULS_S3_SECRET_KEY") or None,
-            ),
-            azure=AzureSettings(
-                connection_string=get("MFETHULS_AZURE_CONNECTION_STRING") or None,
-                account=get("MFETHULS_AZURE_ACCOUNT") or None,
-                container=get("MFETHULS_AZURE_CONTAINER") or None,
-                prefix=get("MFETHULS_AZURE_PREFIX") or None,
-                key=get("MFETHULS_AZURE_KEY") or None,
-                sas_token=get("MFETHULS_AZURE_SAS_TOKEN") or None,
-            ),
         )
 
     def with_test_paths(self, environ: Optional[Mapping[str, str]] = None) -> tuple["Settings", list[str]]:
@@ -190,3 +117,19 @@ def using(settings: Settings) -> Iterator[Settings]:
         yield settings
     finally:
         _configured = previous
+
+
+def use_test_env() -> None:
+    """Point mfethuls at the MFETHULS_TEST_* data, registry and storage from .env.
+
+    Call before loading any data. Restart the session to switch back.
+    A test variable that is not set is skipped with a warning, so the matching
+    runtime path keeps its normal value. The environment itself is not changed.
+    """
+
+    settings, missing = get_settings().with_test_paths()
+    for variable in missing:
+        logging.getLogger(__name__).warning(
+            "use_test_env: %s is not set; the runtime path keeps its current value.", variable
+        )
+    configure(settings)

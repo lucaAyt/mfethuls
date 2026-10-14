@@ -1,7 +1,8 @@
 """Register raw data that the registry does not describe yet (the "Register new data" dialog).
 
-Local mode writes the new rows to the registry file. In service mode the registry
-belongs to OneDrive: the dialog only offers the rows as a download to add there.
+When the app may write the registry (``backend.writes_registry``), the new rows are
+appended to the registry file. Otherwise the registry is kept elsewhere (e.g. on
+OneDrive) and the dialog offers the rows as a download to add there.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from mfethuls.discovery import (
 )
 from mfethuls.experiments import Registry, append_rows
 from mfethuls.registry_validator import _load_instrument_config
+from mfethuls.settings import get_settings
 
 _SCHEMA_DIR = os.path.join(os.path.dirname(mfethuls.config.__file__), "schemas")
 _HELPER_COLUMNS = ["include", "_folder", "_modified"]
@@ -109,7 +111,7 @@ def _filter_controls(items: List[NewData]) -> tuple[List[NewData], str]:
 
 
 @st.dialog("Register new data", width="large")
-def register_dialog(registry_path: str, data_root: str, *, service_mode: bool, on_saved=None) -> None:
+def register_dialog(registry_path: str, data_root: str, *, writes_registry: bool, on_saved=None) -> None:
     """Propose registry rows for unregistered raw data, validate them live, then save or download."""
 
     registry = Registry.load(registry_path)
@@ -174,7 +176,7 @@ def register_dialog(registry_path: str, data_root: str, *, service_mode: bool, o
             st.caption("No rows ticked yet.")
         ready = bool(results) and not any(result["errors"] for result in results)
 
-        if service_mode:
+        if not writes_registry:
             st.info(
                 "The registry is kept on OneDrive. Download these rows, add them to the registry there, "
                 "then press **Sync from OneDrive**."
@@ -211,3 +213,59 @@ def register_dialog(registry_path: str, data_root: str, *, service_mode: bool, o
                        "Ingest skips them; they stay where they are.")
             for path in skipped:
                 st.caption(path)
+
+
+@st.cache_data(show_spinner=False, ttl=600)
+def registry_frame(path: str) -> pd.DataFrame:
+    """The registry table at ``path`` (cached; cleared when rows are added)."""
+    return Registry.load(path).frame
+
+
+@st.cache_data(show_spinner=False, ttl=600)
+def count_new_data(registry_path: str, data_root: str) -> int:
+    """How many items under ``data_root`` the registry does not describe yet (cached)."""
+    return sum(1 for item in discover_unregistered(Registry.load(registry_path), data_root) if not item.issue)
+
+
+def clear_registry_caches() -> None:
+    registry_frame.clear()
+    count_new_data.clear()
+
+
+def new_data_prompt(backend, registry_path: str) -> None:
+    """Sidebar note about unregistered raw data, opening the "Register new data" dialog."""
+    data_root = get_settings().data_root
+    if not data_root or not registry_path or not os.path.exists(registry_path):
+        return
+    message = st.session_state.pop("register_message", None)
+    if message:
+        st.success(message)
+    try:
+        count = count_new_data(registry_path, data_root)
+    except Exception as exc:
+        st.caption(f"Could not scan the data folder: {exc}")
+        return
+    if count:
+        st.info(f"**{count}** new data item{'s' if count != 1 else ''} found in the data folder.")
+    open_col, rescan_col = st.columns([3, 1], vertical_alignment="bottom")
+    if open_col.button("Review & register", icon=":material/playlist_add:", disabled=not count, width="stretch"):
+        register_dialog(
+            registry_path, data_root, writes_registry=backend.writes_registry,
+            on_saved=lambda names, ingest: _after_register(backend, registry_path, names, ingest),
+        )
+    if rescan_col.button("", icon=":material/refresh:", help="Scan the data folder again", width="stretch"):
+        count_new_data.clear()
+        st.rerun()
+
+
+def _after_register(backend, registry_path: str, names: list[str], ingest: bool) -> None:
+    """Refresh after rows were added to the registry, and ingest them if asked."""
+    clear_registry_caches()
+    message = f"Added {len(names)} experiment{'s' if len(names) != 1 else ''} to the registry."
+    if ingest:
+        with st.spinner(f"Ingesting {len(names)} experiment(s)…"):
+            results = backend.ingest(names, registry_path)
+        failed = [name for name, result in results if result.get("status") == "error"]
+        message += f" Ingested {len(names) - len(failed)}." + (f" Failed: {', '.join(failed)}." if failed else "")
+        backend.clear_caches()
+    st.session_state["register_message"] = message

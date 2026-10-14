@@ -1,5 +1,5 @@
 from .comparison import ComparisonSet, load_experiments, load_samples
-from .config.mode import use_test_env
+from .settings import use_test_env
 from .experiments import Registry
 
 

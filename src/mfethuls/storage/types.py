@@ -11,6 +11,15 @@ from ..experiments import Experiment
 class DataStorageBackend:
     """Abstract base class for data storage backends."""
 
+    # Recorded in provenance and the metadata mirror, e.g. "local_filesystem", "s3".
+    label: str = "local_filesystem"
+    is_cloud: bool = False
+
+    def locations(self, experiment: Experiment) -> Dict[str, Optional[str]]:
+        """Where the dataset's Parquet file is stored: ``{"local": path, "cloud": path}`` (None if not there)."""
+        path, _ = self.dataset_paths(experiment)
+        return {"local": None, "cloud": path} if self.is_cloud else {"local": path, "cloud": None}
+
     def dataset_paths(self, experiment: Experiment) -> Tuple[str, str]:
         raise NotImplementedError()
 
@@ -36,6 +45,10 @@ class MetadataBackend:
     """Abstract base class for metadata-only backends."""
 
     def persist_metadata(self, metadata: "DatasetMetadata") -> Optional[int]:
+        raise NotImplementedError()
+
+    def remove_experiment(self, experiment_id: str) -> int:
+        """Delete everything recorded for an experiment; returns how many records there were."""
         raise NotImplementedError()
 
 

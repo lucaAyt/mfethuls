@@ -126,7 +126,7 @@ Pass `ax=` to draw into your own axes (overlay and single plots only). The figur
 
 ## Streamlit dashboard
 
-The **Plot** section of `apps/Home.py` offers two modes:
+The **Plot** section of the app (`mfethuls-app`) offers two modes:
 
 - **Line or scatter plots of any columns:** choose the x and y columns, colour column, log axes and axis direction.
 - **Built-in instrument plot** (toggle): the plots described above, for the selected experiments.

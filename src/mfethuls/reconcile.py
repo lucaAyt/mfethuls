@@ -27,7 +27,7 @@ experiments (by default 10% of them, at least 3) is blocked unless ``force`` is
 given, because a half-synced registry file looks just like deleted rows.
 
 Run it from the command line with ``python -m mfethuls.reconcile`` (add ``--apply``
-to carry out the plan).
+to carry out the plan); it uses the local stores (:func:`mfethuls.stores.open_local_stores`).
 """
 
 from __future__ import annotations
@@ -39,15 +39,14 @@ import logging
 import math
 import os
 from collections import defaultdict
-from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, replace
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .experiments import Experiment, Registry, _normalize_optional_str
-from .manifest import ManifestBackend, content_hash, get_manifest_backend
+from .manifest import content_hash
 from .parsers.registry import reads
-from .settings import get_settings
 from .storage.config import _dataset_basename
+from .stores import Stores, open_local_stores
 
 logger = logging.getLogger(__name__)
 
@@ -123,52 +122,6 @@ class Plan:
             "blocked_reason": self.blocked_reason,
             "counts": self.counts(),
         }
-
-
-@dataclass
-class Stores:
-    """Where ingested data lives. ``storage`` and ``metadata`` are optional."""
-
-    manifest: ManifestBackend
-    catalog: Any  # DuckDBQueryBackend
-    storage: Any = None  # DataStorageBackend
-    metadata: Any = None  # PostgresMetadataBackend (service mode)
-    # Passed on to ingest when refreshing.
-    storage_mode: str = "local"
-    cloud_provider: Optional[str] = None
-    db_url: Optional[str] = None
-
-
-@contextmanager
-def open_stores(
-    *,
-    storage_mode: str = "local",
-    cloud_provider: Optional[str] = None,
-    db_url: Optional[str] = None,
-    read_only: bool = False,
-) -> Iterator[Stores]:
-    """The configured stores: manifest, DuckDB catalog, dataset storage and Postgres if enabled."""
-
-    from .config.loader import _build_data_backend, _resolve_metadata_db_url
-    from .storage import DuckDBQueryBackend, _get_duckdb_path
-
-    resolved_db_url = _resolve_metadata_db_url(db_url)
-    metadata = None
-    if resolved_db_url:
-        from .storage.metadata import PostgresMetadataBackend
-
-        metadata = PostgresMetadataBackend(resolved_db_url)
-    manifest = get_manifest_backend(data_root=get_settings().data_root, db_url=resolved_db_url)
-    with DuckDBQueryBackend(db_path=_get_duckdb_path(), read_only=read_only) as catalog:
-        yield Stores(
-            manifest=manifest,
-            catalog=catalog,
-            storage=_build_data_backend(storage_mode, cloud_provider),
-            metadata=metadata,
-            storage_mode=storage_mode,
-            cloud_provider=cloud_provider,
-            db_url=resolved_db_url,
-        )
 
 
 def _key(instrument_name: Any, raw_data_filename: Any) -> Tuple[Optional[str], Optional[str]]:
@@ -350,14 +303,7 @@ def _forget(action: Action, stores: Stores) -> None:
 def _refresh(action: Action, registry: Registry, stores: Stores) -> None:
     from .config.loader import ingest_experiment_dataset
 
-    result = ingest_experiment_dataset(
-        action.name,
-        registry=registry,
-        query_backend=stores.catalog,
-        storage_mode=stores.storage_mode,
-        cloud_provider=stores.cloud_provider,
-        db_url=stores.db_url,
-    )
+    result = ingest_experiment_dataset(action.name, registry=registry, stores=stores)
     status = (result or {}).get("status")
     if status not in {"registered", "persisted"}:
         raise RuntimeError(f"ingest returned status {status!r}")
@@ -446,13 +392,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--registry", help="Registry file (default PATH_TO_REGISTRY).")
     parser.add_argument("--apply", action="store_true", help="Carry out the plan (default: only show it).")
     parser.add_argument("--force", action="store_true", help="Apply even if it would forget many experiments.")
-    parser.add_argument("--storage-mode", default="local", choices=["local", "cloud", "both"])
-    parser.add_argument("--cloud-provider")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s:%(name)s:%(message)s")
 
     registry = Registry.load(args.registry)
-    with open_stores(storage_mode=args.storage_mode, cloud_provider=args.cloud_provider) as stores:
+    with open_local_stores() as stores:
         current = plan(registry, stores)
         print(format_plan(current))
         if not args.apply:

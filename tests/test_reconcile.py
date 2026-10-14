@@ -8,7 +8,8 @@ import pytest
 
 from mfethuls import Registry
 from mfethuls.config.loader import ingest_experiment_dataset
-from mfethuls.reconcile import ReconcileBlocked, apply, open_stores, plan
+from mfethuls.reconcile import ReconcileBlocked, apply, plan
+from mfethuls.stores import open_local_stores as open_stores
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
 
@@ -21,13 +22,12 @@ def lab(tmp_path, monkeypatch):
     shutil.copytree(EXAMPLES_DIR, copy)
     monkeypatch.setenv("PATH_TO_DATA", str(copy / "data"))
     monkeypatch.setenv("PATH_TO_LOCAL_STORAGE", str(tmp_path / "storage"))
-    monkeypatch.setenv("MFETHULS_MODE", "local")
     monkeypatch.delenv("MFETHULS_DUCKDB_PATH", raising=False)
     frame = pd.read_csv(copy / "experiments_registry.csv")
     registry = Registry.from_frame(frame)
     with open_stores() as stores:
         for name in registry.names:
-            ingest_experiment_dataset(name, refresh=True, registry=registry, query_backend=stores.catalog)
+            ingest_experiment_dataset(name, refresh=True, registry=registry, stores=stores)
     return copy / "data", tmp_path / "storage", frame
 
 
@@ -188,37 +188,9 @@ def test_identical_raw_data_is_reported_as_duplicates(lab):
                                              "sample_id": "S009", "raw_data_filename": "poly9"}])])
     registry = Registry.from_frame(extra)
     with open_stores() as stores:
-        ingest_experiment_dataset("LB_dsc_009", registry=registry, query_backend=stores.catalog)
+        ingest_experiment_dataset("LB_dsc_009", registry=registry, stores=stores)
 
     assert _plan(extra).duplicates == [["LB_dsc_001", "LB_dsc_009"]]
-
-
-def test_api_applies_only_the_reviewed_plan(lab, tmp_path, monkeypatch):
-    from fastapi.testclient import TestClient
-
-    from mfethuls.api import app
-
-    _, _, frame = lab
-    registry_path = tmp_path / "registry.csv"
-    frame[frame["name"] != "LB_tga_002"].to_csv(registry_path, index=False)
-    monkeypatch.setenv("PATH_TO_REGISTRY", str(registry_path))
-    monkeypatch.setenv("MFETHULS_MODE", "service")
-    monkeypatch.setenv("MFETHULS_API_KEY", "key")
-    client = TestClient(app, headers={"Authorization": "Bearer key"})
-
-    reviewed = client.get("/reconcile").json()
-    assert [(a["kind"], a["name"]) for a in reviewed["actions"]] == [("forget", "LB_tga_002")]
-
-    # The registry changes after the review: the reviewed plan is no longer what would happen.
-    frame[~frame["name"].isin(["LB_tga_002", "LB_tga_001"])].to_csv(registry_path, index=False)
-    refused = client.post("/reconcile", params={"fingerprint": reviewed["fingerprint"]})
-    assert refused.status_code == 409 and "Check again" in refused.json()["detail"]
-
-    frame[frame["name"] != "LB_tga_002"].to_csv(registry_path, index=False)
-    applied = client.post("/reconcile", params={"fingerprint": reviewed["fingerprint"]})
-    assert applied.status_code == 200
-    assert [r["status"] for r in applied.json()["results"]] == ["done"]
-    assert client.get("/reconcile").json()["actions"] == []
 
 
 def test_command_line_shows_the_plan_and_applies_only_when_asked(lab, tmp_path, capsys):

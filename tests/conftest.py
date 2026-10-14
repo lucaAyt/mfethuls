@@ -30,13 +30,3 @@ def isolated_settings(monkeypatch, tmp_path):
     mfethuls_settings.configure(None)
     yield
     mfethuls_settings.configure(None)
-
-
-@pytest.fixture
-def service_mode(monkeypatch):
-    monkeypatch.setenv("MFETHULS_MODE", "service")
-
-
-@pytest.fixture
-def local_mode(monkeypatch):
-    monkeypatch.setenv("MFETHULS_MODE", "local")

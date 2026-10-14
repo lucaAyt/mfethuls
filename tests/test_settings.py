@@ -1,46 +1,35 @@
-from mfethuls.settings import Settings, configure, get_settings, using
+import logging
+import os
+
+import pytest
+
+from mfethuls.settings import Settings, configure, get_settings, use_test_env, using
 
 
 def test_defaults_without_environment():
     settings = Settings.from_env({})
 
-    assert settings.mode == "local"
     assert settings.data_root is None
     assert settings.registry_path is None
     assert settings.disable_storage is False
-    assert settings.api_url == "http://localhost:8000"
-    assert settings.job_timeout_s == 1800
-    assert settings.postgres.enabled is False
-    assert settings.postgres.host == "localhost"
 
 
 def test_from_env_parses_values():
     settings = Settings.from_env(
         {
-            "MFETHULS_MODE": "Server",
             "PATH_TO_DATA": "/data",
             "PATH_TO_REGISTRY": "/registry.csv",
             "PATH_TO_LOCAL_STORAGE": "/storage",
             "MFETHULS_DISABLE_STORAGE": "yes",
-            "MFETHULS_JOB_TIMEOUT_SECONDS": "60",
-            "MFETHULS_POSTGRES_ENABLED": "true",
-            "MFETHULS_POSTGRES_USER": "lab",
-            "MFETHULS_S3_BUCKET": "bucket",
         }
     )
 
-    assert settings.mode == "service"
-    assert settings.is_service_mode
     assert (settings.data_root, settings.registry_path, settings.local_storage) == (
         "/data",
         "/registry.csv",
         "/storage",
     )
     assert settings.disable_storage is True
-    assert settings.job_timeout_s == 60
-    assert settings.postgres.enabled is True
-    assert settings.postgres.user == "lab"
-    assert settings.s3.bucket == "bucket"
 
 
 def test_get_settings_follows_the_environment_until_configured(monkeypatch):
@@ -76,3 +65,39 @@ def test_with_test_paths_reports_missing_variables():
     assert settings.data_root == "/test-data"
     assert settings.registry_path == "/runtime.csv"
     assert missing == ["MFETHULS_TEST_REGISTRY", "MFETHULS_TEST_LOCAL_STORAGE"]
+
+
+@pytest.fixture
+def runtime_paths(monkeypatch):
+    for runtime_key in ("PATH_TO_DATA", "PATH_TO_REGISTRY", "PATH_TO_LOCAL_STORAGE"):
+        monkeypatch.setenv(runtime_key, f"original_{runtime_key}")
+    return monkeypatch
+
+
+def test_use_test_env_switches_settings_to_test_paths(runtime_paths):
+    runtime_paths.setenv("MFETHULS_TEST_DATA_ROOT", "test/data")
+    runtime_paths.setenv("MFETHULS_TEST_REGISTRY", "test/registry.csv")
+    runtime_paths.setenv("MFETHULS_TEST_LOCAL_STORAGE", "test/storage")
+
+    use_test_env()
+
+    settings = get_settings()
+    assert (settings.data_root, settings.registry_path, settings.local_storage) == (
+        "test/data",
+        "test/registry.csv",
+        "test/storage",
+    )
+    # The environment itself is left alone.
+    assert os.environ["PATH_TO_DATA"] == "original_PATH_TO_DATA"
+
+
+def test_use_test_env_warns_and_keeps_value_when_test_var_missing(runtime_paths, caplog):
+    runtime_paths.setenv("MFETHULS_TEST_DATA_ROOT", "test/data")
+    runtime_paths.setenv("MFETHULS_TEST_LOCAL_STORAGE", "test/storage")
+
+    with caplog.at_level(logging.WARNING, logger="mfethuls.settings"):
+        use_test_env()
+
+    assert get_settings().data_root == "test/data"
+    assert get_settings().registry_path == "original_PATH_TO_REGISTRY"
+    assert "MFETHULS_TEST_REGISTRY is not set" in caplog.text

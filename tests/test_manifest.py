@@ -15,7 +15,6 @@ from mfethuls.manifest import (
     content_hash,
     find_data_files,
     generate_experiment_id,
-    get_manifest_backend,
 )
 
 
@@ -200,19 +199,6 @@ def test_file_manifest_roundtrip_survives_new_backend_instance():
             experiment_name="CL_dsc_001",
         )
         assert eid == eid2
-
-
-# ── get_manifest_backend factory ─────────────────────────────────────────────
-
-def test_get_manifest_backend_returns_file_backend_when_no_db_url():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        backend = get_manifest_backend(data_root=tmpdir, db_url=None)
-        assert isinstance(backend, FileManifestBackend)
-
-
-def test_get_manifest_backend_raises_without_data_root_or_db_url():
-    with pytest.raises(ValueError):
-        get_manifest_backend(data_root=None, db_url=None)
 
 
 # ── find_data_files ───────────────────────────────────────────────────────────

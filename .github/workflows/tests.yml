@@ -21,7 +21,7 @@ jobs:
       - name: Install
         run: |
           uv venv --python 3.11
-          uv pip install -e ".[dev,viz,service]"
+          uv pip install -e ".[dev,viz]"
 
       - name: Lint
         run: uv run --no-sync ruff check

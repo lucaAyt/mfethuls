@@ -42,8 +42,6 @@ Key points:
 
 Save the CSV. That's the only file you touch before ingesting.
 
-> **Service mode:** instead of editing locally, update the shared registry on OneDrive. Then use the Ingest sidebar → "Sync from OneDrive" before proceeding.
-
 ---
 
 ## Step 2 — Launch the app
@@ -70,8 +68,6 @@ If a row has a validation error (unknown instrument name, file not found, etc.),
 When it finishes:
 - Two Parquet files exist under `PATH_TO_LOCAL_STORAGE/dsc_mettler_toledo/<hex_id>/`
 - Two views are registered in the DuckDB catalog: `LB_dsc_001_S001_R001`, `LB_dsc_002_S002_R001`
-
-> **Service mode:** click **"Sync from OneDrive"** first to pull data from OneDrive, then select experiments and click **"Ingest experiments"**. To validate a registry without ingesting, use `POST /registry/preview` from the API — see [reference/api.md](../reference/api.md).
 
 ---
 
@@ -152,8 +148,6 @@ features = df.groupby("experiment_name")["heat_flow_mW"].min().reset_index()
 features.columns = ["experiment_name", "peak_heat_flow_mW"]
 print(features)
 ```
-
-> **Service mode:** replace the DuckDB path with a Postgres URL for metadata queries, or mount the block volume over SSHFS to connect to DuckDB directly. See [data analysis guide](data_analysis.md) for the full options.
 
 ---
 

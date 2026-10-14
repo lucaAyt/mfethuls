@@ -11,7 +11,7 @@ from .experiments import Experiment, Registry
 from .dataset import Dataset
 
 if TYPE_CHECKING:
-    from .storage import DuckDBQueryBackend
+    from .stores import Stores
 
 
 logger = logging.getLogger(__name__)
@@ -72,10 +72,7 @@ def _load_comparison(
     *,
     use_storage: bool = True,
     refresh: bool = False,
-    storage_mode: str = "local",
-    cloud_provider: str | None = None,
-    db_url: str | None = None,
-    query_backend: "DuckDBQueryBackend | None" = None,
+    stores: "Stores | None" = None,
 ) -> ComparisonSet:
     datasets: list[Dataset] = []
     labels: list[str] = []
@@ -85,10 +82,7 @@ def _load_comparison(
             exp.name,
             use_storage=use_storage,
             refresh=refresh,
-            storage_mode=storage_mode,
-            cloud_provider=cloud_provider,
-            db_url=db_url,
-            query_backend=query_backend,
+            stores=stores,
             registry=registry,
         )
         if dataset is None:
@@ -107,10 +101,7 @@ def load_experiments(
     registry_path: str | None = None,
     use_storage: bool = True,
     refresh: bool = False,
-    storage_mode: str = "local",
-    cloud_provider: str | None = None,
-    db_url: str | None = None,
-    query_backend: "DuckDBQueryBackend | None" = None,
+    stores: "Stores | None" = None,
 ) -> ComparisonSet:
     """Load multiple experiments into a comparison set for inspection or plotting.
 
@@ -118,8 +109,7 @@ def load_experiments(
     ``registry_path`` (default ``PATH_TO_REGISTRY``) is read on each call, so
     edits to it are always picked up.
 
-    If db_url is provided, dataset metadata will be registered in the specified
-    Postgres database after local storage save.
+    ``stores`` defaults to the local stores (see :mod:`mfethuls.stores`).
     """
 
     names = [str(name) for name in experiment_names]
@@ -140,10 +130,7 @@ def load_experiments(
         registry,
         use_storage=use_storage,
         refresh=refresh,
-        storage_mode=storage_mode,
-        cloud_provider=cloud_provider,
-        db_url=db_url,
-        query_backend=query_backend,
+        stores=stores,
     )
 
 
@@ -154,9 +141,7 @@ def load_samples(
     registry_path: str | None = None,
     use_storage: bool = True,
     refresh: bool = False,
-    storage_mode: str = "local",
-    cloud_provider: str | None = None,
-    query_backend: "DuckDBQueryBackend | None" = None,
+    stores: "Stores | None" = None,
 ) -> ComparisonSet:
     """Load all experiments of one or more sample ids into a comparison set.
 
@@ -182,7 +167,5 @@ def load_samples(
         registry,
         use_storage=use_storage,
         refresh=refresh,
-        storage_mode=storage_mode,
-        cloud_provider=cloud_provider,
-        query_backend=query_backend,
+        stores=stores,
     )
