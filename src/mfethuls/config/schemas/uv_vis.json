@@ -17,6 +17,7 @@
           "Wavelength [nm]"
         ],
         "transmittance_pct": [
+          "intensity",
           "transmission",
           "Transmission",
           "Transmittance [%]"

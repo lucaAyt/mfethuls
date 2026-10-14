@@ -3,17 +3,18 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+from matplotlib.legend import Legend
 import pandas as pd
 import pytest
 
 from mfethuls.dataset import Dataset
 from mfethuls import plot_experiments as plot_experiments_root
 from mfethuls.plotting import (
-    load_comparison_set,
+    load_experiments,
     plot_dma,
-    plot_comparison,
     plot_dataset,
     plot_dsc,
+    plot_fluorescence,
     plot_ftir,
     plot_experiments,
     plot_rheology,
@@ -37,9 +38,85 @@ def test_plot_uv_vis_chooses_absorbance():
     )
 
     fig, ax = _close(plot_uv_vis(dataset))
-    assert ax.get_xlabel() == "wavelength_nm"
-    assert ax.get_ylabel() == "absorbance_a_u"
+    assert ax.get_xlabel() == "Wavelength (nm)"
+    assert ax.get_ylabel() == "Absorbance (a.u.)"
     assert len(ax.lines) == 1
+
+
+def test_plot_fluorescence_uses_emission_counts():
+    dataset = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [400, 450, 500], "emission_counts": [12.0, 80.0, 30.0]}),
+        metadata={"experiment_id": "EXP001"},
+    )
+
+    fig, ax = _close(plot_fluorescence(dataset))
+    assert ax.get_xlabel() == "Wavelength (nm)"
+    assert ax.get_ylabel() == "Emission intensity (counts)"
+
+
+@pytest.mark.parametrize("metadata", [{"instrument_type": "fluorescence"}, {}])
+def test_plot_dataset_dispatches_fluorescence_by_metadata_or_columns(metadata):
+    dataset = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [400, 450, 500], "emission_counts": [12.0, 80.0, 30.0]}),
+        metadata={"experiment_id": "EXP001", **metadata},
+    )
+
+    fig, ax = _close(plot_dataset(dataset))
+    assert ax.get_ylabel() == "Emission intensity (counts)"
+    assert "Fluorescence" in ax.get_title()
+
+
+def test_plot_uv_vis_rejects_fluorescence_data():
+    dataset = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [400, 450], "emission_counts": [12.0, 80.0]}),
+        metadata={"experiment_id": "EXP001"},
+    )
+
+    with pytest.raises(PlotError):
+        plot_uv_vis(dataset)
+
+
+def test_builtin_plots_stay_black_on_white_under_dark_style():
+    """marimo's dark theme applies dark_background globally; saved figures must stay readable."""
+    dataset = Dataset(
+        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.4, 0.2]}),
+        metadata={"experiment_id": "EXP001"},
+    )
+    black, white = (0.0, 0.0, 0.0, 1.0), (1.0, 1.0, 1.0, 1.0)
+
+    with plt.style.context("dark_background"):
+        fig, ax = plot_uv_vis(dataset)
+        fig.canvas.draw()  # ticks created at draw time must also stay black
+        assert fig.get_facecolor() == white
+        assert ax.get_facecolor() == white
+        assert matplotlib.colors.to_rgba(ax.xaxis.label.get_color()) == black
+        assert matplotlib.colors.to_rgba(ax.title.get_color()) == black
+        assert matplotlib.colors.to_rgba(ax.spines["bottom"].get_edgecolor()) == black
+        tick_colors = {matplotlib.colors.to_rgba(t.get_color()) for t in ax.get_xticklabels() + ax.get_yticklabels()}
+        assert tick_colors == {black}
+    plt.close(fig)
+
+
+def test_facet_figure_height_scales_with_panel_count():
+    def _dataset(name, x, y):
+        return Dataset(
+            data=pd.DataFrame({x: [1.0, 2.0, 3.0], y: [0.1, 0.2, 0.3]}),
+            metadata={"experiment_id": name, "experiment_name": name},
+        )
+
+    datasets = [
+        _dataset("a", "wavelength_nm", "absorbance_a_u"),
+        _dataset("b", "wavenumber_cm_inv", "transmittance_pct"),
+        _dataset("c", "temperature_C", "heat_flow_mW"),
+    ]
+
+    fig_two, _ = _close(plot_experiments(datasets[:2], mode="facet"))
+    fig_three, _ = _close(plot_experiments(datasets, mode="facet"))
+
+    width_two, height_two = fig_two.get_size_inches()
+    width_three, height_three = fig_three.get_size_inches()
+    assert width_two == width_three
+    assert height_three / height_two == pytest.approx(3 / 2)
 
 
 def test_plot_dsc_uses_canonical_columns():
@@ -49,8 +126,8 @@ def test_plot_dsc_uses_canonical_columns():
     )
 
     fig, ax = _close(plot_dsc(dataset))
-    assert ax.get_xlabel() == "temperature_C"
-    assert ax.get_ylabel() == "heat_flow_mW"
+    assert ax.get_xlabel() == "Temperature (°C)"
+    assert ax.get_ylabel() == "Heat flow (mW)"
     assert len(ax.lines) == 1
 
 
@@ -70,7 +147,7 @@ def test_plot_dsc_defaults_to_profile_grouping_when_available():
     assert len(ax.lines) == 2
     legend = ax.get_legend()
     assert legend is not None
-    assert legend.get_title().get_text() == "profile"
+    assert legend.get_title().get_text() == "Segment"
 
 
 def test_plot_dsc_omits_cycle_boundary_labels_from_legend():
@@ -96,16 +173,16 @@ def test_plot_dsc_omits_cycle_boundary_labels_from_legend():
     )
 
     fig, ax = _close(plot_dsc(dataset))
-    assert len(ax.lines) == 3
+    assert len(ax.lines) == 1  # boundary segments are not drawn
     legend = ax.get_legend()
     assert legend is not None
     legend_labels = [text.get_text() for text in legend.get_texts()]
-    assert legend.get_title().get_text() == "profile"
+    assert legend.get_title().get_text() == "Segment"
     assert legend_labels == ["Heating"]
 
 
 def test_plot_dsc_omits_boundary_profiles_in_comparison_overlay():
-    """Verify DSC boundary profiles (_nolegend_ markers) remain suppressed in comparison overlays."""
+    """Verify DSC boundary profiles are neither drawn nor listed in comparison overlays."""
     ds1 = Dataset(
         data=pd.DataFrame(
             {
@@ -148,20 +225,43 @@ def test_plot_dsc_omits_boundary_profiles_in_comparison_overlay():
     )
 
     fig, ax = _close(plot_experiments([ds1, ds2], mode="overlay", kind="dsc"))
-    # Should have 6 lines (3 from each dataset: "Heating start", "Heating", "Cooling end")
-    # But only "Heating" should appear in legend (start and end are _nolegend_)
-    assert len(ax.lines) == 6
-    legend = ax.get_legend()
-    assert legend is not None
-    legend_labels = [text.get_text() for text in legend.get_texts()]
-    # Should only contain the two "Heating" profiles (one per dataset), not boundary profiles
-    assert "EXP_DSC_A | Heating" in legend_labels
-    assert "EXP_DSC_B | Heating" in legend_labels
-    # Should NOT contain blank labels or boundary profiles
-    assert "" not in legend_labels
-    assert not any("start" in label for label in legend_labels)
-    assert not any("end" in label for label in legend_labels)
-    assert len(legend_labels) == 2  # Only the two "Heating" profiles
+    # Only the "Heating" segment of each dataset is drawn; "start"/"end" boundaries are skipped
+    assert len(ax.lines) == 2
+    # Two legends: segments (colour) and experiments (line style)
+    legends = [artist for artist in ax.artists if isinstance(artist, Legend)] + [ax.get_legend()]
+    texts = {legend.get_title().get_text(): [t.get_text() for t in legend.get_texts()] for legend in legends}
+    assert texts == {"Segment": ["Heating"], "Experiment": ["EXP_DSC_A", "EXP_DSC_B"]}
+
+    # Same segment colour for both experiments, different line styles
+    assert ax.lines[0].get_color() == ax.lines[1].get_color()
+    assert ax.lines[0].get_linestyle() != ax.lines[1].get_linestyle()
+
+
+def test_plot_dsc_colours_segments_by_type_and_cycle():
+    dataset = Dataset(
+        data=pd.DataFrame(
+            {
+                "temperature_C": list(range(12)),
+                "heat_flow_mW": [0.1] * 12,
+                "profile": ["Isothermal_0"] * 2 + ["Heating_0"] * 2 + ["Cooling_0"] * 2
+                + ["Heating_start"] * 2 + ["Heating_1"] * 2 + ["Cooling_1"] * 2,
+            }
+        ),
+        metadata={"experiment_id": "EXP_DSC_C"},
+    )
+
+    fig, ax = _close(plot_dsc(dataset))
+    colors = {line.get_label(): line.get_color() for line in ax.lines}
+
+    assert "Heating_start" not in colors
+    # Later cycles get a darker shade of the same colour
+    for early, late in [("Heating_0", "Heating_1"), ("Cooling_0", "Cooling_1")]:
+        assert sum(colors[late][:3]) < sum(colors[early][:3])
+    # Heating is red-dominant, cooling blue-dominant, isothermal grey
+    assert colors["Heating_1"][0] > colors["Heating_1"][2]
+    assert colors["Cooling_1"][2] > colors["Cooling_1"][0]
+    r, g, b, _ = colors["Isothermal_0"]
+    assert max(r, g, b) - min(r, g, b) < 0.01
 
 
 def test_plot_ftir_chooses_absorbance_and_reverses_axis():
@@ -176,8 +276,8 @@ def test_plot_ftir_chooses_absorbance_and_reverses_axis():
     )
 
     fig, ax = _close(plot_ftir(dataset))
-    assert ax.get_xlabel() == "wavenumber_cm_inv"
-    assert ax.get_ylabel() == "absorbance_a_u"
+    assert ax.get_xlabel() == r"Wavenumber (cm$^{-1}$)"
+    assert ax.get_ylabel() == "Absorbance (a.u.)"
     assert len(ax.lines) == 1
     left, right = ax.get_xlim()
     assert left > right
@@ -196,7 +296,7 @@ def test_plot_rheology_uses_profile_requirements():
     )
 
     fig, ax = _close(plot_rheology(dataset))
-    assert ax.get_xlabel() == "angular_frequency_rad_s"
+    assert ax.get_xlabel() == r"Angular frequency $\omega$ (rad s$^{-1}$)"
     assert len(ax.lines) == 2
 
 
@@ -213,7 +313,7 @@ def test_plot_dma_uses_profile_requirements():
     )
 
     fig, ax = _close(plot_dma(dataset))
-    assert ax.get_xlabel() == "frequency_hz"
+    assert ax.get_xlabel() == "Frequency (Hz)"
     assert len(ax.lines) == 2
 
 
@@ -241,8 +341,8 @@ def test_plot_dataset_dispatches_from_columns():
     )
 
     fig, ax = _close(plot_dataset(dataset))
-    assert ax.get_xlabel() == "mz"
-    assert ax.get_ylabel() == "intensity_a_u"
+    assert ax.get_xlabel() == "$m/z$"
+    assert ax.get_ylabel() == "Intensity (a.u.)"
 
 
 def test_plot_dataset_dispatches_ftir_from_columns():
@@ -257,8 +357,8 @@ def test_plot_dataset_dispatches_ftir_from_columns():
     )
 
     fig, ax = _close(plot_dataset(dataset))
-    assert ax.get_xlabel() == "wavenumber_cm_inv"
-    assert ax.get_ylabel() == "transmittance_pct"
+    assert ax.get_xlabel() == r"Wavenumber (cm$^{-1}$)"
+    assert ax.get_ylabel() == "Transmittance (%)"
 
 
 def test_plot_dataset_dispatches_dma_from_metadata_and_profile():
@@ -277,7 +377,7 @@ def test_plot_dataset_dispatches_dma_from_metadata_and_profile():
     )
 
     fig, ax = _close(plot_dataset(dataset))
-    assert ax.get_xlabel() == "strain_pct"
+    assert ax.get_xlabel() == "Strain (%)"
 
 
 def test_plot_dataset_dispatches_dma_from_profile_without_instrument_type():
@@ -293,7 +393,7 @@ def test_plot_dataset_dispatches_dma_from_profile_without_instrument_type():
     )
 
     fig, ax = _close(plot_dataset(dataset))
-    assert ax.get_xlabel() == "strain_pct"
+    assert ax.get_xlabel() == "Strain (%)"
 
 
 def test_plotting_fails_on_missing_columns():
@@ -338,7 +438,7 @@ def test_plot_uv_vis_respects_explicit_group_by():
     assert len(ax.lines) == 2
     legend = ax.get_legend()
     assert legend is not None
-    assert legend.get_title().get_text() == "source_file"
+    assert legend.get_title().get_text() == "File"
 
 
 def test_plot_uv_vis_uses_gradient_palette_for_dense_groups():
@@ -420,7 +520,13 @@ def test_plot_uv_vis_logs_when_inferred_grouping_ties(caplog):
     assert "Grouping inference tie detected" in caplog.text
 
 
-def test_load_comparison_set_preserves_order_and_options(monkeypatch):
+def _dsc_registry(*names):
+    from mfethuls import Registry
+
+    return Registry.from_frame(pd.DataFrame([{"name": name, "instrument_name": "dsc"} for name in names]))
+
+
+def test_load_experiments_preserves_order_and_options(monkeypatch):
     calls = []
 
     def _fake_loader(name, use_storage=True, refresh=False, **kwargs):
@@ -433,7 +539,8 @@ def test_load_comparison_set_preserves_order_and_options(monkeypatch):
 
     monkeypatch.setattr("mfethuls.comparison.load_experiment_dataset", _fake_loader)
 
-    result = load_comparison_set(["EXP003", "EXP001"], use_storage=False, refresh=True)
+    result = load_experiments(["EXP003", "EXP001"], registry=_dsc_registry("EXP003", "EXP001"),
+                                          use_storage=False, refresh=True)
 
     assert isinstance(result, ComparisonSet)
     assert [ds.experiment_id for ds in result.datasets] == ["EXP003", "EXP001"]
@@ -444,7 +551,7 @@ def test_load_comparison_set_preserves_order_and_options(monkeypatch):
     ]
 
 
-def test_load_comparison_set_label_fallbacks(monkeypatch):
+def test_load_experiments_label_fallbacks(monkeypatch):
     queue = [
         Dataset(
             data=pd.DataFrame({"temperature_C": [25.0], "heat_flow_mW": [0.2]}),
@@ -462,11 +569,11 @@ def test_load_comparison_set_label_fallbacks(monkeypatch):
 
     monkeypatch.setattr("mfethuls.comparison.load_experiment_dataset", _fake_loader)
 
-    result = load_comparison_set(["exp_a", "exp_b"])
+    result = load_experiments(["exp_a", "exp_b"], registry=_dsc_registry("exp_a", "exp_b"))
     assert result.labels == ["EXP777", "dataset_2"]
 
 
-def test_plot_comparison_auto_overlay_when_shared_x():
+def test_plot_experiments_auto_overlay_when_shared_x():
     ds1 = Dataset(
         data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
         metadata={"experiment_id": "EXP001"},
@@ -481,7 +588,7 @@ def test_plot_comparison_auto_overlay_when_shared_x():
     assert ax.get_title() == "Comparison Overlay"
 
 
-def test_plot_comparison_auto_facet_when_x_not_compatible():
+def test_plot_experiments_auto_facet_when_x_not_compatible():
     ds1 = Dataset(
         data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
         metadata={"experiment_id": "EXP001"},
@@ -494,13 +601,13 @@ def test_plot_comparison_auto_facet_when_x_not_compatible():
     fig, axes = plot_experiments([ds1, ds2], mode="auto")
     plt.close(fig)
     assert axes.shape[0] == 2
-    assert axes[0, 0].get_xlabel() == "wavelength_nm"
-    assert axes[1, 0].get_xlabel() == "temperature_C"
+    assert axes[0, 0].get_xlabel() == "Wavelength (nm)"
+    assert axes[1, 0].get_xlabel() == "Temperature (°C)"
     assert axes[0, 0].get_title() == ""
     assert axes[1, 0].get_title() == ""
 
 
-def test_plot_comparison_explicit_overlay_rejects_incompatible_x():
+def test_plot_experiments_explicit_overlay_rejects_incompatible_x():
     ds1 = Dataset(
         data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
         metadata={"experiment_id": "EXP001"},
@@ -514,7 +621,7 @@ def test_plot_comparison_explicit_overlay_rejects_incompatible_x():
         plot_experiments([ds1, ds2], mode="overlay")
 
 
-def test_plot_comparison_explicit_stacked_rejects_incompatible_x():
+def test_plot_experiments_explicit_stacked_rejects_incompatible_x():
     ds1 = Dataset(
         data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
         metadata={"experiment_id": "EXP001"},
@@ -528,7 +635,7 @@ def test_plot_comparison_explicit_stacked_rejects_incompatible_x():
         plot_experiments([ds1, ds2], mode="stacked", stacked_offset=0.5)
 
 
-def test_plot_comparison_stacked_requires_positive_offset():
+def test_plot_experiments_stacked_requires_positive_offset():
     ds1 = Dataset(
         data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
         metadata={"experiment_id": "EXP001"},
@@ -540,20 +647,6 @@ def test_plot_comparison_stacked_requires_positive_offset():
 
     with pytest.raises(PlotError):
         plot_experiments([ds1, ds2], mode="stacked", stacked_offset=0.0)
-
-
-def test_plot_comparison_remains_compatible_alias():
-    ds1 = Dataset(
-        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.1, 0.2, 0.3]}),
-        metadata={"experiment_id": "EXP001"},
-    )
-    ds2 = Dataset(
-        data=pd.DataFrame({"wavelength_nm": [200, 250, 300], "absorbance_a_u": [0.15, 0.25, 0.35]}),
-        metadata={"experiment_id": "EXP002"},
-    )
-
-    fig, ax = _close(plot_comparison([ds1, ds2], mode="auto", kind="uv_vis"))
-    assert len(ax.lines) == 2
 
 
 def test_plot_experiments_is_available_from_package_root():

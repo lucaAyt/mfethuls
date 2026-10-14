@@ -1,13 +1,13 @@
-import os
 import re
 import logging
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
 
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.ingestion import collect_dataframe_from_paths
-from mfethuls.parsers.registry import register_parser
+from mfethuls.parsers.registry import reads, register_parser
 from mfethuls.schema_normalization import apply_dataframe_schema
 
 
@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 @register_parser('tga', 'tgaX')
 class TGAXParser:
+    extra_extensions = ('.csv',)
+
     def __init__(self, file_extension='.txt', delimiter='\s+'):
         self.file_extension = file_extension
         self.delimiter = delimiter
@@ -35,8 +37,7 @@ class TGAXParser:
     ):
         """Parse TGA data.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -45,11 +46,8 @@ class TGAXParser:
             parse_raw=self.parse_raw_data,
             logger=logger,
             parser_label="TGA",
-            should_parse_raw=lambda path: str(path).casefold().endswith(self.file_extension.casefold()) or str(path).casefold().endswith('.csv'),
+            should_parse_raw=lambda path: reads(self, path),
         )
-
-        if experiment_id is None:
-            return df
 
         df, schema_report = apply_dataframe_schema(
             df,
@@ -113,14 +111,14 @@ class TGAXParser:
                 return pd.DataFrame(columns=cols)
 
             df = pd.DataFrame(lines[1:], columns=cols).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
-            df["name"] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
+            df["name"] = [f'{Path(path).stem}'] * df.shape[0]
             
             # Calculate mass percentage as not in original data
             _calculate_mass_percentage(df, weight_column="Weight [mg]")
         
         else:
             
-            filename = f'{os.path.basename(os.path.normpath(path)).rstrip(".csv")}'
+            filename = f'{Path(path).stem}'
             df = pd.read_csv(path).assign(name=filename)
             _calculate_mass_percentage(df)
             logger.warning(f"Parsed CSV file:\n{df}")

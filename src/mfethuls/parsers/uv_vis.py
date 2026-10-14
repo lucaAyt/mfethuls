@@ -1,6 +1,7 @@
 import os
 import logging
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 @register_parser('uv_vis', 'flame')
-@register_parser('reflection', 'flame')
+@register_parser('fluorescence', 'flame')
 class FlameOceanOpticsParser:
     def __init__(self, file_extension='.txt'):
         self.file_extension = file_extension
@@ -35,10 +36,13 @@ class FlameOceanOpticsParser:
         experiment_name: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ):
-        """Parse in-situ UV or reflection data from Ocean Optics Flame.
+        """Parse in-situ UV-Vis or fluorescence data from Ocean Optics Flame.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        The raw signal column is named ``intensity``; the schema of the
+        instrument type gives it its meaning (``transmittance_pct`` for
+        uv_vis, ``emission_counts`` for fluorescence).
+
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -46,15 +50,12 @@ class FlameOceanOpticsParser:
             file_extension=self.file_extension,
             parse_raw=self.parse_raw_data,
             logger=logger,
-            parser_label="Flame UV",
+            parser_label="Flame",
         )
-
-        if experiment_id is None:
-            return df
 
         df, schema_report = apply_dataframe_schema(
             df,
-            instrument_type="uv_vis",
+            instrument_type=instrument_type or "uv_vis",
             instrument_model=instrument_model or "flame",
         )
 
@@ -83,7 +84,7 @@ class FlameOceanOpticsParser:
 
     def parse_raw_data(self, path):
         # Get milliseconds from timestamp in filename if data was saved with timestamp suffix
-        filenname_suffix = os.path.basename(path).split('_')[-1].rstrip(self.file_extension)
+        filenname_suffix = Path(path).stem.split('_')[-1]
         milliseconds = timedelta(milliseconds=float(filenname_suffix.split('-')[-1])) if '-' in filenname_suffix \
             else timedelta(0)
 
@@ -100,11 +101,8 @@ class FlameOceanOpticsParser:
             return pd.DataFrame()
 
         df = df.iloc[:, :2]
-        df.columns = ['wavelength (nm)', 'transmission']
+        df.columns = ['wavelength (nm)', 'intensity']
         df.loc[:, 'timestamp'] = handle_tz(timestamp) + milliseconds if timestamp else pd.NaT
-
-        # cut data
-        df = df[df['wavelength (nm)'].between(280, 900)]
 
         # Add name of experiment
         df.loc[:, 'name'] = [f'{os.path.basename(os.path.dirname(path))}'] * df.shape[0]
@@ -132,8 +130,7 @@ class ShimadzuUVVisParser:
     ):
         """Parse Shimadzu UV-Vis data.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -143,9 +140,6 @@ class ShimadzuUVVisParser:
             logger=logger,
             parser_label="Shimadzu UV",
         )
-
-        if experiment_id is None:
-            return df
 
         df, schema_report = apply_dataframe_schema(
             df,
@@ -180,7 +174,7 @@ class ShimadzuUVVisParser:
         df = pd.read_csv(path, header=1, sep='\t').apply(pd.to_numeric, errors='coerce')
 
         # Additional 'meta' data: You can use underscore for titration meta data. Delete post if not needed in output
-        titrant_info = os.path.basename(os.path.normpath(path)).split('_')[-1].rstrip(self.file_extension).lstrip('0')
+        titrant_info = Path(path).stem.split('_')[-1].lstrip('0')
         df.loc[:, 'titrant'] = titrant_info if not titrant_info == '' else '0'  # I DNA
         df.loc[:, 'name'] = [f'{os.path.basename(os.path.dirname(path))}'] * df.shape[0]
 

@@ -2,14 +2,25 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 import re
-from typing import Any, Dict, List, Optional, Iterator
+from typing import Any, Callable, Dict, List, Optional, Iterator
 
 import pandas as pd
 
-from .config import _get_duckdb_path, _get_duckdb_s3_config, _get_duckdb_s3_endpoint_host
+from .catalog import CATALOG_FIELDS, CatalogRecord
+from .config import _get_duckdb_path
 from contextlib import contextmanager
+
+logger = logging.getLogger(__name__)
+
+# Fields copied from a dataset's .metadata.json sidecar when backfilling older catalog rows.
+_SIDECAR_FIELDS = (
+    "experiment_id", "experiment_name", "instrument_name", "instrument_type",
+    "instrument_model", "sample_id", "run_id", "measurement_profile",
+)
 
 try:
     import duckdb  # type: ignore
@@ -24,10 +35,76 @@ def _get_duckdb():
     return getattr(storage_module, "duckdb", duckdb)
 
 
+def _create_catalog(conn) -> None:
+    """Create ``dataset_registry`` and add catalog columns missing from older databases."""
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dataset_registry (
+            table_name TEXT PRIMARY KEY,
+            storage_path TEXT NOT NULL,
+            experiment_name TEXT,
+            raw_data_filename TEXT,
+            registered_at TIMESTAMP DEFAULT now()
+        );
+        """
+    )
+    for column, sql_type in CATALOG_FIELDS.items():
+        conn.execute(f"ALTER TABLE dataset_registry ADD COLUMN IF NOT EXISTS {column} {sql_type};")
+
+
+def _sidecar_path(storage_path: str) -> str:
+    base, _ = os.path.splitext(storage_path)
+    return f"{base}.metadata.json"
+
+
+def _backfill_catalog(conn) -> int:
+    """Fill catalog rows registered before the catalog had full records.
+
+    Rows without an ``experiment_id`` get their fields from the dataset's
+    ``.metadata.json`` sidecar and their row count from the Parquet file. Only local
+    files are read, and a database without such rows costs one query. Returns the
+    number of rows updated.
+    """
+
+    rows = conn.execute(
+        "SELECT table_name, storage_path FROM dataset_registry WHERE experiment_id IS NULL;"
+    ).fetchall()
+    updated = 0
+    for table_name, storage_path in rows:
+        sidecar = _sidecar_path(storage_path)
+        if DuckDBQueryBackend._is_remote_uri(storage_path) or not os.path.exists(sidecar):
+            continue
+        try:
+            with open(sidecar, encoding="utf8") as handle:
+                metadata = json.load(handle)
+            values = {name: metadata.get(name) for name in _SIDECAR_FIELDS}
+            values["rows"] = conn.execute("SELECT count(*) FROM read_parquet(?);", [storage_path]).fetchone()[0]
+            assignments = ", ".join(f"{name} = coalesce(?, {name})" for name in values)
+            conn.execute(
+                f"UPDATE dataset_registry SET {assignments} WHERE table_name = ?;",
+                [*values.values(), table_name],
+            )
+            updated += 1
+        except Exception:
+            logger.warning("Could not backfill catalog row %r from %s", table_name, sidecar)
+    return updated
+
+
 class DuckDBQueryBackend:
     """DuckDB-backed query backend for Parquet datasets."""
 
-    def __init__(self, db_path: Optional[str] = None, read_only: bool = False) -> None:
+    def __init__(
+        self,
+        db_path: Optional[str] = None,
+        read_only: bool = False,
+        setup: Optional[Callable[[Any], None]] = None,
+    ) -> None:
+        """Open the catalog at ``db_path`` (default: in the storage folder).
+
+        ``setup(connection)`` runs right after connecting, before views are
+        recreated, e.g. to give DuckDB credentials for Parquet files in the cloud.
+        """
         if _get_duckdb() is None:
             raise RuntimeError("duckdb is required for DuckDBQueryBackend. Install duckdb.")
 
@@ -39,33 +116,27 @@ class DuckDBQueryBackend:
         # with a brief write-mode connection before opening read-only.
         if read_only and self.db_path != ":memory:":
             init = _get_duckdb().connect(self.db_path, read_only=False)
-            init.execute(
-                """
-                CREATE TABLE IF NOT EXISTS dataset_registry (
-                    table_name TEXT PRIMARY KEY,
-                    storage_path TEXT NOT NULL,
-                    experiment_name TEXT,
-                    raw_data_filename TEXT,
-                    registered_at TIMESTAMP DEFAULT now()
-                );
-                """
-            )
+            _create_catalog(init)
+            _backfill_catalog(init)
             init.close()
         self._conn = _get_duckdb().connect(self.db_path, read_only=read_only)
-        self._s3_configured = False
+        if setup is not None:
+            setup(self._conn)
         self._ensure_registry()
         # Avoid rehydrating views in read-only mode because the registry
         # table may not exist and rehydration attempts will fail.
         if not self.read_only:
             self._rehydrate_views()
+            self.backfill_catalog()
 
     @staticmethod
-    def _is_s3_uri(storage_path: str) -> bool:
-        return storage_path.strip().lower().startswith("s3://")
+    def _is_remote_uri(storage_path: str) -> bool:
+        """A cloud location (``s3://``, ``az://``, ...); readable once ``setup`` configured access."""
+        return "://" in storage_path
 
     @staticmethod
     def _is_materializable_storage_path(storage_path: str) -> bool:
-        if DuckDBQueryBackend._is_s3_uri(storage_path):
+        if DuckDBQueryBackend._is_remote_uri(storage_path):
             return True
         normalized = os.path.abspath(storage_path)
         return os.path.exists(normalized)
@@ -74,56 +145,17 @@ class DuckDBQueryBackend:
     def _sql_string(value: str) -> str:
         return value.replace("'", "''")
 
-    def _ensure_s3_configured(self) -> None:
-        if self._s3_configured:
-            return
-        self._configure_s3_access()
-        self._s3_configured = True
-
-    def _configure_s3_access(self) -> None:
-        config = _get_duckdb_s3_config()
-        if not all(config.get(key) for key in ("region", "endpoint", "access_key_id", "secret_access_key")):
-            return
-
-        try:
-            self._conn.execute("INSTALL httpfs;")
-            self._conn.execute("LOAD httpfs;")
-        except Exception:
-            pass
-
-        endpoint_host = _get_duckdb_s3_endpoint_host(config.get("region"), config.get("endpoint"))
-        if not endpoint_host:
-            return
-
-        self._conn.execute(
-            f"""
-            CREATE OR REPLACE SECRET do_spaces_secret (
-                TYPE S3,
-                PROVIDER CONFIG,
-                KEY_ID '{self._sql_string(config.get('access_key_id', ''))}',
-                SECRET '{self._sql_string(config.get('secret_access_key', ''))}',
-                REGION '{self._sql_string(config.get('region', ''))}',
-                ENDPOINT '{self._sql_string(endpoint_host)}',
-                URL_STYLE 'vhost',
-                USE_SSL TRUE
-            );
-            """
-        )
-
     def _ensure_registry(self) -> None:
         if self.read_only:
             return
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS dataset_registry (
-                table_name TEXT PRIMARY KEY,
-                storage_path TEXT NOT NULL,
-                experiment_name TEXT,
-                raw_data_filename TEXT,
-                registered_at TIMESTAMP DEFAULT now()
-            );
-            """
-        )
+        _create_catalog(self._conn)
+
+    def backfill_catalog(self) -> int:
+        """Fill catalog rows registered before the catalog had full records (see ``_backfill_catalog``)."""
+
+        if self.read_only:
+            return 0
+        return _backfill_catalog(self._conn)
 
     def _rehydrate_views(self) -> None:
         rows = self._conn.execute(
@@ -131,8 +163,6 @@ class DuckDBQueryBackend:
         ).fetchall()
         for table_name, storage_path in rows:
             try:
-                if self._is_s3_uri(storage_path):
-                    self._ensure_s3_configured()
                 if self._is_materializable_storage_path(storage_path):
                     self._conn.execute(
                         f'CREATE OR REPLACE VIEW "{self._sql_string(table_name)}" AS SELECT * FROM read_parquet(\'{self._sql_string(storage_path)}\');'
@@ -151,15 +181,20 @@ class DuckDBQueryBackend:
         table_name: Optional[str] = None,
         overwrite: bool = True,
         persist_view: bool = True,
-        experiment_name: Optional[str] = None,
-        raw_data_filename: Optional[str] = None,
+        record: Optional[CatalogRecord] = None,
     ) -> str:
+        """Create the view for ``storage_path`` and upsert its catalog row.
+
+        ``record`` fills the catalog row; without it only the view and path are stored.
+        """
+
         if self.read_only:
             raise RuntimeError("Cannot register parquet on a read-only DuckDB connection")
+        fields = record.fields() if record is not None else {}
+        if record is not None:
+            table_name = table_name or record.table_name
         inferred = table_name or os.path.splitext(os.path.basename(storage_path))[0]
         view_name = self._sanitize_table_name(inferred)
-        if self._is_s3_uri(storage_path):
-            self._ensure_s3_configured()
         if overwrite:
             try:
                 self._conn.unregister(view_name)
@@ -169,37 +204,50 @@ class DuckDBQueryBackend:
             self._conn.execute(
                 f'CREATE OR REPLACE VIEW "{self._sql_string(view_name)}" AS SELECT * FROM read_parquet(\'{self._sql_string(storage_path)}\');'
             )
+            columns = ["table_name", "storage_path", *fields]
+            updates = ", ".join(f"{column} = excluded.{column}" for column in columns[1:])
+            placeholders = ", ".join("?" for _ in columns)
             self._conn.execute(
-                """
-                INSERT INTO dataset_registry (table_name, storage_path, experiment_name, raw_data_filename)
-                VALUES (?, ?, ?, ?)
+                f"""
+                INSERT INTO dataset_registry ({', '.join(columns)})
+                VALUES ({placeholders})
                 ON CONFLICT(table_name)
-                DO UPDATE SET
-                    storage_path = excluded.storage_path,
-                    experiment_name = excluded.experiment_name,
-                    raw_data_filename = excluded.raw_data_filename,
-                    registered_at = now();
+                DO UPDATE SET {updates}, registered_at = now();
                 """,
-                [view_name, storage_path, experiment_name, raw_data_filename],
+                [view_name, storage_path, *fields.values()],
             )
+            if fields.get("experiment_id"):
+                self._remove_superseded(fields["experiment_id"], keep=view_name)
         return view_name
 
+    def _remove_superseded(self, experiment_id: str, *, keep: str) -> None:
+        """Drop older catalog rows and views of the same experiment under another name.
+
+        The view and file names include sample and run, so correcting either in
+        the registry registers the experiment under a new name. The old Parquet
+        file is user data and stays on disk; it is named in a warning.
+        """
+
+        stale = self._conn.execute(
+            "SELECT table_name, storage_path FROM dataset_registry WHERE experiment_id = ? AND table_name <> ?;",
+            [experiment_id, keep],
+        ).fetchall()
+        for table_name, old_path in stale:
+            self.remove_dataset(table_name)
+            logger.warning(
+                "Experiment %s is now registered as %r; removed the old catalog entry %r. "
+                "Its file %s is no longer used and can be deleted.",
+                experiment_id, keep, table_name, old_path,
+            )
+
     def list_registered(self) -> List[Dict[str, Any]]:
-        res = self._conn.execute(
-            "SELECT table_name, storage_path, experiment_name, raw_data_filename, registered_at "
-            "FROM dataset_registry ORDER BY registered_at DESC;"
-        )
-        rows = res.fetchall()
-        return [
-            {
-                "table_name": row[0],
-                "storage_path": row[1],
-                "experiment_name": row[2],
-                "raw_data_filename": row[3],
-                "registered_at": row[4],
-            }
-            for row in rows
-        ]
+        """All catalog rows, newest first, as dictionaries of every column."""
+
+        columns = ["table_name", "storage_path", *CATALOG_FIELDS, "registered_at"]
+        rows = self._conn.execute(
+            f"SELECT {', '.join(columns)} FROM dataset_registry ORDER BY registered_at DESC;"
+        ).fetchall()
+        return [dict(zip(columns, row)) for row in rows]
 
     def remove_dataset(self, table_name: str) -> None:
         if self.read_only:

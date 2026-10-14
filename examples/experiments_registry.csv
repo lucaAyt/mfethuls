@@ -1,0 +1,8 @@
+name,instrument_name,sample_id,run_id,raw_data_filename,measurement_profile,description,operator
+LB_dsc_001,dsc_mettler_toledo,S001,R001,poly1,,DSC run - polymer 1,LB
+LB_dsc_002,dsc_mettler_toledo,S002,R001,poly2,,DSC run - polymer 2,LB
+LB_tga_001,tga,S001,R001,poly1,,TGA run - polymer 1,LB
+LB_tga_002,tga,S002,R001,poly2,,TGA run - polymer 2,LB
+LB_ftir_001,ftir,S001,R001,poly1,,FTIR spectrum - polymer 1,LB
+LB_ftir_002,ftir,S002,R001,poly2,,FTIR spectrum - polymer 2,LB
+LB_fluorescence_001,fluorescence_insitu,S003,R001,poly3,,Fluorescence in-situ kinetics - polymer 3,LB

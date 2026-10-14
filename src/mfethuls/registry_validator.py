@@ -16,6 +16,7 @@ import pandas as pd
 
 from mfethuls.parsers.registry import _PARSER_REGISTRY
 from mfethuls.schema_normalization import _load_instrument_schema
+from mfethuls.settings import get_settings
 
 if TYPE_CHECKING:
     from mfethuls.experiments import Experiment
@@ -237,7 +238,7 @@ class RegistryValidator:
             return errors, warnings
 
         if check_data_paths:
-            data_root = data_root or os.environ.get("PATH_TO_DATA")
+            data_root = data_root or get_settings().data_root
             if not data_root:
                 warnings.append(
                     ("data_path", "No data_root provided; cannot validate data paths.")
@@ -360,90 +361,59 @@ class RegistryValidator:
         parsers = sorted(_PARSER_REGISTRY.keys())
         return ", ".join(f"({t}, {m})" for t, m in parsers) or "(none)"
 
-    def validate_all(self) -> Tuple[bool, Dict[str, List[str]]]:
-        """Run a diagnostic pass over all registered instruments.
 
-        Returns a tuple (all_valid, detailed_errors_dict).
-        """
-        all_errors: Dict[str, List[str]] = {}
-        for entry in self.config:
-            instr_name = entry.get("name", "unknown")
-            instr_type = entry.get("type", "unknown")
-            instr_model = entry.get("model", "unknown")
-
-            # Check parser registration
-            parser_key = (instr_type, instr_model)
-            if parser_key not in _PARSER_REGISTRY:
-                if instr_name not in all_errors:
-                    all_errors[instr_name] = []
-                all_errors[instr_name].append(
-                    f"No parser for ({instr_type}, {instr_model})"
-                )
-
-            # Check schema existence
-            schema = _load_instrument_schema(instr_type)
-            if not schema:
-                if instr_name not in all_errors:
-                    all_errors[instr_name] = []
-                all_errors[instr_name].append(f"No schema for type '{instr_type}'")
-
-        return len(all_errors) == 0, all_errors
-
-def _check_name_uniqueness(df: pd.DataFrame) -> List[str]:
-    """Return error messages for duplicate 'name' values in the registry."""
-    duplicates = df["name"].dropna()[df["name"].dropna().duplicated()].unique().tolist()
-    if duplicates:
-        return [f"Duplicate experiment name(s): {sorted(duplicates)}. Each name must be unique."]
-    return []
+def _text(value: Any) -> Optional[str]:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    text = str(value).strip()
+    return text or None
 
 
-def _check_raw_data_filename_uniqueness(df: pd.DataFrame) -> List[str]:
-    """Return error messages for duplicate raw_data_filename per instrument_name."""
-    if "raw_data_filename" not in df.columns:
-        return _check_name_uniqueness_as_filename(df)
+def _table_errors(df: pd.DataFrame) -> List[List[Dict[str, str]]]:
+    """Errors that need the whole table: duplicate names and files, unsafe file names.
 
-    errors: List[str] = []
-    check = df[["raw_data_filename", "instrument_name"]].dropna(subset=["instrument_name"])
-    dupes = check[check.duplicated(subset=["raw_data_filename", "instrument_name"], keep=False)]
-    if not dupes.empty:
-        for _, group in dupes.groupby(["raw_data_filename", "instrument_name"]):
-            fname = group["raw_data_filename"].iloc[0]
-            instr = group["instrument_name"].iloc[0]
-            errors.append(
-                f"raw_data_filename {fname!r} is declared more than once for instrument "
-                f"{instr!r}. Each file must map to exactly one experiment."
-            )
-    return errors
+    Returned per row (same order as ``df``) so each problem shows on the rows involved.
+    A row's file is its ``raw_data_filename``, or its ``name`` when that is empty.
+    """
 
+    records = df.to_dict(orient="records")
+    errors: List[List[Dict[str, str]]] = [[] for _ in records]
+    names = [_text(rec.get("name")) for rec in records]
+    files = [_text(rec.get("raw_data_filename")) or name for rec, name in zip(records, names)]
+    instruments = [(_text(rec.get("instrument_name")) or "").casefold() or None for rec in records]
 
-def _check_name_uniqueness_as_filename(df: pd.DataFrame) -> List[str]:
-    """When raw_data_filename is absent, names serve as filenames — check uniqueness per instrument."""
-    errors: List[str] = []
-    check = df[["name", "instrument_name"]].dropna(subset=["instrument_name"])
-    dupes = check[check.duplicated(subset=["name", "instrument_name"], keep=False)]
-    if not dupes.empty:
-        for _, group in dupes.groupby(["name", "instrument_name"]):
-            name = group["name"].iloc[0]
-            instr = group["instrument_name"].iloc[0]
-            errors.append(
-                f"name {name!r} is used more than once for instrument {instr!r}. "
-                "Add a raw_data_filename column or use unique names per instrument."
-            )
-    return errors
+    name_count: Dict[str, int] = {}
+    for name in names:
+        if name:
+            name_count[name] = name_count.get(name, 0) + 1
+    file_count: Dict[Tuple[str, str], int] = {}
+    for file, instrument in zip(files, instruments):
+        if file and instrument:
+            file_count[(file, instrument)] = file_count.get((file, instrument), 0) + 1
 
-
-def _check_raw_data_filename_filesystem_safe(df: pd.DataFrame) -> List[str]:
-    """Return error messages for raw_data_filename values with unsafe characters."""
-    if "raw_data_filename" not in df.columns:
-        return []
-    errors: List[str] = []
-    for val in df["raw_data_filename"].dropna().unique():
-        val_str = str(val)
-        if not _SAFE_FILENAME_RE.fullmatch(val_str):
-            errors.append(
-                f"raw_data_filename {val_str!r} contains characters outside [A-Za-z0-9_\\-.]. "
-                "Use only alphanumeric characters, underscores, hyphens, and dots."
-            )
+    for idx, rec in enumerate(records):
+        if names[idx] and name_count[names[idx]] > 1:
+            errors[idx].append({
+                "field": "name",
+                "message": f"Name {names[idx]!r} is used by more than one row. Each name must be unique.",
+            })
+        if files[idx] and instruments[idx] and file_count[(files[idx], instruments[idx])] > 1:
+            errors[idx].append({
+                "field": "raw_data_filename",
+                "message": (
+                    f"Raw data {files[idx]!r} is used by more than one {instruments[idx]} row. "
+                    "Each file must map to exactly one experiment."
+                ),
+            })
+        declared = _text(rec.get("raw_data_filename"))
+        if declared and not _SAFE_FILENAME_RE.fullmatch(declared):
+            errors[idx].append({
+                "field": "raw_data_filename",
+                "message": (
+                    f"raw_data_filename {declared!r} contains characters outside [A-Za-z0-9_\\-.]. "
+                    "Use only alphanumeric characters, underscores, hyphens, and dots."
+                ),
+            })
     return errors
 
 
@@ -465,18 +435,11 @@ def validate_registry_dataframe(
     rows_out: List[Dict[str, Any]] = []
     valid_count = 0
 
-    # DataFrame-level uniqueness and safety checks — reported on row 0 as global errors
-    global_errors: List[str] = []
-    if "name" in df.columns:
-        global_errors.extend(_check_name_uniqueness(df))
-    global_errors.extend(_check_raw_data_filename_uniqueness(df))
-    global_errors.extend(_check_raw_data_filename_filesystem_safe(df))
+    table_errors = _table_errors(df)
 
     for idx, rec in enumerate(df.to_dict(orient="records"), start=1):
         row_result = experiment_from_registry_record(rec)
-        errors = [{"field": "registry", "message": message} for message in row_result.errors]
-        if idx == 1:
-            errors = [{"field": "registry_global", "message": m} for m in global_errors] + errors
+        errors = table_errors[idx - 1] + [{"field": "registry", "message": message} for message in row_result.errors]
         warnings = [{"field": "registry", "message": message} for message in row_result.warnings]
 
         experiment = row_result.experiment

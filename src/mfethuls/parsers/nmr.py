@@ -34,8 +34,7 @@ class BrukerNMRParser:
         is a member of the Bruker dataset directory). parse_raw_data is called
         once per unique folder so nmrglue reads the spectrum exactly once.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
         experiment_folders: set[str] = set()
         for paths in dict_paths.values():
@@ -56,9 +55,6 @@ class BrukerNMRParser:
         # structure. We now normalize into canonical 1D spectral columns.
 
         df = df.reset_index(drop=True)
-
-        if experiment_id is None:
-            return df
 
         df, schema_report = apply_dataframe_schema(
             df,

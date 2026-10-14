@@ -1,17 +1,15 @@
 # Data Analysis Guide — Querying Lab Data in Notebooks
 
-This guide covers every way to access mfethuls data programmatically: the Python API, DuckDB SQL, Postgres metadata, and direct Parquet reads. Written for data scientists doing model building, statistical analysis, or exploratory work in notebooks — not for experimentalists running ingests.
+This guide covers every way to access mfethuls data programmatically: the Python API, DuckDB SQL and direct Parquet reads. Written for data scientists doing model building, statistical analysis, or exploratory work in notebooks — not for experimentalists running ingests.
 
 ---
 
 ## Where the data lives
 
-Three stores, each with a distinct role:
-
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │  DuckDB  (mfethuls.duckdb)                                       │
-│  Measurement data — the actual numbers from instruments          │
+│  The catalog and one view per dataset                            │
 │                                                                  │
 │  dataset_registry          → catalogue of all datasets           │
 │  VIEW CL_dsc_001_S001_R001 → SELECT * reads the Parquet file     │
@@ -19,90 +17,13 @@ Three stores, each with a distinct role:
 └──────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
-│  Postgres  (mfethuls DB)                                         │
-│  Metadata — who, what, when, how                                 │
-│                                                                  │
-│  datasets table →  experiment_name, sample_id, run_id,          │
-│                    instrument_name, instrument_model,            │
-│                    measurement_profile, rows, cols,              │
-│                    storage_path, provenance (JSONB)              │
-│  ingest_jobs   →  full audit trail of every ingest run          │
-└──────────────────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────────────────────┐
-│  Parquet files  (/data/mfethuls_storage/<instrument>/<hex_id>/)  │
+│  Parquet files  (PATH_TO_LOCAL_STORAGE/<instrument>/<hex_id>/)   │
 │  Source of truth — DuckDB views read directly from these         │
 │  Can be read with pd.read_parquet() or duckdb without the DB     │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**Rule of thumb:**
-- Need numbers (temperatures, intensities, counts)? → DuckDB or Parquet
-- Need to filter or discover by sample, instrument, date? → Postgres
-- Building a model across many experiments? → Join Postgres (filter) + DuckDB (load data)
-
----
-
-## Remote access — connecting from your laptop
-
-### Postgres
-
-Postgres is accessible directly over Tailscale — port 5432 is exposed by the Droplet:
-
-```python
-PG_URL = "postgresql://mfethuls:<password>@100.x.x.x:5432/mfethuls"
-```
-
-### DuckDB
-
-DuckDB is a **file**, not a server. You cannot connect to it remotely the way you can Postgres. Options:
-
-**Option A — Mount the volume over SSHFS (Linux/macOS)**
-
-```shell
-brew install macfuse sshfs     # macOS
-sudo apt install sshfs         # Ubuntu
-
-sshfs root@100.x.x.x:/mnt/mfethuls-data ~/mfethuls-data -o follow_symlinks
-```
-
-Then connect:
-
-```python
-import duckdb
-conn = duckdb.connect("~/mfethuls-data/mfethuls.duckdb", read_only=True)
-```
-
-**Option B — Run the notebook on the Droplet**
-
-```shell
-ssh root@100.x.x.x
-cd /opt/mfethuls
-docker compose exec streamlit bash
-jupyter notebook --ip=0.0.0.0 --no-browser
-```
-
-Then tunnel to port 8888 via SSH and open in your browser.
-
-**Option C — REST API for data rows + Postgres for metadata (no file access needed)**
-
-```python
-import requests
-import pandas as pd
-
-API_URL = "http://100.x.x.x:8000"
-API_KEY = "<your-api-key>"
-headers = {"Authorization": f"Bearer {API_KEY}"}
-
-def fetch_dataset(name: str, limit: int = 10_000) -> pd.DataFrame:
-    r = requests.get(f"{API_URL}/dataset/{name}", headers=headers, params={"limit": limit})
-    r.raise_for_status()
-    payload = r.json()
-    cols = [c["name"] for c in payload["columns"]]
-    return pd.DataFrame(payload["rows"], columns=cols)
-
-df = fetch_dataset("CL_dsc_001_S001_R001")
-```
+**Rule of thumb:** find experiments in the catalog (`list_datasets()` or the `dataset_registry` table), then load their numbers through the Python API or the DuckDB views.
 
 ---
 
@@ -123,26 +44,20 @@ The `notebook` extra installs both Jupyter and Marimo. Use whichever you prefer 
 ```python
 from mfethuls.storage.notebook import list_datasets
 
-# Local mode — no arguments
-list_datasets()
-
-# Service mode (over Tailscale)
-list_datasets("postgresql://mfethuls:<password>@100.x.x.x:5432/mfethuls")[
-    ["experiment_name", "instrument_name", "sample_id", "registered_at"]
-]
+list_datasets()[["experiment_name", "instrument_name", "sample_id", "registered_at"]]
 ```
 
 ---
 
-## Access pattern 1 — Python API (simplest, works locally or remotely)
+## Access pattern 1 — Python API (simplest)
 
-The Python API handles registry loading and data retrieval in one call. Works in both local mode (files on disk) and service mode (files on the Droplet volume).
+The Python API handles registry loading and data retrieval in one call.
 
 ```python
 import os
 import mfethuls
 
-# Point at data (local or SSHFS mount)
+# Point at the data
 os.environ["PATH_TO_DATA"] = "/path/to/data"
 os.environ["PATH_TO_REGISTRY"] = "/path/to/experiments_template.csv"
 os.environ["MFETHULS_DUCKDB_PATH"] = "/path/to/mfethuls.duckdb"
@@ -172,15 +87,29 @@ cs = mfethuls.load_samples(
 df = cs.to_dataframe()
 ```
 
+### Inspect the registry
+
+Both functions read the registry file on each call, so edits to it apply straight away. To look at it yourself, or to reuse one copy across calls:
+
+```python
+registry = mfethuls.Registry.load()      # PATH_TO_REGISTRY, or pass a path
+registry.frame                           # the spreadsheet as read
+registry.problems                        # rows that were skipped or have warnings, and why
+[exp.name for exp in registry.for_samples(["S001"])]
+
+cs = mfethuls.load_experiments(["CL_dsc_001"], registry=registry)
+```
+
+Descriptions and extra columns always come from the current registry, also for data loaded from storage.
+
 ### Plot directly
 
 ```python
-mfethuls.plot_experiments(
-    cs,
-    x="temperature_C",
-    y="heat_flow_mW",
-)
+fig, ax = mfethuls.plot_experiments(cs)                  # Matplotlib, publication style
+fig = mfethuls.plot_experiments(cs, backend="plotly")    # interactive
 ```
+
+The plot is chosen per instrument (heat flow vs temperature for DSC, a spectrum for FTIR, …). See the [plotting guide](plotting.md) for comparison modes, labels and units, and saving figures.
 
 ---
 
@@ -254,7 +183,7 @@ For a large number of experiments, build the UNION ALL dynamically from the regi
 ### Query Parquet directly (no DuckDB file needed)
 
 ```python
-# Useful if the DuckDB file is unavailable but you have the Parquet path from Postgres
+# Useful if the DuckDB file is unavailable but you know the Parquet path
 df = conn.execute("""
     SELECT * FROM read_parquet('/path/to/mfethuls_storage/DSC/<hex_id>/CL_dsc_001.parquet')
 """).df()
@@ -266,118 +195,6 @@ df = conn.execute("""
 ```
 
 ---
-
-## Access pattern 3 — Postgres metadata
-
-Use Postgres for discovery and filtering — find the right experiments before loading data.
-
-```python
-from mfethuls.storage.notebook import list_datasets
-
-# Local mode — no arguments needed
-meta = list_datasets()
-
-# Service mode — pass Postgres URL for richer metadata
-meta = list_datasets("postgresql://mfethuls:<password>@100.x.x.x:5432/mfethuls", limit=1000)
-print(meta.columns.tolist())
-# ['id', 'experiment_id', 'sample_id', 'run_id', 'experiment_name',
-#  'instrument_name', 'instrument_type', 'instrument_model',
-#  'rows', 'cols', 'measurement_profile', 'schema_version',
-#  'storage_path', 'provenance', 'created_at', ...]
-```
-
-### Filter by instrument
-
-```python
-dsc_meta = meta[meta["instrument_name"].str.startswith("dsc")]
-tga_meta = meta[meta["instrument_name"] == "tga"]
-```
-
-### Filter by sample
-
-```python
-sample_meta = meta[meta["sample_id"].isin(["S001", "S002"])]
-```
-
-### Raw SQL via SQLAlchemy (for complex queries)
-
-```python
-from sqlalchemy import create_engine, text
-
-engine = create_engine(PG_URL)
-
-with engine.connect() as conn:
-    result = conn.execute(text("""
-        SELECT experiment_name, instrument_name, sample_id, run_id, rows, measurement_profile
-        FROM datasets
-        WHERE instrument_name = 'dsc_mettler_toledo'
-          AND sample_id = 'S001'
-        ORDER BY created_at DESC
-    """))
-    df = pd.DataFrame(result.mappings().all())
-```
-
-### Inspect the ingest audit trail
-
-```python
-with engine.connect() as conn:
-    jobs = conn.execute(text("""
-        SELECT job_id, status, created_at, updated_at,
-               jsonb_array_length(datasets) AS experiment_count
-        FROM ingest_jobs
-        ORDER BY created_at DESC
-        LIMIT 20
-    """))
-    pd.DataFrame(jobs.mappings().all())
-```
-
----
-
-## Access pattern 4 — Joining metadata + measurement data
-
-The most powerful pattern for model building: use Postgres to select the right experiments, then load their data via DuckDB or the API.
-
-```python
-from mfethuls.storage.notebook import list_datasets
-import mfethuls
-import duckdb
-import pandas as pd
-
-PG_URL  = "postgresql://mfethuls:<password>@100.x.x.x:5432/mfethuls"
-DDB_PATH = "/path/to/mfethuls.duckdb"
-
-# Step 1 — Discover experiments of interest via Postgres
-meta = list_datasets(PG_URL, limit=1000)
-target = meta[
-    (meta["instrument_name"] == "dsc_mettler_toledo") &
-    (meta["sample_id"].isin(["S001", "S002", "S003"]))
-]
-
-# Step 2 — Load measurement data for those experiments
-conn = duckdb.connect(DDB_PATH, read_only=True)
-registry = conn.execute("SELECT table_name, experiment_name FROM dataset_registry").df()
-
-# Only load experiments that are both in Postgres metadata AND in DuckDB
-available = set(registry["experiment_name"])
-experiment_names = [n for n in target["experiment_name"] if n in available]
-
-frames = []
-for _, row in registry[registry["experiment_name"].isin(experiment_names)].iterrows():
-    df = conn.execute(f'SELECT *, \'{row["experiment_name"]}\' AS experiment_name FROM "{row["table_name"]}"').df()
-    frames.append(df)
-
-measurements = pd.concat(frames, ignore_index=True)
-
-# Step 3 — Join with metadata for labels, grouping keys etc.
-enriched = measurements.merge(
-    target[["experiment_name", "sample_id", "run_id", "instrument_model", "measurement_profile"]],
-    on="experiment_name",
-    how="left"
-)
-
-print(enriched.shape)
-print(enriched.groupby(["sample_id", "measurement_profile"])["heat_flow_mW"].describe())
-```
 
 ---
 
@@ -402,10 +219,10 @@ All datasets also carry `experiment_name`, `experiment_id` (internal hex, system
 
 ## Tips for model building
 
-**Normalise before concatenating** — instruments report in different units even within the same type. Check `measurement_profile` from Postgres — it tells you which experimental protocol was used and whether signals are directly comparable.
+**Normalise before concatenating** — instruments report in different units even within the same type. Check `measurement_profile` in the catalog — it tells you which experimental protocol was used and whether signals are directly comparable.
 
-**Use `experiment_name` as the join key** — it is stable across re-ingests, human-readable, and present in both DuckDB views and Postgres metadata. `experiment_id` is an internal hex assigned by the system and not needed outside the storage layer.
+**Use `experiment_name` as the join key** — it is human-readable and present in the catalog and the data. `experiment_id` is an internal hex assigned by the system and not needed outside the storage layer.
 
-**Filter in Postgres, load in DuckDB** — Postgres is cheap to query for discovery; DuckDB loads potentially large Parquet files. Do not load all datasets and filter in Python.
+**Filter in the catalog, then load** — the catalog is cheap to query for discovery; loading reads potentially large Parquet files. Do not load all datasets and filter in Python.
 
-**Re-ingest is safe** — the `refresh=True` flag on ingest re-parses and overwrites Parquet files. DuckDB views and Postgres metadata are updated in place. Existing DataFrames you've already loaded are not affected.
+**Re-ingest is safe** — the `refresh=True` flag on ingest re-parses and overwrites Parquet files. DuckDB views and the catalog are updated in place. Existing DataFrames you've already loaded are not affected.

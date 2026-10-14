@@ -1,6 +1,6 @@
 import pandas as pd
 
-from mfethuls.schema_normalization import apply_dataframe_schema
+from mfethuls.schema_normalization import add_elapsed_time, apply_dataframe_schema
 
 
 def test_apply_dataframe_schema_renames_and_casts_dsc_mettler_columns():
@@ -425,3 +425,44 @@ def test_apply_dataframe_schema_layered_rheometer_unknown_profile_warns():
     assert "time_s" in normalized.columns
     assert "temperature_C" in normalized.columns
     assert any("Unknown measurement_profile" in warning for warning in report["warnings"])
+
+
+def test_add_elapsed_time_counts_seconds_from_first_timestamp():
+    df = pd.DataFrame(
+        {
+            "wavelength_nm": [400.0, 500.0, 400.0, 500.0],
+            "timestamp": pd.to_datetime(
+                ["2025-05-11 16:11:09.757", "2025-05-11 16:11:09.757", "2025-05-11 16:11:11.257", "2025-05-11 16:11:11.257"],
+                utc=True,
+            ),
+        }
+    )
+
+    result = add_elapsed_time(df)
+
+    assert result["time_s"].tolist() == [0.0, 0.0, 1.5, 1.5]
+    assert "time_s" not in df.columns  # input is not modified
+
+
+def test_add_elapsed_time_keeps_existing_time_and_skips_missing_timestamps():
+    with_time = pd.DataFrame({"timestamp": pd.to_datetime(["2025-01-01", "2025-01-02"]), "time_s": [5.0, 6.0]})
+    no_timestamps = pd.DataFrame({"timestamp": [pd.NaT, pd.NaT]})
+    no_column = pd.DataFrame({"x": [1, 2]})
+
+    assert add_elapsed_time(with_time)["time_s"].tolist() == [5.0, 6.0]
+    assert "time_s" not in add_elapsed_time(no_timestamps).columns
+    assert add_elapsed_time(no_column) is no_column
+
+
+def test_apply_dataframe_schema_derives_time_s_for_flame_fluorescence():
+    df = pd.DataFrame(
+        {
+            "wavelength (nm)": [400.0, 400.0],
+            "intensity": [1.0, 2.0],
+            "time": ["2025-05-11T16:11:09+00:00", "2025-05-11T16:11:19+00:00"],
+        }
+    )
+
+    normalized, _ = apply_dataframe_schema(df, instrument_type="fluorescence", instrument_model="flame")
+
+    assert normalized["time_s"].tolist() == [0.0, 10.0]

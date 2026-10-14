@@ -9,5 +9,7 @@ MY_RHEOMETER_FREQ,rheometer,S001,R001,,oscillatory_frequency_sweep,Frequency swe
 MY_RHEOMETER_FLOW,rheometer,S001,R001,,flow_curve,Flow curve,
 MY_DMA_001,dma,S001,R001,,oscillatory_temperature_sweep,DMA temperature sweep,
 MY_UVVIS_001,uv_vis,S001,R001,,,UV-Vis spectrum,
+MY_UVVIS_INSITU_001,uv_insitu,S001,R001,,,UV-Vis in-situ kinetics (folder-per-experiment — set raw_data_filename to folder name),
+MY_FLUORESCENCE_001,fluorescence_insitu,S001,R001,,,Fluorescence in-situ kinetics (folder-per-experiment — set raw_data_filename to folder name),
 MY_SAXS_001,saxs,S001,R001,,,SAXS pattern,
 MY_MS_001,ms,S001,R001,,,Mass spectrum,

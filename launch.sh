@@ -15,4 +15,4 @@ if [ ! -f ".env" ]; then
 fi
 
 echo "Starting mfethuls Explorer..."
-uv run --extra viz streamlit run apps/Home.py
+uv run --extra viz mfethuls-app

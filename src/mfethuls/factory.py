@@ -1,7 +1,5 @@
 import os
 
-from dotenv import load_dotenv
-
 from mfethuls.parsers import get_parser
 from mfethuls.instruments.generic import GenericInstrument
 from mfethuls.characterizers.dsc import DSCProfiling
@@ -9,27 +7,21 @@ from mfethuls.characterizers.tga import TGACharacterizer
 from mfethuls.dataset import Dataset
 from mfethuls.experiments import Experiment
 from mfethuls.registry_validator import RegistryValidator, RegistryValidationError
-
-# Load environment variables from .env
-load_dotenv()
+from mfethuls.settings import get_settings
 
 
-# Prefer explicit folder name from config/instrument_params.json. Fallback is .env 
-def get_data_root_path(folder_name=None, instrument_type=None):
-    data_root = os.environ.get("PATH_TO_DATA")
-    if folder_name:
-        return os.path.join(data_root, folder_name)
-    env_key = f'{instrument_type.upper()}_FOLDER_NAME'
-    return os.path.join(data_root, os.environ.get(env_key, instrument_type))
+def get_data_root_path(folder_name: str) -> str:
+    """The instrument's raw-data folder: ``folder_name`` from instrument_params.json under PATH_TO_DATA."""
+    return os.path.join(get_settings().data_root, folder_name)
 
 
 def instrument_data_path_constructor(path, *args):
     """Build a dict mapping raw_data_filename → list of file paths.
 
     Walks ``path`` (the instrument root folder) and locates files whose stem
-    matches each entry in ``args``.  All non-parquet files co-located in the
-    same directory as the matched file are collected, so multi-file experiments
-    work transparently.
+    matches each entry in ``args``, or a folder named after it.  Only files
+    with that stem are collected; for multi-file experiments, put the files in
+    a folder named after the experiment (see ``manifest.find_data_files``).
 
     Returns ``{raw_data_filename: [sorted_file_paths], ...}``.
     """
@@ -125,9 +117,6 @@ def parse_experiment(
 
     parser = instrument.parser if hasattr(instrument, "parser") else get_parser(instrument.type_, instrument.model)
 
-    # Prefer parsers that understand experiment context and can return a
-    # Dataset directly. Fallback to the old behaviour (DataFrame + wrapper)
-    # when they don't.
     parse_kwargs = dict(
         experiment_id=experiment_id,
         sample_id=sample_id,
@@ -142,22 +131,4 @@ def parse_experiment(
         parse_kwargs["measurement_profile"] = experiment.metadata.get("registry_measurement_profile")
 
     parsed = parser.parse(dict_data_paths, **parse_kwargs)
-
-    if isinstance(parsed, Dataset):
-        return _apply_characterizer(parsed, instrument)
-
-    # Backwards-compatible wrapper for parsers that still return DataFrames.
-    metadata = {
-        "schema_version": "1.0",
-        "experiment_id": experiment_id,
-        "sample_id": sample_id,
-        "run_id": run_id,
-        "instrument_type": instrument.type_,
-        "instrument_model": instrument.model,
-        "instrument_name": instrument.name,
-        "experiment_name": experiment.name,
-    }
-    metadata.update(experiment.metadata)
-
-    dataset = Dataset(data=parsed, metadata=metadata)
-    return _apply_characterizer(dataset, instrument)
+    return _apply_characterizer(parsed, instrument)

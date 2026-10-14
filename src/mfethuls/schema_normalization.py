@@ -30,6 +30,27 @@ def _coerce_dtype(series: pd.Series, dtype: str) -> pd.Series:
     return series.astype(dtype)
 
 
+def add_elapsed_time(df: pd.DataFrame) -> pd.DataFrame:
+    """Add ``time_s``, seconds since the earliest ``timestamp``, when only timestamps exist.
+
+    Instruments that record a wall-clock ``timestamp`` per row or spectrum (e.g. a
+    series of Flame spectra) get a numeric time axis, which plots as a continuous
+    colour scale or x-axis. An existing ``time_s`` is never overwritten. Returns the
+    same frame when nothing is added.
+    """
+
+    if "timestamp" not in df.columns or "time_s" in df.columns:
+        return df
+
+    timestamps = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
+    if timestamps.isna().all():
+        return df
+
+    df = df.copy()
+    df["time_s"] = (timestamps - timestamps.min()).dt.total_seconds()
+    return df
+
+
 def _merge_aliases(*layers: Dict[str, Any]) -> Dict[str, List[str]]:
     merged: Dict[str, List[str]] = {}
     for layer in layers:
@@ -166,6 +187,8 @@ def apply_dataframe_schema(
             normalized[col] = _coerce_dtype(normalized[col], dtype)
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"Could not cast column {col!r} to {dtype!r}: {exc}")
+
+    normalized = add_elapsed_time(normalized)
 
     missing_required_columns = [col for col in required_columns if col not in normalized.columns]
 

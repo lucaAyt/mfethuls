@@ -11,9 +11,10 @@ import pytest
 from mfethuls.manifest import (
     FileManifestBackend,
     MANIFEST_FILENAME,
+    ManifestError,
+    content_hash,
     find_data_files,
     generate_experiment_id,
-    get_manifest_backend,
 )
 
 
@@ -81,20 +82,47 @@ def test_file_manifest_different_instruments_get_different_ids():
         assert eid_dsc != eid_tga
 
 
-def test_file_manifest_raises_on_experiment_name_mismatch():
+def test_file_manifest_keeps_the_id_and_records_a_changed_name():
+    """The registry decides the name; the ID stays tied to the raw data."""
     with tempfile.TemporaryDirectory() as tmpdir:
         backend = FileManifestBackend(tmpdir)
-        backend.get_or_create_experiment_id(
+        eid = backend.get_or_create_experiment_id(
             instrument_name="dsc",
             raw_data_filename="chitosan_jan15",
             experiment_name="original_name",
         )
-        with pytest.raises(ValueError, match="experiment_name"):
-            backend.get_or_create_experiment_id(
-                instrument_name="dsc",
-                raw_data_filename="chitosan_jan15",
-                experiment_name="changed_name",
-            )
+        renamed = backend.get_or_create_experiment_id(
+            instrument_name="dsc",
+            raw_data_filename="chitosan_jan15",
+            experiment_name="changed_name",
+        )
+        assert renamed == eid
+        (entry,) = backend.all_mappings()
+        assert entry["experiment_name"] == "changed_name"
+
+
+def test_file_manifest_records_content_hash():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        backend = FileManifestBackend(tmpdir)
+        backend.get_or_create_experiment_id(instrument_name="dsc", raw_data_filename="poly1", experiment_name="p1")
+        assert backend.all_mappings()[0]["content_hash"] is None
+
+        backend.record_content_hash(instrument_name="dsc", raw_data_filename="poly1", content_hash="abc")
+        assert backend.all_mappings()[0]["content_hash"] == "abc"
+
+
+def test_content_hash_ignores_file_names_but_not_contents():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def write(name, text):
+            path = os.path.join(tmpdir, name)
+            with open(path, "w") as fh:
+                fh.write(text)
+            return path
+
+        a, b = write("a.txt", "1"), write("b.txt", "2")
+        renamed = [write("x.txt", "2"), write("y.txt", "1")]
+        assert content_hash([a, b]) == content_hash(renamed)
+        assert content_hash([a, b]) != content_hash([a, write("c.txt", "3")])
 
 
 def test_file_manifest_atomic_write_leaves_no_temp_file():
@@ -105,8 +133,53 @@ def test_file_manifest_atomic_write_leaves_no_temp_file():
             raw_data_filename="test_run",
             experiment_name="exp_a",
         )
-        tmp_file = os.path.join(tmpdir, MANIFEST_FILENAME + ".tmp")
-        assert not os.path.exists(tmp_file)
+        assert [f for f in os.listdir(tmpdir) if f.endswith(".tmp")] == []
+
+
+def test_corrupt_manifest_raises_and_is_left_untouched():
+    """Starting over would assign new IDs to every experiment, so a broken manifest stops ingest."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, MANIFEST_FILENAME)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write('{"mappings": [{"experiment_id": "abc"')  # cut off mid-write
+
+        backend = FileManifestBackend(tmpdir)
+        with pytest.raises(ManifestError, match="not valid JSON"):
+            backend.get_or_create_experiment_id(instrument_name="dsc", raw_data_filename="x", experiment_name="x")
+        with open(path, encoding="utf-8") as fh:
+            assert fh.read() == '{"mappings": [{"experiment_id": "abc"'
+
+
+def test_file_manifest_forget_and_relink():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        backend = FileManifestBackend(tmpdir)
+        keep = backend.get_or_create_experiment_id(instrument_name="dsc", raw_data_filename="a", experiment_name="A")
+        gone = backend.get_or_create_experiment_id(instrument_name="dsc", raw_data_filename="b", experiment_name="B")
+
+        assert backend.forget(experiment_id=gone) is True
+        assert backend.forget(experiment_id=gone) is False
+        backend.relink(experiment_id=keep, raw_data_filename="a_renamed")
+        assert backend.get_or_create_experiment_id(
+            instrument_name="dsc", raw_data_filename="a_renamed", experiment_name="A"
+        ) == keep
+        assert [e["experiment_id"] for e in backend.all_mappings()] == [keep]
+        with pytest.raises(KeyError):
+            backend.relink(experiment_id=gone, raw_data_filename="b")
+
+
+def test_concurrent_writers_do_not_lose_entries():
+    """Without the lock, two read-modify-write cycles overlapping drop one writer's entry."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def add(i):
+            FileManifestBackend(tmpdir).get_or_create_experiment_id(
+                instrument_name="dsc", raw_data_filename=f"run{i}", experiment_name=f"run{i}"
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(add, range(40)))
+        assert len(FileManifestBackend(tmpdir).all_mappings()) == 40
 
 
 def test_file_manifest_roundtrip_survives_new_backend_instance():
@@ -128,19 +201,6 @@ def test_file_manifest_roundtrip_survives_new_backend_instance():
         assert eid == eid2
 
 
-# ── get_manifest_backend factory ─────────────────────────────────────────────
-
-def test_get_manifest_backend_returns_file_backend_when_no_db_url():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        backend = get_manifest_backend(data_root=tmpdir, db_url=None)
-        assert isinstance(backend, FileManifestBackend)
-
-
-def test_get_manifest_backend_raises_without_data_root_or_db_url():
-    with pytest.raises(ValueError):
-        get_manifest_backend(data_root=None, db_url=None)
-
-
 # ── find_data_files ───────────────────────────────────────────────────────────
 
 def test_find_data_files_locates_file_in_subfolder():
@@ -155,7 +215,7 @@ def test_find_data_files_locates_file_in_subfolder():
         assert any("chitosan_jan15.txt" in f for f in files)
 
 
-def test_find_data_files_collects_all_files_in_same_dir():
+def test_find_data_files_ignores_other_files_in_same_dir():
     with tempfile.TemporaryDirectory() as tmpdir:
         sub = os.path.join(tmpdir, "exp_folder")
         os.makedirs(sub)
@@ -163,8 +223,29 @@ def test_find_data_files_collects_all_files_in_same_dir():
             open(os.path.join(sub, fname), "w").close()
 
         parent, files = find_data_files(tmpdir, "sample")
-        assert len(files) == 3
-        assert all(os.path.dirname(f) == sub for f in files)
+        assert parent == sub
+        assert files == [os.path.join(sub, "sample.txt")]
+
+
+def test_find_data_files_shared_folder_returns_own_file_only():
+    """Several experiments in one folder each get only their own file."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for fname in [".gitkeep", "poly1.txt", "poly2.txt"]:
+            open(os.path.join(tmpdir, fname), "w").close()
+
+        _, files1 = find_data_files(tmpdir, "poly1")
+        _, files2 = find_data_files(tmpdir, "poly2")
+        assert files1 == [os.path.join(tmpdir, "poly1.txt")]
+        assert files2 == [os.path.join(tmpdir, "poly2.txt")]
+
+
+def test_find_data_files_collects_all_extensions_for_stem():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for fname in ["poly1.txt", "poly1.csv", "poly2.txt"]:
+            open(os.path.join(tmpdir, fname), "w").close()
+
+        _, files = find_data_files(tmpdir, "poly1")
+        assert {os.path.basename(f) for f in files} == {"poly1.txt", "poly1.csv"}
 
 
 def test_find_data_files_raises_file_not_found():
@@ -214,22 +295,32 @@ def test_find_data_files_matches_directory_name():
         assert parent == exp_folder
 
 
-def test_find_data_files_combines_file_and_directory():
-    """When a matching file AND a matching folder both exist, results are combined."""
+def test_find_data_files_raises_on_file_and_directory():
+    """A matching file AND a matching folder elsewhere is ambiguous and raises ValueError."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Anchor file co-located in tmpdir
         open(os.path.join(tmpdir, "sample_A.txt"), "w").close()
-        # Subfolder with individual measurements
         folder = os.path.join(tmpdir, "sample_A")
         os.makedirs(folder)
         open(os.path.join(folder, "meas_001.csv"), "w").close()
-        open(os.path.join(folder, "meas_002.csv"), "w").close()
 
-        _parent, files = find_data_files(tmpdir, "sample_A")
-        basenames = {os.path.basename(f) for f in files}
-        assert "sample_A.txt" in basenames
-        assert "meas_001.csv" in basenames
-        assert "meas_002.csv" in basenames
+        with pytest.raises(ValueError, match="both a file and a directory"):
+            find_data_files(tmpdir, "sample_A")
+
+
+def test_find_data_files_file_inside_its_namesake_folder_is_the_folder():
+    """LUB055/LUB055.txt: the name means the folder; the file name means the file."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        folder = os.path.join(tmpdir, "LUB055")
+        os.makedirs(folder)
+        for name in ["LUB055.txt", "LUB055_b.txt"]:
+            open(os.path.join(folder, name), "w").close()
+
+        parent, files = find_data_files(tmpdir, "LUB055")
+        assert parent == folder
+        assert [os.path.basename(f) for f in files] == ["LUB055.txt", "LUB055_b.txt"]
+
+        _, files = find_data_files(tmpdir, "LUB055.txt")
+        assert [os.path.basename(f) for f in files] == ["LUB055.txt"]
 
 
 def test_find_data_files_raises_on_ambiguous_directory():

@@ -1,12 +1,9 @@
-import os
 import logging
 import argparse
 
-import mfethuls.parsers
-import mfethuls.factory as factory
 from mfethuls import load_experiments, plot_experiments
-from mfethuls.experiments import load_experiment_registry
-from mfethuls.storage import get_postgres_db_url
+from mfethuls.settings import use_test_env
+from mfethuls.experiments import Registry
 
 
 def _apply_runtime_env_mode(registry_env: str) -> None:
@@ -19,21 +16,9 @@ def _apply_runtime_env_mode(registry_env: str) -> None:
     if registry_env != "test":
         return
 
-    test_data_root = os.environ.get("MFETHULS_TEST_DATA_ROOT")
-    if test_data_root:
-        os.environ["PATH_TO_DATA"] = test_data_root
-        # factory.DATA_ROOT_PATH is initialized at import-time, so keep it aligned.
-        factory.DATA_ROOT_PATH = test_data_root
+    use_test_env()
 
-    test_local_storage = os.environ.get("MFETHULS_TEST_LOCAL_STORAGE")
-    if test_local_storage:
-        os.environ["PATH_TO_LOCAL_STORAGE"] = test_local_storage
-
-    test_registry = os.environ.get("MFETHULS_TEST_REGISTRY")
-    if test_registry:
-        os.environ["PATH_TO_REGISTRY"] = test_registry
-
-def mainX(argv: list[str] | None = None):
+def main(argv: list[str] | None = None):
     """Small demo for manual testing of the experiment/Dataset flow.
 
     This function is intentionally simple and prints shapes / metadata rather
@@ -97,23 +82,15 @@ def mainX(argv: list[str] | None = None):
         "--plot-output",
         help="Optional path to save the plot instead of only creating it in memory.",
     )
-    parser.add_argument(
-        "--persist-metadata",
-        action="store_true",
-        help="Persist dataset metadata in Postgres. Uses MFETHULS_POSTGRES_URL from .env, or --db-url if provided.",
-    )
-    parser.add_argument(
-        "--db-url",
-        help="Postgres database URL (overrides .env). Format: 'postgresql://user:pass@host/dbname'.",
-    )
-
     args = parser.parse_args(argv)
 
     _apply_runtime_env_mode(args.registry_env)
 
-    df_registry = load_experiment_registry(args.registry)
+    registry = Registry.load(args.registry)
+    df_registry = registry.frame
     print("Loading experiment registry from configured environment/path defaults")
-    print("Registered experiments:\n", df_registry[["name", "experiment_id", "instrument_name"]])
+    summary_columns = [c for c in ("name", "instrument_name", "sample_id", "run_id") if c in df_registry.columns]
+    print("Registered experiments:\n", df_registry[summary_columns])
 
     if args.experiments:
         selected = args.experiments
@@ -124,32 +101,12 @@ def mainX(argv: list[str] | None = None):
 
     print("Selected experiments:", selected)
 
-    # Determine database URL: CLI flags override .env config
-    db_url = None
-
-    # First, try loading from .env (MFETHULS_POSTGRES_ENABLED + MFETHULS_POSTGRES_URL)
-    env_db_url = get_postgres_db_url()
-
-    # CLI flags can override or disable .env config
-    if args.persist_metadata:
-        # User explicitly requested DB registration via CLI
-        if args.db_url:
-            db_url = args.db_url
-        elif env_db_url:
-            db_url = env_db_url
-        else:
-            print("ERROR: --persist-metadata requires either --db-url CLI flag or MFETHULS_POSTGRES_URL in .env")
-            return
-    elif env_db_url:
-        # Use .env config if not explicitly disabled
-        db_url = env_db_url
-
     try:
         comparison = load_experiments(
             selected,
+            registry=registry,
             use_storage=not args.no_storage,
             refresh=args.refresh,
-            db_url=db_url,
         )
     except Exception as exc:  # noqa: BLE001
         print(f"  Failed to load experiments: {exc!r}")
@@ -192,11 +149,6 @@ def mainX(argv: list[str] | None = None):
         else:
             print("Created comparison plot in memory. Use --plot-output to save it.")
         plt.close(fig)
-
-def main(argv: list[str] | None = None):
-    """Simple debugging entrypoint."""
-
-    mainX(argv)
 
 if __name__ == "__main__":
     main()

@@ -7,11 +7,11 @@ from typing import Sequence, TYPE_CHECKING
 import pandas as pd
 
 from .config.loader import load_experiment_dataset
-from .experiments import load_experiment_registry
+from .experiments import Experiment, Registry
 from .dataset import Dataset
 
 if TYPE_CHECKING:
-    from .storage import DuckDBQueryBackend
+    from .stores import Stores
 
 
 logger = logging.getLogger(__name__)
@@ -66,56 +66,27 @@ def _label_for_dataset(dataset: Dataset, index: int) -> str:
     return f"dataset_{index + 1}"
 
 
-def load_comparison_set(
-    experiment_names: Sequence[str],
+def _load_comparison(
+    experiments: Sequence[Experiment],
+    registry: Registry,
     *,
     use_storage: bool = True,
     refresh: bool = False,
-    storage_mode: str = "local",
-    cloud_provider: str | None = None,
-    query_backend: "DuckDBQueryBackend | None" = None,
+    stores: "Stores | None" = None,
 ) -> ComparisonSet:
-    """Compatibility wrapper for load_experiments."""
-
-    return load_experiments(
-        experiment_names,
-        use_storage=use_storage,
-        refresh=refresh,
-        storage_mode=storage_mode,
-        cloud_provider=cloud_provider,
-        query_backend=query_backend,
-    )
-
-
-def _load_comparison_from_names(
-    experiment_names: Sequence[str],
-    *,
-    use_storage: bool = True,
-    refresh: bool = False,
-    storage_mode: str = "local",
-    cloud_provider: str | None = None,
-    db_url: str | None = None,
-    query_backend: "DuckDBQueryBackend | None" = None,
-) -> ComparisonSet:
-    names = [str(name) for name in experiment_names]
-    if not names:
-        raise ValueError("load_experiments requires at least one experiment name.")
-
     datasets: list[Dataset] = []
     labels: list[str] = []
 
-    for idx, name in enumerate(names):
+    for idx, exp in enumerate(experiments):
         dataset = load_experiment_dataset(
-            name,
+            exp.name,
             use_storage=use_storage,
             refresh=refresh,
-            storage_mode=storage_mode,
-            cloud_provider=cloud_provider,
-            db_url=db_url,
-            query_backend=query_backend,
+            stores=stores,
+            registry=registry,
         )
         if dataset is None:
-            logger.warning("Not loading experiment %r because no dataset is associated with it.", name)
+            logger.warning("Not loading experiment %r because no dataset is associated with it.", exp.name)
             continue
         datasets.append(dataset)
         labels.append(_label_for_dataset(dataset, idx))
@@ -126,40 +97,56 @@ def _load_comparison_from_names(
 def load_experiments(
     experiment_names: Sequence[str],
     *,
+    registry: Registry | None = None,
+    registry_path: str | None = None,
     use_storage: bool = True,
     refresh: bool = False,
-    storage_mode: str = "local",
-    cloud_provider: str | None = None,
-    db_url: str | None = None,
-    query_backend: "DuckDBQueryBackend | None" = None,
+    stores: "Stores | None" = None,
 ) -> ComparisonSet:
     """Load multiple experiments into a comparison set for inspection or plotting.
 
-    If db_url is provided, dataset metadata will be registered in the specified
-    Postgres database after local storage save.
+    Experiments are looked up in ``registry``. Without one, the registry file at
+    ``registry_path`` (default ``PATH_TO_REGISTRY``) is read on each call, so
+    edits to it are always picked up.
+
+    ``stores`` defaults to the local stores (see :mod:`mfethuls.stores`).
     """
-    return _load_comparison_from_names(
-        experiment_names,
+
+    names = [str(name) for name in experiment_names]
+    if not names:
+        raise ValueError("load_experiments requires at least one experiment name.")
+    registry = registry if registry is not None else Registry.load(registry_path)
+
+    unknown = [name for name in names if name not in registry]
+    if unknown:
+        where = f" at {registry.path!r}" if registry.path else ""
+        raise KeyError(
+            f"Unknown experiment name(s): {unknown}. They are not in the registry{where}, "
+            "or their rows were skipped as invalid (see Registry.problems)."
+        )
+
+    return _load_comparison(
+        [registry.get(name) for name in names],
+        registry,
         use_storage=use_storage,
         refresh=refresh,
-        storage_mode=storage_mode,
-        cloud_provider=cloud_provider,
-        db_url=db_url,
-        query_backend=query_backend,
+        stores=stores,
     )
 
 
 def load_samples(
     sample_ids: Sequence[str] | str,
     *,
+    registry: Registry | None = None,
     registry_path: str | None = None,
     use_storage: bool = True,
     refresh: bool = False,
-    storage_mode: str = "local",
-    cloud_provider: str | None = None,
-    query_backend: "DuckDBQueryBackend | None" = None,
+    stores: "Stores | None" = None,
 ) -> ComparisonSet:
-    """Load all experiments associated with one or more sample ids into a comparison set."""
+    """Load all experiments of one or more sample ids into a comparison set.
+
+    The registry is used as in :func:`load_experiments`.
+    """
 
     if isinstance(sample_ids, str):
         requested_sample_ids = [sample_ids]
@@ -170,21 +157,15 @@ def load_samples(
     if not requested_sample_ids:
         raise ValueError("load_samples requires at least one sample id.")
 
-    registry = load_experiment_registry(registry_path)
-    if "sample_id" not in registry.columns:
-        raise ValueError("Experiment registry does not include a sample_id column.")
-
-    selected = registry[registry["sample_id"].astype(str).isin(requested_sample_ids)]
-    experiment_names = [str(name) for name in selected["name"].tolist() if str(name).strip()]
-
-    if not experiment_names:
+    registry = registry if registry is not None else Registry.load(registry_path)
+    experiments = registry.for_samples(requested_sample_ids)
+    if not experiments:
         raise ValueError(f"No experiments found for sample id(s): {requested_sample_ids}")
 
-    return _load_comparison_from_names(
-        experiment_names,
+    return _load_comparison(
+        experiments,
+        registry,
         use_storage=use_storage,
         refresh=refresh,
-        storage_mode=storage_mode,
-        cloud_provider=cloud_provider,
-        query_backend=query_backend,
+        stores=stores,
     )

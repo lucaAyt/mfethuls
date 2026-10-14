@@ -39,8 +39,7 @@ class RheometerAntPaarParser:
     ):
         """Parse rheometer data.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -50,9 +49,6 @@ class RheometerAntPaarParser:
             logger=logger,
             parser_label="rheometer",
         ).dropna(how='all', axis=1)
-
-        if experiment_id is None:
-            return df
 
         # Map the explicit measurement_profile provided by the registry to a
         # canonical profile key defined in the rheometer schema. We only

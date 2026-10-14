@@ -1,70 +1,26 @@
-"""Convenience helpers for notebook usage."""
+"""Convenience helpers for notebook usage: what is in the DuckDB catalog."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import pandas as pd
 
 
-def list_datasets(
-    db_url: Optional[str] = None,
-    limit: int = 100,
-    filters: Optional[Dict[str, Any]] = None,
-) -> pd.DataFrame:
-    """List ingested datasets.
+def list_datasets(limit: int = 100) -> pd.DataFrame:
+    """Ingested datasets from the DuckDB catalog: experiment, instrument, sample, run, profile and row count."""
 
-    With no arguments uses DuckDB (local mode). Pass a Postgres URL for
-    service mode to get richer metadata (instrument, sample, run info).
-
-    Examples:
-        list_datasets()                                          # local
-        list_datasets("postgresql://user:pass@host/mfethuls")   # service
-    """
-    if db_url:
-        from .metadata import PostgresMetadataBackend
-        backend = PostgresMetadataBackend(db_url)
-        rows = backend.list_datasets(limit=limit, filters=filters)
-        return pd.DataFrame(rows)
-
-    # Local mode — read from DuckDB dataset_registry
-    from .config import _get_duckdb_path
     from .duckdb_backend import DuckDBQueryBackend
-    db_path = _get_duckdb_path()
-    with DuckDBQueryBackend(db_path=db_path, read_only=True) as qb:
-        return qb.query(
-            "SELECT experiment_name, table_name, storage_path, raw_data_filename, registered_at "
-            "FROM dataset_registry ORDER BY registered_at DESC LIMIT ?",
-            [limit],
-        )
+
+    with DuckDBQueryBackend(read_only=True) as qb:
+        return pd.DataFrame(qb.list_registered()[:limit])
 
 
-def get_dataset(
-    experiment_name: str,
-    db_url: Optional[str] = None,
-) -> Optional["pd.Series"]:
-    """Get metadata for a single experiment by name.
+def get_dataset(experiment_name: str) -> Optional["pd.Series"]:
+    """The catalog row of one experiment, by name; ``None`` if it was not ingested."""
 
-    With no db_url uses DuckDB (local mode). Pass a Postgres URL for
-    service mode to get full metadata.
-
-    Examples:
-        get_dataset("CL_dsc_001")
-        get_dataset("CL_dsc_001", "postgresql://user:pass@host/mfethuls")
-    """
-    if db_url:
-        from .metadata import PostgresMetadataBackend
-        row = PostgresMetadataBackend(db_url).get_dataset_by_name(experiment_name)
-        return pd.Series(row) if row is not None else None
-
-    # Local mode — read from DuckDB dataset_registry
-    from .config import _get_duckdb_path
     from .duckdb_backend import DuckDBQueryBackend
-    db_path = _get_duckdb_path()
-    with DuckDBQueryBackend(db_path=db_path, read_only=True) as qb:
-        df = qb.query(
-            "SELECT experiment_name, table_name, storage_path, raw_data_filename, registered_at "
-            "FROM dataset_registry WHERE experiment_name = ? LIMIT 1",
-            [experiment_name],
-        )
-    return pd.Series(df.iloc[0]) if not df.empty else None
+
+    with DuckDBQueryBackend(read_only=True) as qb:
+        rows = [row for row in qb.list_registered() if row["experiment_name"] == experiment_name]
+    return pd.Series(rows[0]) if rows else None

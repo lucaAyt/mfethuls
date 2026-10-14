@@ -3,7 +3,8 @@ import json
 import logging
 
 from collections import namedtuple
-from typing import Any, Optional, TYPE_CHECKING
+from dataclasses import replace
+from typing import Any, Optional
 
 from mfethuls.dataset import Dataset
 from mfethuls.factory import (
@@ -13,22 +14,14 @@ from mfethuls.factory import (
     create_characterizer,
     parse_experiment as _parse_experiment,
 )
-from mfethuls.experiments import get_experiment
-from mfethuls.storage import (
-    AzureBlobParquetStorage,
-    CombinedStorageBackend,
-    get_postgres_db_url,
-    LocalParquetStorage,
-    PostgresMetadataBackend,
-    S3ParquetStorage,
-    StorageManager,
-)
-from mfethuls.storage.config import _view_basename
-from mfethuls.config.mode import is_service_mode
-from mfethuls.manifest import get_manifest_backend
-
-if TYPE_CHECKING:
-    from mfethuls.storage import DuckDBQueryBackend
+from mfethuls.experiments import Experiment, Registry
+from mfethuls.manifest import content_hash
+from mfethuls.parsers.registry import reads
+from mfethuls.schema_normalization import add_elapsed_time
+from mfethuls.settings import get_settings
+from mfethuls.storage.catalog import CatalogRecord
+from mfethuls.storage.manager import StorageManager
+from mfethuls.stores import Stores, local_stores
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +44,13 @@ def prepare_instruments(filters=None, experiments=None):
         type_ = entry.get("type")
         model = entry.get("model")
         name = entry.get("name")
-        folder_name = entry.get("folder_name")
+        folder_name = entry["folder_name"]  # required; see tests/test_instrument_config.py
         characterizer = None
 
         if "characterizer" in entry:
             characterizer = create_characterizer(type_, entry["characterizer"])
 
-        data_path = get_data_root_path(folder_name, type_)
+        data_path = get_data_root_path(folder_name)
         instr = create_instrument(type_, name, model, characterizer, data_path)
         instruments[name] = instr
 
@@ -76,17 +69,36 @@ def filter_entries(filters):
     ]
 
 
-def _resolve_metadata_db_url(db_url: Optional[str]) -> Optional[str]:
-    if not is_service_mode():
-        return None
-    if db_url:
-        return db_url
+# Identifier columns parsers write into every data row.
+_ID_COLUMNS = ("experiment_id", "sample_id", "run_id")
 
-    metadata_db_enabled_env = os.environ.get("MFETHULS_METADATA_DB_ENABLED", "").lower()
-    if metadata_db_enabled_env in {"1", "true", "yes"}:
-        return get_postgres_db_url()
 
-    return None
+def apply_registry_fields(dataset: Dataset, exp: Experiment) -> Dataset:
+    """Overwrite the descriptive fields stored at ingest with the registry's current values.
+
+    The registry owns names, sample/run ids, description and extra columns; the
+    stored metadata is a snapshot from ingest time. Registry values win in
+    ``dataset.metadata`` and in the id columns of the data.
+    """
+
+    current = {
+        "experiment_name": exp.name,
+        "experiment_id": exp.experiment_id,
+        "sample_id": exp.sample_id,
+        "run_id": exp.run_id,
+        "instrument_name": exp.instrument_name,
+        "raw_data_filename": exp.raw_data_filename,
+        **exp.metadata,
+    }
+    dataset.metadata.update(current)
+    for column in _ID_COLUMNS:
+        if column in dataset.data.columns and current[column] is not None:
+            dataset.data[column] = current[column]
+    return dataset
+
+
+def _resolve_experiment(experiment_name: str, registry: Optional[Registry]) -> Experiment:
+    return (registry if registry is not None else Registry.load()).get(experiment_name)
 
 
 def get_cached_dataset(exp, cache_backend, experiment_name: str) -> Optional[Dataset]:
@@ -94,84 +106,121 @@ def get_cached_dataset(exp, cache_backend, experiment_name: str) -> Optional[Dat
         return None
 
     if cache_backend.dataset_in_storage(exp):
-        if os.environ.get("MFETHULS_STORAGE_DEBUG"):
+        if get_settings().storage_debug:
             logger.warning(
                 "Loading Dataset for experiment %s from storage cache in %s",
                 experiment_name,
                 cache_backend.__class__.__name__,
             )
-        return cache_backend.load_dataset(exp)
+        dataset = cache_backend.load_dataset(exp)
+        # Datasets stored before time_s was derived during normalization.
+        dataset.data = add_elapsed_time(dataset.data)
+        apply_registry_fields(dataset, exp)
+        return dataset
 
     return None
 
 
-def ensure_registered(exp, data_backend, query_backend: "DuckDBQueryBackend | None") -> Optional[str]:
-    if data_backend is None or query_backend is None:
-        return None
+def catalog_record(exp, data_backend, dataset: Optional[Dataset] = None) -> Optional[CatalogRecord]:
+    """The catalog row for ``exp`` as stored by ``data_backend``."""
 
-    parquet_path, _ = data_backend.dataset_paths(exp)
-    return query_backend.register_parquet(
-        parquet_path,
-        table_name=_view_basename(exp),
-        experiment_name=exp.name,
-        raw_data_filename=exp.raw_data_filename,
-    )
-
-
-def persist_dataset(
-    exp,
-    dataset: Dataset,
-    data_backend,
-    db_url: Optional[str],
-    query_backend: "DuckDBQueryBackend | None",
-    experiment_name: str,
-) -> tuple[Optional[str], Optional[str], Optional[str]]:
     if data_backend is None:
-        return None, None, None
-
-    resolved_db_url = _resolve_metadata_db_url(db_url)
-    metadata_backend = PostgresMetadataBackend(resolved_db_url) if resolved_db_url else None
-    manager = StorageManager(
-        data_backend=data_backend,
-        metadata_backend=metadata_backend,
-        query_backend=query_backend,
+        return None
+    parquet_path, _ = data_backend.dataset_paths(exp)
+    return CatalogRecord.build(
+        exp,
+        parquet_path,
+        dataset_metadata=dataset.metadata if dataset is not None else None,
+        rows=len(dataset.data) if dataset is not None else None,
     )
+
+
+def ensure_registered(exp, stores: Stores, dataset: Optional[Dataset] = None) -> Optional[str]:
+    """Register the stored dataset of ``exp`` in the catalog (if there is one); returns the view name."""
+
+    record = catalog_record(exp, stores.storage, dataset)
+    if record is None or stores.catalog is None:
+        return None
+    return stores.catalog.register_parquet(record.storage_path, record=record)
+
+
+def persist_dataset(exp, dataset: Dataset, stores: Stores) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Store ``dataset`` and register it in the catalog and the metadata sink."""
+
+    if stores.storage is None:
+        return None, None, None
+    manager = StorageManager(data_backend=stores.storage, metadata_backend=stores.metadata, query_backend=stores.catalog)
     parquet_path, meta_path, dataset_id = manager.save_and_persist(exp, dataset)
-    if os.environ.get("MFETHULS_STORAGE_DEBUG"):
-        logger.info("Saved Dataset for experiment %s to storage backend", experiment_name)
-        if dataset_id:
-            logger.info(
-                "Persisted dataset metadata for experiment %s in Postgres (dataset_id=%s)",
-                experiment_name,
-                dataset_id,
-            )
+    if get_settings().storage_debug:
+        logger.info("Saved dataset of experiment %s (metadata id %s)", exp.name, dataset_id)
     return parquet_path, meta_path, dataset_id
 
 
-def _assign_experiment_id(exp, db_url: Optional[str]) -> None:
-    """Assign experiment_id from the manifest backend (creates on first ingest)."""
-    data_root = os.environ.get("PATH_TO_DATA")
-    resolved_db_url = _resolve_metadata_db_url(db_url)
-    backend = get_manifest_backend(data_root=data_root, db_url=resolved_db_url)
-    raw_filename = exp.raw_data_filename or exp.name
-    exp.experiment_id = backend.get_or_create_experiment_id(
+def _assign_experiment_id(exp, stores: Stores) -> None:
+    """Assign experiment_id from the manifest (created on first ingest)."""
+    exp.experiment_id = stores.manifest.get_or_create_experiment_id(
         instrument_name=exp.instrument_name,
-        raw_data_filename=raw_filename,
+        raw_data_filename=exp.raw_data_filename or exp.name,
         experiment_name=exp.name,
     )
+
+
+def _data_files(instrument, files: list[str], experiment_name: str) -> list[str]:
+    """The files the instrument's parser reads; others next to the data (plots, notes) are skipped."""
+    data = [f for f in files if reads(instrument.parser, f)]
+    skipped = [os.path.basename(f) for f in files if f not in data]
+    if skipped:
+        logger.warning("Experiment %r: not reading %s (not data for %s).",
+                       experiment_name, ", ".join(skipped), instrument.name)
+    return data
+
+
+def _parse_raw(exp, stores: Stores) -> Dataset:
+    """Parse the raw data files of ``exp`` and record their content hash in the manifest."""
+
+    raw_filename = exp.raw_data_filename or exp.name
+    bundle = prepare_instruments(filters={"name": [exp.instrument_name]}, experiments=[raw_filename])
+    try:
+        instrument = bundle.instruments[exp.instrument_name]
+        raw_dict = bundle.data_paths[exp.instrument_name]
+    except KeyError as exc:
+        raise KeyError(
+            f"Instrument {exp.instrument_name!r} for experiment {exp.name!r} "
+            f"is not present in the current instrument configuration."
+        ) from exc
+
+    files = _data_files(instrument, raw_dict.get(raw_filename, []), exp.name)
+    dataset = _parse_experiment(exp, {exp.experiment_id: files}, instrument)
+    if files:
+        stores.manifest.record_content_hash(
+            instrument_name=exp.instrument_name, raw_data_filename=raw_filename, content_hash=content_hash(files)
+        )
+    return dataset
+
+
+def _resolve_stores(stores: Optional[Stores], use_storage: bool) -> Stores:
+    stores = stores if stores is not None else local_stores()
+    if not use_storage or get_settings().disable_storage:
+        return replace(stores, storage=None, catalog=None, metadata=None, cache=None)
+    return stores
 
 
 def ingest_experiment_dataset(
     experiment_name,
+    *,
+    stores: Optional[Stores] = None,
     use_storage: bool = True,
     refresh: bool = False,
-    storage_mode: str = "local",
-    cloud_provider: Optional[str] = None,
-    db_url: Optional[str] = None,
-    query_backend: "DuckDBQueryBackend | None" = None,
+    registry: Optional[Registry] = None,
 ) -> Optional[dict[str, Any]]:
-    exp = get_experiment(experiment_name)
+    """Parse (or reuse) and store one experiment, register it in the catalog, and report the outcome.
 
+    The experiment is looked up in ``registry``; without one, the registry at
+    ``PATH_TO_REGISTRY`` is read. ``stores`` defaults to :func:`~mfethuls.stores.local_stores`
+    without a catalog; pass stores with an open catalog to register the dataset.
+    """
+
+    exp = _resolve_experiment(experiment_name, registry)
     if exp.instrument_name is None:
         logger.warning(
             "Skipping experiment %r: it is registered but has no associated instrument data yet.",
@@ -179,97 +228,52 @@ def ingest_experiment_dataset(
         )
         return {"status": "skipped"}
 
-    disable_storage_env = os.environ.get("MFETHULS_DISABLE_STORAGE", "").lower()
-    effective_use_storage = use_storage and disable_storage_env not in {"1", "true", "yes"}
-    if not effective_use_storage:
+    stores = _resolve_stores(stores, use_storage)
+    if stores.storage is None:
         return {"status": "skipped"}
-
-    # Ensure Postgres schema exists before any operation that touches the DB.
-    # PostgresManifestBackend (used by _assign_experiment_id) writes to the
-    # experiments table, which is created by PostgresMetadataBackend._ensure_tables().
-    # On a fresh deployment the table won't exist until we initialise it here.
-    resolved_db_url = _resolve_metadata_db_url(db_url)
-    if resolved_db_url:
-        PostgresMetadataBackend(resolved_db_url)
-
-    _assign_experiment_id(exp, db_url)
-
-    data_backend = _build_data_backend(storage_mode, cloud_provider)
-    cache_backend = data_backend
-    if (storage_mode or "").strip().lower() == "both":
-        cache_backend = LocalParquetStorage()
+    _assign_experiment_id(exp, stores)
 
     if not refresh:
-        cached_dataset = get_cached_dataset(exp, cache_backend, experiment_name)
+        cached_dataset = get_cached_dataset(exp, stores.reads_from, experiment_name)
         if cached_dataset is not None:
-            dataset_id = ensure_registered(exp, data_backend, query_backend)
-            parquet_path, _ = data_backend.dataset_paths(exp)
+            dataset_id = ensure_registered(exp, stores, cached_dataset)
+            record = catalog_record(exp, stores.storage, cached_dataset)
             return {
                 "status": "registered",
                 "dataset_id": dataset_id,
-                "storage_path": parquet_path,
+                "storage_path": record.storage_path,
+                "catalog_record": record,
             }
 
-    raw_filename = exp.raw_data_filename or exp.name
-    filters = {"name": [exp.instrument_name]}
-    bundle = prepare_instruments(filters=filters, experiments=[raw_filename])
-
-    try:
-        instrument = bundle.instruments[exp.instrument_name]
-        raw_dict = bundle.data_paths[exp.instrument_name]
-    except KeyError as exc:
-        raise KeyError(
-            f"Instrument {exp.instrument_name!r} for experiment {experiment_name!r} "
-            f"is not present in the current instrument configuration."
-        ) from exc
-
-    # Remap from {raw_data_filename: files} → {experiment_id: files} for parsers
-    dict_data_paths = {exp.experiment_id: raw_dict.get(raw_filename, [])}
-
-    dataset = _parse_experiment(exp, dict_data_paths, instrument)
-    parquet_path, _, dataset_id = persist_dataset(
-        exp,
-        dataset,
-        data_backend,
-        db_url,
-        query_backend,
-        experiment_name,
-    )
+    dataset = _parse_raw(exp, stores)
+    parquet_path, _, dataset_id = persist_dataset(exp, dataset, stores)
     if parquet_path or dataset_id:
         return {
             "status": "persisted",
             "dataset_id": dataset_id,
             "storage_path": parquet_path,
+            "catalog_record": catalog_record(exp, stores.storage, dataset),
         }
     return {"status": "failed"}
 
 
 def load_experiment_dataset(
     experiment_name,
+    *,
+    stores: Optional[Stores] = None,
     use_storage: bool = True,
     refresh: bool = False,
-    storage_mode: str = "local",
-    cloud_provider: Optional[str] = None,
-    db_url: Optional[str] = None,
-    query_backend: "DuckDBQueryBackend | None" = None,
+    registry: Optional[Registry] = None,
 ) -> Optional[Dataset]:
-    """Load and parse data for a given experiment name into a Dataset.
+    """Load one experiment as a Dataset: from storage when it was stored before, else parsed from raw data.
 
-    This is a high-level helper that ties together the Experiment registry,
-    instrument configuration, and the existing parser machinery. It keeps the
-    current prepare_instruments behaviour intact while offering a simpler
-    interface for users who only know the experiment name.
-
-    If db_url is provided, the dataset metadata will also be registered in the
-    specified Postgres database after successful storage save.
-
-    When `db_url` is not provided, metadata persistence can be enabled via the
-    `MFETHULS_METADATA_DB_ENABLED` env var (`1`/`true`/`yes`). In that mode,
-    the DB URL is resolved from Postgres env settings via `get_postgres_db_url`.
+    The experiment is looked up in ``registry``; without one, the registry at
+    ``PATH_TO_REGISTRY`` is read. A freshly parsed dataset is stored for next time
+    (unless ``use_storage`` is false). ``stores`` defaults to
+    :func:`~mfethuls.stores.local_stores`.
     """
 
-    exp = get_experiment(experiment_name)
-
+    exp = _resolve_experiment(experiment_name, registry)
     if exp.instrument_name is None:
         logger.warning(
             "Skipping experiment %r: it is registered but has no associated instrument data yet.",
@@ -277,83 +281,15 @@ def load_experiment_dataset(
         )
         return None
 
-    _assign_experiment_id(exp, db_url)
+    stores = _resolve_stores(stores, use_storage)
+    _assign_experiment_id(exp, stores)
 
-    # Allow a global switch to disable storage via environment for debugging.
-    disable_storage_env = os.environ.get("MFETHULS_DISABLE_STORAGE", "").lower()
-    effective_use_storage = use_storage and disable_storage_env not in {"1", "true", "yes"}
-
-    data_backend = None
-    if effective_use_storage:
-        data_backend = _build_data_backend(storage_mode, cloud_provider)
-
-    cache_backend = data_backend
-    if effective_use_storage and (storage_mode or "").strip().lower() == "both":
-        cache_backend = LocalParquetStorage()
-
-    # If requested, try to serve from storage cache first.
-    if effective_use_storage and not refresh:
-        cached_dataset = get_cached_dataset(exp, cache_backend, experiment_name)
+    if stores.reads_from is not None and not refresh:
+        cached_dataset = get_cached_dataset(exp, stores.reads_from, experiment_name)
         if cached_dataset is not None:
-            ensure_registered(exp, data_backend, query_backend)
+            ensure_registered(exp, stores, cached_dataset)
             return cached_dataset
 
-    raw_filename = exp.raw_data_filename or exp.name
-    filters = {"name": [exp.instrument_name]}
-    bundle = prepare_instruments(filters=filters, experiments=[raw_filename])
-
-    try:
-        instrument = bundle.instruments[exp.instrument_name]
-        raw_dict = bundle.data_paths[exp.instrument_name]
-    except KeyError as exc:
-        raise KeyError(
-            f"Instrument {exp.instrument_name!r} for experiment {experiment_name!r} "
-            f"is not present in the current instrument configuration."
-        ) from exc
-
-    dict_data_paths = {exp.experiment_id: raw_dict.get(raw_filename, [])}
-
-    # Delegate parsing + Dataset construction to the factory helper.
-    dataset = _parse_experiment(exp, dict_data_paths, instrument)
-
-    # Persist to local storage for future fast loading, and optionally persist
-    # metadata to Postgres via StorageManager. Never fail the call if
-    # persistence itself has issues.
-    if effective_use_storage:
-        persist_dataset(
-            exp,
-            dataset,
-            data_backend,
-            db_url,
-            query_backend,
-            experiment_name,
-        )
-
+    dataset = _parse_raw(exp, stores)
+    persist_dataset(exp, dataset, stores)
     return dataset
-
-
-def _build_data_backend(storage_mode: str, cloud_provider: Optional[str]) -> "LocalParquetStorage | S3ParquetStorage | AzureBlobParquetStorage | CombinedStorageBackend":
-    mode = (storage_mode or "local").strip().lower()
-    if mode not in {"local", "cloud", "both"}:
-        raise ValueError("storage_mode must be one of: local, cloud, both")
-
-    if mode in {"cloud", "both"} and not is_service_mode():
-        raise ValueError("cloud storage is only available in service mode")
-
-    if mode == "local":
-        #TODO: Check if this log is outputting
-        logger.info("Using LocalParquetStorage as data backend")
-        return LocalParquetStorage()
-
-    provider = (cloud_provider or "").strip().lower()
-    if provider in {"s3", "aws"}:
-        cloud_backend = S3ParquetStorage()
-    elif provider in {"azure", "azure_blob", "blob", "azureblob"}:
-        cloud_backend = AzureBlobParquetStorage()
-    else:
-        raise ValueError("cloud_provider must be set to 's3' or 'azure' when storage_mode is cloud or both")
-
-    if mode == "cloud":
-        return cloud_backend
-
-    return CombinedStorageBackend(primary=cloud_backend, secondary=LocalParquetStorage())

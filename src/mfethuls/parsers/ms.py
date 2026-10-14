@@ -1,6 +1,6 @@
-import os
 import re
 import logging
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -35,8 +35,7 @@ class BrukerMS:
     ):
         """Parse Bruker MS data.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -46,9 +45,6 @@ class BrukerMS:
             logger=logger,
             parser_label="MS",
         )
-
-        if experiment_id is None:
-            return df
 
         df, schema_report = apply_dataframe_schema(
             df,
@@ -88,7 +84,7 @@ class BrukerMS:
                .reset_index(drop=True) \
                .dropna(axis=0, how='any')
                
-        name = f'{os.path.basename(os.path.normpath(path)).casefold().rstrip(self.file_extension)}'
+        name = f'{Path(path).stem.casefold()}'
         df.loc[:, 'name'] = [name] * df.shape[0]
 
         peak_mz = self._read_peak_mz_from_raw_file(path)

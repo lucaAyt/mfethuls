@@ -23,7 +23,7 @@ You need: Tailscale installed and connected to the lab tailnet. That's it.
 
 4. **Ingest** — click **"Ingest experiments"**. A progress bar runs while the data is parsed. Completed experiments appear in the Datasets tab.
 
-5. **Browse and plot** — Datasets tab → select a dataset → tweak the plot → download as SVG (or interactive HTML).
+5. **Browse and plot** — Datasets sidebar → select experiments → choose the axes or switch on the built-in instrument plot → set axis limits if needed → download as SVG (or interactive HTML).
 
 **No install, no Python, no config.**
 
@@ -54,7 +54,6 @@ cp env_example .env
 
 Edit `.env`:
 ```
-MFETHULS_MODE=local
 PATH_TO_DATA=/path/to/raw/instrument/data
 PATH_TO_REGISTRY=/path/to/experiments_template.csv
 PATH_TO_LOCAL_STORAGE=/path/to/parquet/output
@@ -63,6 +62,8 @@ PATH_TO_LOCAL_STORAGE=/path/to/parquet/output
 `PATH_TO_DATA` should be the root folder containing instrument subfolders (`DSC/`, `TGA/`, etc.).
 
 `experiments_template.csv` in the repo root is a pre-filled starting point — open it in Excel and replace the placeholder rows with your experiments.
+
+**No data yet?** The repo includes example files (`examples/data/` — DSC, TGA, FTIR, fluorescence in-situ). Point `PATH_TO_DATA` at `examples/data/` and `PATH_TO_REGISTRY` at `examples/experiments_registry.csv` to run a complete ingest immediately.
 
 ### Launch
 
@@ -96,6 +97,4 @@ For a complete notebook guide including DuckDB SQL queries and model-building pa
 |---|---|
 | See the full workflow with a concrete example | [docs/guides/workflow.md](workflow.md) |
 | Understand the registry format (columns, instruments, profiles) | [docs/reference/registry.md](../reference/registry.md) |
-| Deploy to a shared lab server | [docs/guides/cloud_deployment.md](cloud_deployment.md) |
 | Query data in notebooks | [docs/guides/data_analysis.md](data_analysis.md) |
-| See all REST API endpoints | [docs/reference/api.md](../reference/api.md) |

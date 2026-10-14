@@ -140,14 +140,18 @@ venv.bak/
 *.duckdb
 *.duckdb.wal
 .mfethuls_registry/
+.mfethuls_manifest.json
 mfethuls_storage/
 
 # Notebooks with local outputs — commit selectively, not wholesale
-notebooks/__marimo__/
+__marimo__/
 notebooks/*.ipynb
 
 # Accidental Windows device-name file
 nul
+
+# Office temp files (Excel lock files etc.)
+~$*
 
 # Spyder project settings
 .spyderproject
@@ -184,3 +188,6 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Figures saved from notebooks or the CLI into the repo root
+/*.svg

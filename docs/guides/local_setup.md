@@ -67,12 +67,15 @@ PATH_TO_DATA/          ← the path you give the setup wizard
   SEC/                 ← Agilent SEC files
   Rheology/            ← Anton Paar rheometer files
   DMA/                 ← TA Q800 DMA files
-  UV_VIS/              ← Shimadzu / Ocean Optics
+  UV_Vis/              ← Shimadzu / Ocean Optics UV-Vis files
+  Fluorescence/        ← Ocean Optics Flame fluorescence in-situ files
   SAXS/                ← Anton Paar SAXS files
   MS/                  ← Bruker MS files
 ```
 
 Files can be placed **at any depth** inside the instrument folder — subfolders are fine. mfethuls walks the full folder tree to find your files.
+
+> **Not ready with your own data?** The repo includes example files under `examples/data/` (DSC, TGA, FTIR, fluorescence in-situ). When the setup wizard asks for paths, point `PATH_TO_DATA` at `examples/data/` and `PATH_TO_REGISTRY` at `examples/experiments_registry.csv` — you can run a complete ingest and explore the dashboard straight away.
 
 ---
 

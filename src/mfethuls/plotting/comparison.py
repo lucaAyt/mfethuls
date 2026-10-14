@@ -3,11 +3,13 @@ from __future__ import annotations
 import logging
 from typing import Literal, Sequence
 
-import matplotlib.pyplot as plt
-
 from ..dataset import Dataset
 from ..comparison import ComparisonSet
-from .core import PlotError, _resolve_plot_kind, plot_dataset
+from .backend import Backend, render
+from .core import PlotError, _resolve_plot_kind, build_dataset_spec
+from .dsc import dsc_overlay_legends, experiment_legend, experiment_legend_group, experiment_linestyle
+from .labels import axis_label
+from .spec import Colorbar, Panel, PlotSpec
 
 
 LOGGER = logging.getLogger(__name__)
@@ -51,6 +53,7 @@ def _resolve_x_column(dataset: Dataset, resolved_kind: str) -> str | None:
 
     simple_x = {
         "uv_vis": "wavelength_nm",
+        "fluorescence": "wavelength_nm",
         "ftir": "wavenumber_cm_inv",
         "dsc": "temperature_C",
         "tga": "temperature_C",
@@ -122,23 +125,20 @@ def _is_x_axis_compatible(datasets: Sequence[Dataset], kinds: Sequence[str]) -> 
     return True, unique[0]
 
 
-def _label_new_lines(axis, *, start_idx: int, dataset_label: str) -> None:
-    new_lines = axis.lines[start_idx:]
-    if not new_lines:
-        return
+def _shared_colorbar(colorbars: Sequence[Colorbar | None]) -> Colorbar | None:
+    """One colour bar spanning all datasets, when every dataset has one for the same quantity."""
 
-    for line in new_lines:
-        current = str(line.get_label() or "")
-        if current == "_nolegend_":
-            # Preserve lines marked for no legend (e.g., DSC boundary profiles)
-            continue
-        elif current and not current.startswith("_"):
-            line.set_label(f"{dataset_label} | {current}")
-        else:
-            line.set_label(dataset_label)
+    if not colorbars or not all(colorbars) or len({(c.title, c.cmap) for c in colorbars}) != 1:
+        return None
+    return Colorbar(
+        title=colorbars[0].title,
+        vmin=min(c.vmin for c in colorbars),
+        vmax=max(c.vmax for c in colorbars),
+        cmap=colorbars[0].cmap,
+    )
 
 
-def plot_experiments(
+def build_experiments_spec(
     comparison: ComparisonSet | Sequence[Dataset],
     *,
     kind: str | None = None,
@@ -147,16 +147,17 @@ def plot_experiments(
     group_by: str | None = None,
     max_groups: int = 50,
     stacked_offset: float = 0.0,
-    ax=None,
     title: str | None = None,
     strict: bool = True,
-):
+) -> PlotSpec:
+    """Build the backend-neutral spec that :func:`plot_experiments` renders."""
+
     comparison_set = _coerce_comparison_set(comparison)
     datasets = comparison_set.datasets
     labels = comparison_set.labels
 
     if not datasets:
-        raise PlotError("plot_comparison requires at least one dataset.")
+        raise PlotError("plot_experiments requires at least one dataset.")
 
     dataset_kwargs = {
         "kind": kind,
@@ -198,55 +199,68 @@ def plot_experiments(
         )
 
     if resolved_mode == "stacked" and stacked_offset <= 0:
-        raise PlotError("plot_comparison in stacked mode requires stacked_offset > 0.")
+        raise PlotError("plot_experiments in stacked mode requires stacked_offset > 0.")
 
     if resolved_mode == "facet":
-        fig, axes = plt.subplots(len(datasets), 1, squeeze=False)
-        flat_axes = list(axes.ravel())
-        for idx, (dataset, label) in enumerate(zip(datasets, labels)):
-            plot_dataset(
-                dataset,
-                ax=flat_axes[idx],
-                **dataset_kwargs,
-            )
-            flat_axes[idx].set_title("")
+        panels = []
+        for dataset in datasets:
+            panel = build_dataset_spec(dataset, **dataset_kwargs).panel
+            panel.title = None
+            panels.append(panel)
+        return PlotSpec(panels, layout="facet", title=title)
 
-        if len(flat_axes) > 1:
-            fig.subplots_adjust(hspace=0.45)
-        if title:
-            fig.suptitle(title)
-        return fig, axes
+    all_dsc = all(resolved == "dsc" for resolved in resolved_kinds)
+    panels = []
+    for idx, dataset in enumerate(datasets):
+        overlay_kwargs = dict(dataset_kwargs)
+        # DSC overlays: colour shows the segment, line style shows the experiment.
+        if all_dsc:
+            overlay_kwargs["linestyle"] = experiment_linestyle(idx)
+        panels.append(build_dataset_spec(dataset, **overlay_kwargs).panel)
 
-    if ax is not None:
-        fig, axis = ax.figure, ax
-    else:
-        fig, axis = plt.subplots()
+    # Colour-bar overlays (e.g. spectra coloured by time_s): colour shows the value,
+    # line style shows the experiment.
+    colorbar = _shared_colorbar([panel.colorbar for panel in panels])
+    by_experiment = all_dsc or colorbar is not None
 
-    for idx, (dataset, label) in enumerate(zip(datasets, labels)):
-        start = len(axis.lines)
-        plot_dataset(
-            dataset,
-            ax=axis,
-            **dataset_kwargs,
-        )
+    overlay = Panel(
+        title=title or ("Comparison Stacked" if resolved_mode == "stacked" else "Comparison Overlay"),
+        xlabel=axis_label(shared_x),
+        legend=colorbar is None,
+        colorbar=colorbar,
+    )
+    segment_colors: dict[str, object] = {}
+    for idx, (panel, label) in enumerate(zip(panels, labels)):
+        # Every dataset shares the x-axis, so its scale and direction carry over.
+        if idx == 0:
+            overlay.xscale = panel.xscale
+            overlay.yscale = panel.yscale
+            overlay.x_reversed = panel.x_reversed
+        overlay.ylabel = panel.ylabel
 
-        # TODO: x-axis being reverted back after stacking NMR plots
-        if resolved_mode == "stacked":
-            for line in axis.lines[start:]:
-                line.set_ydata(line.get_ydata() + (idx * stacked_offset))
+        for trace in panel.traces:
+            if trace.label:
+                segment_colors.setdefault(trace.label, trace.color)
+                trace.label = f"{label} | {trace.label}"
+            else:
+                trace.label = label
+            if resolved_mode == "stacked":
+                trace.y = trace.y + (idx * stacked_offset)
+            if colorbar is not None:
+                trace.linestyle = experiment_linestyle(idx)
+            if by_experiment:
+                trace.legend_group = experiment_legend_group(idx)
+            overlay.traces.append(trace)
 
-        _label_new_lines(axis, start_idx=start, dataset_label=label)
+    if all_dsc and overlay.traces:
+        overlay.legends = dsc_overlay_legends(segment_colors, labels)
+    elif colorbar is not None and len(datasets) > 1:
+        overlay.legends = [experiment_legend(labels)]
 
-    axis.set_title(title or ("Comparison Stacked" if resolved_mode == "stacked" else "Comparison Overlay"))
-    if axis.lines:
-        axis.legend()
-    if shared_x:
-        axis.set_xlabel(shared_x)
-
-    return fig, axis
+    return PlotSpec([overlay])
 
 
-def plot_comparison(
+def plot_experiments(
     comparison: ComparisonSet | Sequence[Dataset],
     *,
     kind: str | None = None,
@@ -258,10 +272,16 @@ def plot_comparison(
     ax=None,
     title: str | None = None,
     strict: bool = True,
+    backend: Backend | None = None,
 ):
-    """Compatibility wrapper for plot_experiments."""
+    """Plot several experiments together.
 
-    return plot_experiments(
+    ``mode="auto"`` overlays datasets that share an x-axis and otherwise draws one
+    panel per dataset. Returns ``(fig, ax)`` (``(fig, axes)`` for a facet) with the
+    matplotlib backend and a Plotly ``Figure`` with the plotly backend.
+    """
+
+    spec = build_experiments_spec(
         comparison,
         kind=kind,
         mode=mode,
@@ -269,7 +289,8 @@ def plot_comparison(
         group_by=group_by,
         max_groups=max_groups,
         stacked_offset=stacked_offset,
-        ax=ax,
         title=title,
         strict=strict,
     )
+    # A facet always creates its own figure; ax= only applies to overlay and stacked.
+    return render(spec, backend=backend, ax=None if spec.layout == "facet" else ax)

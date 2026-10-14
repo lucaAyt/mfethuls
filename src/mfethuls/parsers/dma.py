@@ -1,6 +1,6 @@
-import os
 import re
 import logging
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -39,8 +39,7 @@ class DmaTaQ800:
     ):
         """Parse DMA TA Q800 data.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -50,9 +49,6 @@ class DmaTaQ800:
             logger=logger,
             parser_label="DMA",
         )
-
-        if experiment_id is None:
-            return df
 
         registry_profile = measurement_profile or (metadata or {}).get("registry_measurement_profile")
         if registry_profile:
@@ -112,8 +108,8 @@ class DmaTaQ800:
                     column_names.append(re.split(self.delimiter, line.strip(), maxsplit=2)[1].casefold())
 
                 if take:
-                    l = re.split(self.delimiter, line.strip())
-                    lines.append(l)
+                    fields = re.split(self.delimiter, line.strip())
+                    lines.append(fields)
 
                 if pattern_start.match(line):
                     take = True
@@ -126,6 +122,6 @@ class DmaTaQ800:
 
         # Make up columns by combining 1st and 2nd lines
         df = pd.DataFrame(lines, columns=column_names).apply(pd.to_numeric, errors='coerce').dropna(axis=0)
-        df.loc[:, 'name'] = [f'{os.path.basename(os.path.normpath(path)).rstrip(self.file_extension)}'] * df.shape[0]
+        df.loc[:, 'name'] = [f'{Path(path).stem}'] * df.shape[0]
 
         return df
