@@ -15,8 +15,3 @@ class GenericInstrument(Instrument):
         return (f"GenericInstrument(name='{self.name}', type='{self.type_}', model='{self.model}', "
                 f"parser={self.parser.__class__.__name__}{char}, data_root_path='{self.data_root_path}')")
 
-    def parse_data(self, dict_data_paths):
-        parsed = self.parser.parse(dict_data_paths)
-        if self.characterizer:
-            parsed = self.characterizer.characterize(parsed)
-        return parsed

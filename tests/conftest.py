@@ -6,7 +6,7 @@ from mfethuls import settings as mfethuls_settings
 
 
 def _is_mfethuls_variable(name: str) -> bool:
-    return name.startswith(("MFETHULS_", "PATH_TO_")) or name.endswith("_FOLDER_NAME")
+    return name.startswith(("MFETHULS_", "PATH_TO_"))
 
 
 def pytest_configure(config):
@@ -30,13 +30,3 @@ def isolated_settings(monkeypatch, tmp_path):
     mfethuls_settings.configure(None)
     yield
     mfethuls_settings.configure(None)
-
-
-@pytest.fixture
-def service_mode(monkeypatch):
-    monkeypatch.setenv("MFETHULS_MODE", "service")
-
-
-@pytest.fixture
-def local_mode(monkeypatch):
-    monkeypatch.setenv("MFETHULS_MODE", "local")

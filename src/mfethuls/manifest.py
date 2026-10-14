@@ -1,24 +1,30 @@
 """Manifest backend: durable experiment_id assignment and raw data file discovery.
 
 experiment_id is auto-assigned at first ingest and persisted so that re-ingestion
-and DB resets always produce the same ID for the same raw data file.
+and DB resets always produce the same ID for the same raw data file. The ID is
+keyed on (instrument_name, raw_data_filename); the experiment name comes from the
+registry and may change, the manifest just records the latest one. Each entry
+also keeps a ``content_hash`` of its raw files (see :func:`content_hash`).
 
-Two backends are provided:
-- FileManifestBackend  — local mode; reads/writes PATH_TO_DATA/.mfethuls_manifest.json
-- PostgresManifestBackend — service mode; uses the experiments Postgres table
+:class:`FileManifestBackend` keeps the manifest in PATH_TO_DATA/.mfethuls_manifest.json.
+Other backends implement :class:`ManifestBackend`.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import re
+import tempfile
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from filelock import FileLock
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +32,31 @@ MANIFEST_FILENAME = ".mfethuls_manifest.json"
 _SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9_\-\.]+$")
 
 
+class ManifestError(RuntimeError):
+    """The manifest cannot be read; it is left untouched."""
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def generate_experiment_id() -> str:
     """Generate a 12-char hex UUID suitable for use as an internal experiment_id."""
     return uuid.uuid4().hex[:12]
+
+
+def content_hash(paths: list[str]) -> str:
+    """SHA-256 of an experiment's raw files, independent of their names and location.
+
+    Hashes each file's bytes, then the sorted file hashes, so renaming or moving
+    the files keeps the hash while any change to their contents alters it.
+    """
+    file_hashes = []
+    for path in paths:
+        digest = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(chunk)
+        file_hashes.append(digest.hexdigest())
+    return hashlib.sha256("\n".join(sorted(file_hashes)).encode()).hexdigest()
 
 
 def _collect_files(directory: str) -> list[str]:
@@ -56,9 +82,14 @@ def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[
        folder-per-experiment instruments (e.g. UV/Vis in-situ, NMR) where the
        experiment data lives in a named subfolder with no single anchor file.
 
-    Exactly one of the searches may match. ``ValueError`` is raised if both a
-    file and a directory match, or if either search matches in more than one
-    location. ``FileNotFoundError`` is raised when neither search finds anything.
+    Exactly one of the searches may match. A file inside the matching directory
+    (``LUB055/LUB055.txt``) is not a conflict: the directory is the experiment.
+    ``ValueError`` is raised if a file and a directory match in different places,
+    or if either search matches in more than one location. ``FileNotFoundError``
+    is raised when neither search finds anything.
+
+    To mean only the files of one stem inside such a directory (registering it as
+    one experiment per file), give the file name with its extension: ``LUB055.txt``.
 
     Returns:
         ``(parent_dir, sorted_file_paths)`` — the same contract as before.
@@ -93,7 +124,14 @@ def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[
             + "\nRename one to remove ambiguity."
         )
     if file_matches and dir_matched_folders:
-        file_dir, matched = next(iter(file_matches.items()))
+        folder = dir_matched_folders[0]
+        if all(os.path.commonpath([root, folder]) == folder for root in file_matches):
+            files = _collect_files(folder)
+            if files:
+                return folder, files
+            parent_dir, matched = next(iter(file_matches.items()))
+            return parent_dir, sorted(matched)
+        matched = next(iter(file_matches.values()))
         raise ValueError(
             f"raw_data_filename {raw_data_filename!r} matches both a file and a directory:\n"
             + "\n".join(f"  {p}" for p in sorted(matched))
@@ -135,12 +173,26 @@ class ManifestBackend(ABC):
 
         On first call for a given pair, a new UUID is generated and persisted.
         Subsequent calls return the same ID, guaranteeing stability across
-        DB resets and file rearrangement.
-
-        Raises:
-            ValueError: The stored experiment_name does not match the provided
-                one — the name was changed after first ingest.
+        DB resets and file rearrangement. The stored experiment_name is updated
+        to ``experiment_name``: the registry decides the name.
         """
+
+    @abstractmethod
+    def record_content_hash(self, *, instrument_name: str, raw_data_filename: str, content_hash: str) -> None:
+        """Store the :func:`content_hash` of an experiment's raw files on its entry."""
+
+    @abstractmethod
+    def forget(self, *, experiment_id: str) -> bool:
+        """Remove the entry of ``experiment_id``; ``True`` if there was one."""
+
+    @abstractmethod
+    def relink(self, *, experiment_id: str, raw_data_filename: str) -> None:
+        """Point the entry of ``experiment_id`` at renamed raw data, keeping the ID."""
+
+    @abstractmethod
+    def all_mappings(self) -> List[Dict[str, Any]]:
+        """Every recorded experiment: ``instrument_name``, ``raw_data_filename``,
+        ``experiment_id``, ``experiment_name`` and ``content_hash`` (``None`` until parsed)."""
 
 
 # ── File-based backend ────────────────────────────────────────────────────────
@@ -148,9 +200,17 @@ class ManifestBackend(ABC):
 class FileManifestBackend(ManifestBackend):
     """Local-mode manifest stored as JSON at PATH_TO_DATA/.mfethuls_manifest.json.
 
-    Writes are atomic (write-to-temp + os.replace) so concurrent single-machine
-    ingestion is safe.
+    Every change is read-modify-write under a lock file (``.mfethuls_manifest.json.lock``),
+    so processes on this machine (the app, a notebook, the CLI) do not overwrite each
+    other's entries. The lock does not reach other machines syncing the same folder.
+
+    The file is replaced atomically: the new content goes to a temporary file that
+    is flushed to disk and then swapped in, so readers see the old or the new
+    manifest, never half of one. A manifest that cannot be read raises
+    :class:`ManifestError` instead of starting over, which would lose every ID.
     """
+
+    LOCK_TIMEOUT_S = 60
 
     def __init__(self, data_root: str) -> None:
         self.data_root = data_root
@@ -162,79 +222,45 @@ class FileManifestBackend(ManifestBackend):
         with open(self._manifest_path, encoding="utf-8") as fh:
             try:
                 data = json.load(fh)
-            except json.JSONDecodeError:
-                logger.warning("Manifest file at %r is corrupted — starting fresh.", self._manifest_path)
-                return {"version": "1.0", "mappings": []}
+            except json.JSONDecodeError as exc:
+                raise ManifestError(
+                    f"The manifest at {self._manifest_path!r} is not valid JSON ({exc}). It holds the ID of "
+                    "every ingested experiment, so nothing was changed. Restore it from a backup or the "
+                    "folder's version history (e.g. OneDrive), or fix the JSON by hand."
+                ) from exc
+        if not isinstance(data, dict) or not isinstance(data.get("mappings", []), list):
+            raise ManifestError(f"The manifest at {self._manifest_path!r} has no 'mappings' list.")
         return data
 
     def _write_atomic(self, manifest: Dict[str, Any]) -> None:
-        tmp_path = self._manifest_path + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as fh:
-            json.dump(manifest, fh, indent=2)
-        os.replace(tmp_path, self._manifest_path)
+        fd, tmp_path = tempfile.mkstemp(dir=self.data_root, prefix=MANIFEST_FILENAME + ".", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(manifest, fh, indent=2)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_path, self._manifest_path)
+        except BaseException:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
 
-    def get_or_create_experiment_id(
-        self,
-        *,
-        instrument_name: str,
-        raw_data_filename: str,
-        experiment_name: str,
-    ) -> str:
-        manifest = self._read()
+    def _update(self, change: Callable[[Dict[str, Any]], Tuple[Any, bool]]) -> Any:
+        """Apply ``change(manifest) -> (result, changed)`` under the lock; write if changed."""
+
+        with FileLock(self._manifest_path + ".lock", timeout=self.LOCK_TIMEOUT_S):
+            manifest = self._read()
+            result, changed = change(manifest)
+            if changed:
+                self._write_atomic(manifest)
+        return result
+
+    @staticmethod
+    def _find(manifest: Dict[str, Any], instrument_name: str, raw_data_filename: str) -> Optional[Dict[str, Any]]:
         for entry in manifest.get("mappings", []):
-            if (
-                entry.get("instrument_name") == instrument_name
-                and entry.get("raw_data_filename") == raw_data_filename
-            ):
-                stored_name = entry.get("experiment_name")
-                if stored_name != experiment_name:
-                    raise ValueError(
-                        f"Manifest entry for ({instrument_name!r}, {raw_data_filename!r}) was "
-                        f"first ingested as experiment_name={stored_name!r} but the registry now "
-                        f"has {experiment_name!r}. The experiment name must not change after first "
-                        "ingest. Update the manifest entry or revert the registry name change."
-                    )
-                return entry["experiment_id"]
-
-        experiment_id = generate_experiment_id()
-        manifest.setdefault("mappings", []).append(
-            {
-                "instrument_name": instrument_name,
-                "raw_data_filename": raw_data_filename,
-                "experiment_id": experiment_id,
-                "experiment_name": experiment_name,
-                "first_ingested": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-        self._write_atomic(manifest)
-        logger.debug(
-            "Assigned new experiment_id=%s for (%s, %s)",
-            experiment_id,
-            instrument_name,
-            raw_data_filename,
-        )
-        return experiment_id
-
-    def all_mappings(self) -> List[Dict[str, Any]]:
-        """Return all manifest entries (used by seed_postgres_from_manifest)."""
-        return self._read().get("mappings", [])
-
-
-# ── Postgres-backed backend ───────────────────────────────────────────────────
-
-class PostgresManifestBackend(ManifestBackend):
-    """Service-mode manifest backed by the Postgres experiments table.
-
-    Uses INSERT … ON CONFLICT DO NOTHING + SELECT to guarantee idempotent,
-    race-free ID assignment under concurrent ingestion from multiple workers.
-
-    Requires the experiments table to have a UNIQUE constraint on
-    (instrument_name, raw_data_filename) — added by metadata.py _ensure_tables().
-    """
-
-    def __init__(self, db_url: str) -> None:
-        from sqlalchemy import create_engine
-        self.engine = create_engine(db_url)
+            if entry.get("instrument_name") == instrument_name and entry.get("raw_data_filename") == raw_data_filename:
+                return entry
+        return None
 
     def get_or_create_experiment_id(
         self,
@@ -243,113 +269,55 @@ class PostgresManifestBackend(ManifestBackend):
         raw_data_filename: str,
         experiment_name: str,
     ) -> str:
-        from sqlalchemy import text
-
-        select_sql = text(
-            "SELECT experiment_id, name FROM experiments "
-            "WHERE instrument_name = :instrument_name AND raw_data_filename = :raw_data_filename "
-            "LIMIT 1;"
-        )
-        insert_sql = text(
-            "INSERT INTO experiments (name, experiment_id, instrument_name, raw_data_filename, registered_at) "
-            "VALUES (:name, :experiment_id, :instrument_name, :raw_data_filename, now()) "
-            "ON CONFLICT (instrument_name, raw_data_filename) DO NOTHING;"
-        )
-
-        candidate_id = generate_experiment_id()
-
-        with self.engine.begin() as conn:
-            conn.execute(
-                insert_sql,
+        def change(manifest):
+            entry = self._find(manifest, instrument_name, raw_data_filename)
+            if entry is not None:
+                renamed = entry.get("experiment_name") != experiment_name
+                entry["experiment_name"] = experiment_name
+                return entry["experiment_id"], renamed
+            experiment_id = generate_experiment_id()
+            manifest.setdefault("mappings", []).append(
                 {
-                    "name": experiment_name,
-                    "experiment_id": candidate_id,
                     "instrument_name": instrument_name,
                     "raw_data_filename": raw_data_filename,
-                },
+                    "experiment_id": experiment_id,
+                    "experiment_name": experiment_name,
+                    "first_ingested": datetime.now(timezone.utc).isoformat(),
+                }
             )
-            row = conn.execute(
-                select_sql,
-                {"instrument_name": instrument_name, "raw_data_filename": raw_data_filename},
-            ).fetchone()
+            logger.debug("Assigned new experiment_id=%s for (%s, %s)", experiment_id, instrument_name, raw_data_filename)
+            return experiment_id, True
 
-        if row is None:
-            raise RuntimeError(
-                f"Failed to assign experiment_id for ({instrument_name!r}, {raw_data_filename!r}). "
-                "This should not happen — please check Postgres connectivity."
-            )
+        return self._update(change)
 
-        stored_name = row[1]
-        if stored_name != experiment_name:
-            raise ValueError(
-                f"Postgres experiments table entry for ({instrument_name!r}, {raw_data_filename!r}) "
-                f"has name={stored_name!r} but the registry has {experiment_name!r}. "
-                "The experiment name must not change after first ingest."
-            )
+    def record_content_hash(self, *, instrument_name: str, raw_data_filename: str, content_hash: str) -> None:
+        def change(manifest):
+            entry = self._find(manifest, instrument_name, raw_data_filename)
+            if entry is None or entry.get("content_hash") == content_hash:
+                return None, False
+            entry["content_hash"] = content_hash
+            return None, True
 
-        return row[0]
+        self._update(change)
 
+    def forget(self, *, experiment_id: str) -> bool:
+        def change(manifest):
+            kept = [e for e in manifest.get("mappings", []) if e.get("experiment_id") != experiment_id]
+            removed = len(kept) != len(manifest.get("mappings", []))
+            manifest["mappings"] = kept
+            return removed, removed
 
-# ── Factory ───────────────────────────────────────────────────────────────────
+        return self._update(change)
 
-def get_manifest_backend(
-    *,
-    data_root: Optional[str],
-    db_url: Optional[str],
-) -> ManifestBackend:
-    """Return the appropriate ManifestBackend for the current mode.
+    def relink(self, *, experiment_id: str, raw_data_filename: str) -> None:
+        def change(manifest):
+            for entry in manifest.get("mappings", []):
+                if entry.get("experiment_id") == experiment_id:
+                    entry["raw_data_filename"] = raw_data_filename
+                    return None, True
+            raise KeyError(f"No manifest entry with experiment_id {experiment_id!r}")
 
-    Postgres is preferred when ``db_url`` is provided (service mode).
-    Falls back to the file-based backend for local mode.
-    """
-    if db_url:
-        return PostgresManifestBackend(db_url)
-    if not data_root:
-        raise ValueError(
-            "Cannot create a manifest backend: neither db_url nor data_root is set. "
-            "Set PATH_TO_DATA or provide a Postgres db_url."
-        )
-    return FileManifestBackend(data_root)
+        self._update(change)
 
-
-# ── Disaster recovery ─────────────────────────────────────────────────────────
-
-def seed_postgres_from_manifest(data_root: str, db_url: str) -> int:
-    """Re-populate the Postgres experiments table from the local manifest file.
-
-    Safe to run multiple times — uses INSERT … ON CONFLICT DO NOTHING so
-    existing rows are never overwritten.
-
-    Returns the number of rows inserted.
-    """
-    from sqlalchemy import create_engine, text
-
-    file_backend = FileManifestBackend(data_root)
-    mappings = file_backend.all_mappings()
-    if not mappings:
-        logger.info("Manifest file is empty — nothing to seed.")
-        return 0
-
-    engine = create_engine(db_url)
-    insert_sql = text(
-        "INSERT INTO experiments (name, experiment_id, instrument_name, raw_data_filename, registered_at) "
-        "VALUES (:name, :experiment_id, :instrument_name, :raw_data_filename, now()) "
-        "ON CONFLICT (instrument_name, raw_data_filename) DO NOTHING;"
-    )
-
-    inserted = 0
-    with engine.begin() as conn:
-        for entry in mappings:
-            result = conn.execute(
-                insert_sql,
-                {
-                    "name": entry.get("experiment_name"),
-                    "experiment_id": entry.get("experiment_id"),
-                    "instrument_name": entry.get("instrument_name"),
-                    "raw_data_filename": entry.get("raw_data_filename"),
-                },
-            )
-            inserted += result.rowcount
-
-    logger.info("Seeded %d/%d manifest entries into Postgres.", inserted, len(mappings))
-    return inserted
+    def all_mappings(self) -> List[Dict[str, Any]]:
+        return [{"content_hash": None, **entry} for entry in self._read().get("mappings", [])]

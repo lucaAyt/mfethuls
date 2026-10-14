@@ -4,6 +4,7 @@
     "model": "prior",
     "name": "dsc",
     "folder_name": "DSC",
+    "data_layout": "file",
     "characterizer": {
       "type": "dsc_profiling",
       "sensitivity": 0.1
@@ -14,6 +15,7 @@
     "model": "perkin_elmer",
     "name": "dsc_perkin_elmer",
     "folder_name": "DSC",
+    "data_layout": "file",
     "characterizer": {
       "type": "dsc_profiling",
       "sensitivity": 0.01
@@ -24,16 +26,18 @@
     "model": "mettler_toledo",
     "name": "dsc_mettler_toledo",
     "folder_name": "DSC",
+    "data_layout": "file",
     "characterizer": {
       "type": "dsc_profiling",
       "sensitivity": 0.1
     }
   },
-    {
+  {
     "type": "dsc",
     "model": "default",
     "name": "dsc_default",
     "folder_name": "DSC",
+    "data_layout": "file",
     "characterizer": {
       "type": "dsc_profiling",
       "sensitivity": 0.01
@@ -43,67 +47,80 @@
     "type": "uv_vis",
     "model": "flame",
     "name": "uv_insitu",
-    "folder_name": "UV_Vis"
+    "folder_name": "UV_Vis",
+    "data_layout": "folder"
   },
   {
     "type": "fluorescence",
     "model": "flame",
     "name": "fluorescence_insitu",
-    "folder_name": "Fluorescence"
+    "folder_name": "Fluorescence",
+    "data_layout": "folder"
   },
   {
     "type": "uv_vis",
     "model": "Shimadzu",
     "name": "uv_vis",
-    "folder_name": "UV_Vis"
+    "folder_name": "UV_Vis",
+    "data_layout": "file"
   },
   {
     "type": "rheometer",
     "model": "anton_paar",
     "name": "rheometer",
-    "folder_name": "Rheology"
+    "folder_name": "Rheology",
+    "data_layout": "file"
   },
   {
     "type": "tga",
     "model": "tgaX",
     "name": "tga",
     "folder_name": "TGA",
-    "characterizer": {"type": "tga"}
+    "data_layout": "file",
+    "characterizer": {
+      "type": "tga"
+    }
   },
   {
     "type": "nmr",
     "model": "bruker_nmr",
     "name": "nmr",
-    "folder_name": "NMR"
+    "folder_name": "NMR",
+    "data_layout": "folder"
   },
   {
     "type": "ftir",
     "model": "bruker",
     "name": "ftir",
-    "folder_name": "FTIR"
+    "folder_name": "FTIR",
+    "data_layout": "file"
   },
   {
     "type": "sec",
     "model": "agilent",
     "name": "sec",
-    "folder_name": "SEC"
+    "folder_name": "SEC",
+    "data_layout": "file"
   },
   {
     "type": "dma",
     "model": "ta_q800",
     "name": "dma",
-    "folder_name": "DMA"
+    "folder_name": "DMA",
+    "data_layout": "file"
   },
   {
     "type": "saxs",
     "model": "anton_paar",
     "name": "saxs",
-    "folder_name": "SAXS"
+    "folder_name": "SAXS",
+    "data_layout": "file"
   },
   {
     "type": "ms",
     "model": "bruker",
     "name": "ms",
-    "folder_name": "MS"
+    "folder_name": "MS",
+    "data_layout": "file"
   }
 ]

@@ -1,63 +1,9 @@
 from __future__ import annotations
 
-from unittest.mock import patch
 from pathlib import Path
 
-import pytest
 import pandas as pd
-
-from mfethuls.worker import process_job
-
-
-@patch("mfethuls.worker.update_job")
-@patch("mfethuls.worker.get_job")
-@patch("mfethuls.worker.load_experiment_registry")
-@patch("mfethuls.worker.clear_experiment_registry")
-def test_process_job_calls_ingest_on_success(
-    mock_clear_registry,
-    mock_load_registry,
-    mock_get_job,
-    mock_update_job,
-):
-    mock_get_job.return_value = {
-        "job_id": "job1",
-        "job_registry_storage_path": "/tmp/registry.parquet",
-        "storage_mode": "local",
-    }
-    mock_load_registry.return_value = pd.DataFrame(
-        [{"name": "exp_a", "experiment_id": "EXP001", "instrument_name": "dsc"}]
-    )
-
-    with patch("mfethuls.worker._process_job_ingest", return_value={"job_id": "job1"}) as mock_ingest:
-        process_job("job1")
-
-    mock_clear_registry.assert_called_once()
-    mock_ingest.assert_called_once()
-
-
-@patch("mfethuls.worker.update_job")
-@patch("mfethuls.worker.get_job")
-@patch("mfethuls.worker.load_experiment_registry")
-@patch("mfethuls.worker.clear_experiment_registry")
-def test_process_job_marks_failed_when_ingest_raises(
-    mock_clear_registry,
-    mock_load_registry,
-    mock_get_job,
-    mock_update_job,
-):
-    mock_get_job.return_value = {
-        "job_id": "job1",
-        "job_registry_storage_path": "/tmp/registry.parquet",
-        "storage_mode": "local",
-    }
-    mock_load_registry.return_value = pd.DataFrame(
-        [{"name": "exp_a", "experiment_id": "EXP001", "instrument_name": "dsc"}]
-    )
-
-    with patch("mfethuls.worker._process_job_ingest", side_effect=RuntimeError("boom")):
-        process_job("job1")
-
-    mock_update_job.assert_called_with("job1", status="failed", message="ingest failed: boom")
+import pytest
 
 
 def test_duckdb_backend_context_manager_closes():

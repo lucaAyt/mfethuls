@@ -54,7 +54,6 @@ cp env_example .env
 
 Edit `.env`:
 ```
-MFETHULS_MODE=local
 PATH_TO_DATA=/path/to/raw/instrument/data
 PATH_TO_REGISTRY=/path/to/experiments_template.csv
 PATH_TO_LOCAL_STORAGE=/path/to/parquet/output
@@ -98,6 +97,4 @@ For a complete notebook guide including DuckDB SQL queries and model-building pa
 |---|---|
 | See the full workflow with a concrete example | [docs/guides/workflow.md](workflow.md) |
 | Understand the registry format (columns, instruments, profiles) | [docs/reference/registry.md](../reference/registry.md) |
-| Deploy to a shared lab server | [docs/guides/cloud_deployment.md](cloud_deployment.md) |
 | Query data in notebooks | [docs/guides/data_analysis.md](data_analysis.md) |
-| See all REST API endpoints | [docs/reference/api.md](../reference/api.md) |

@@ -34,8 +34,7 @@ class AntonPaarSAXS:
     ):
         """Parse Anton Paar SAXS data.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -45,9 +44,6 @@ class AntonPaarSAXS:
             logger=logger,
             parser_label="SAXS",
         )
-
-        if experiment_id is None:
-            return df
 
         # TODO: Refine schema normalization to handle SAXS-specific columns 
         # add 'Intensity Relative [Absolute Intensity x SampleThickness]' to schema normalisation

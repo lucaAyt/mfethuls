@@ -7,7 +7,7 @@ import pandas as pd
 
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.ingestion import collect_dataframe_from_paths
-from mfethuls.parsers.registry import register_parser
+from mfethuls.parsers.registry import reads, register_parser
 from mfethuls.schema_normalization import apply_dataframe_schema
 
 
@@ -32,12 +32,7 @@ class DSCPriorParser:
         experiment_name: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ):
-        """Parse raw DSC data.
-
-        When experiment context (experiment_id, etc.) is provided, this returns
-        a Dataset; otherwise it returns a plain DataFrame for backward
-        compatibility.
-        """
+        """Parse raw DSC data into a Dataset."""
 
         df = collect_dataframe_from_paths(
             dict_paths,
@@ -47,17 +42,12 @@ class DSCPriorParser:
             parser_label="DSC(prior)",
         )
 
-        if experiment_id is None:
-            # Old behaviour: just return the DataFrame.
-            return df
-
         df, schema_report = apply_dataframe_schema(
             df,
             instrument_type="dsc",
             instrument_model=instrument_model or "prior",
         )
 
-        # New behaviour: wrap into a Dataset with provided metadata and id columns.
         if "experiment_id" not in df.columns:
             df["experiment_id"] = experiment_id
         if sample_id is not None and "sample_id" not in df.columns:
@@ -116,6 +106,8 @@ class DSCPriorParser:
 
 @register_parser('dsc', 'perkin_elmer')
 class DSCPerkinElmerParser:
+    extra_extensions = ('.csv',)
+
     def __init__(self, file_extension='.txt', parse_char_start='\tTime', parse_char_end='Shiiit', delimiter='\t'):
         self.file_extension = file_extension
         self.parse_char_start = parse_char_start
@@ -137,8 +129,7 @@ class DSCPerkinElmerParser:
     ):
         """Parse raw Perkin Elmer DSC data.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -147,11 +138,8 @@ class DSCPerkinElmerParser:
             parse_raw=self.parse_raw_data,
             logger=logger,
             parser_label="DSC(perkin_elmer)",
-            should_parse_raw=lambda path: str(path).casefold().endswith(self.file_extension.casefold()) or str(path).casefold().endswith('.csv'),
+            should_parse_raw=lambda path: reads(self, path),
         )
-
-        if experiment_id is None:
-            return df
 
         df, schema_report = apply_dataframe_schema(
             df,
@@ -254,8 +242,7 @@ class DSCMettlerToledoParser:
     ):
         """Parse raw Mettler Toledo DSC data.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -265,9 +252,6 @@ class DSCMettlerToledoParser:
             logger=logger,
             parser_label="DSC(mettler_toledo)",
         )
-
-        if experiment_id is None:
-            return df
 
         df, schema_report = apply_dataframe_schema(
             df,
@@ -340,6 +324,8 @@ class DSCMettlerToledoParser:
     
 @register_parser('dsc', 'default')
 class DSCDefault:
+    extra_extensions = ('.csv',)
+
     def __init__(self, file_extension='.txt', parse_char_start='\tTime', parse_char_end='Shiiit', delimiter='\t'):
         self.file_extension = file_extension
         self.parse_char_start = parse_char_start
@@ -361,8 +347,7 @@ class DSCDefault:
     ):
         """Parse raw Perkin Elmer DSC data.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -371,11 +356,8 @@ class DSCDefault:
             parse_raw=self.parse_raw_data,
             logger=logger,
             parser_label="DSC(perkin_elmer)",
-            should_parse_raw=lambda path: str(path).casefold().endswith(self.file_extension.casefold()) or str(path).casefold().endswith('.csv'),
+            should_parse_raw=lambda path: reads(self, path),
         )
-
-        if experiment_id is None:
-            return df
 
         df, schema_report = apply_dataframe_schema(
             df,

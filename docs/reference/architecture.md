@@ -1,179 +1,6 @@
 # mfethuls architecture
 
-mfethuls bridges laboratory instrument exports and analysis-ready datasets: a **registry** (spreadsheet) describes experiments; an **ETL pipeline** parses and normalizes raw data; **storage and query layers** expose Parquet, metadata, and SQL to users and BI tools.
-
----
-
-## System context
-
-```mermaid
-flowchart TB
-  subgraph people [People]
-    RS[Experimentalist]
-    DS[Data scientist]
-    MAINT[Maintainer]
-  end
-
-  subgraph inputs [Inputs]
-    REG[Registry CSV/XLSX\nshared OneDrive / local]
-    RAW[Raw instrument files\nDSC, TGA, FTIR, SEC ...]
-    CFG[instrument_params.json\n+ schema JSON files]
-  end
-
-  subgraph mfethuls [mfethuls]
-    R[Registry layer]
-    E[ETL engine]
-    S[Storage layer]
-    U[User interfaces]
-  end
-
-  subgraph outputs [Outputs]
-    PQ[Parquet datasets]
-    META[Metadata — Postgres + .json sidecars]
-    DDB[(DuckDB catalog)]
-  end
-
-  RS --> REG
-  RS --> RAW
-  MAINT --> CFG
-  REG --> R
-  RAW --> E
-  CFG --> E
-  R --> E
-  E --> S
-  S --> PQ
-  S --> META
-  S --> DDB
-  U --> S
-  DS --> U
-  DS --> DDB
-```
-
-| Role | Responsibilities |
-|------|-----------------|
-| Experimentalist | Registry rows, descriptions, measurement profiles, raw data files |
-| Maintainer | Parsers, schema JSON, instrument config |
-| Data scientist | Queries, notebooks, downstream BI, comparison sets |
-
----
-
-## Deployment modes
-
-```mermaid
-flowchart LR
-  subgraph local ["Local mode (MFETHULS_MODE=local)"]
-    NB[Notebooks / CLI]
-    ST[Streamlit explorer]
-    LP[Local Parquet]
-    LD[(DuckDB file)]
-    NB --> LP
-    ST --> LP
-    LP --> LD
-  end
-
-  subgraph service ["Service mode (MFETHULS_MODE=service)"]
-    USER[User / Browser]
-    AUTH[Auth middleware\nBearer token]
-    API[FastAPI :8000]
-    WK[Worker]
-    PG[(Postgres\njobs + metadata)]
-    LD2[(DuckDB file)]
-    LP2[Parquet local/cloud]
-    ST[Streamlit :8501]
-
-    USER --> ST
-    ST -->|Authorization: Bearer| AUTH
-    AUTH --> API
-    API --> PG
-    WK --> PG
-    API -->|read-only\nper request| LD2
-    WK -->|brief write\nend of job| LD2
-    WK --> LP2
-  end
-```
-
-**Local mode:** no Postgres required; ingest writes Parquet and registers DuckDB views on disk. Single-process — no lock contention.
-
-**Service mode:** API queues jobs in Postgres; worker runs the ingest pipeline; API holds DuckDB read-only for milliseconds per request; worker holds a write lock only at the end of each job (batch view registration). Streamlit connects directly to DuckDB via the shared data volume.
-
----
-
-## End-to-end ingest pipeline
-
-```mermaid
-sequenceDiagram
-  participant User
-  participant API as FastAPI + Auth
-  participant PG as Postgres
-  participant Worker
-  participant ETL as ETL core
-  participant Store as Storage (Parquet + Postgres)
-  participant DDB as DuckDB
-
-  User->>API: POST /registry/preview
-  API->>API: validate_registry_dataframe
-  API-->>User: rows + errors/warnings + summary
-
-  User->>API: POST /ingest (Bearer token)
-  API->>API: validate registry (strict unless allow_invalid)
-  API->>PG: create_job (queued)
-  API-->>User: 202 {job_id}
-
-  loop Poll until done
-    User->>API: GET /jobs/{job_id}
-    API-->>User: {status, progress, datasets}
-  end
-
-  Worker->>PG: claim_next_job (FOR UPDATE SKIP LOCKED)
-  Worker->>Worker: clear_experiment_registry()
-  Worker->>Worker: load_experiment_registry(PATH_TO_REGISTRY)
-
-  loop Each experiment — no DuckDB connection held
-    Worker->>ETL: ingest_experiment_dataset(query_backend=None)
-    ETL->>Store: write Parquet file
-    ETL->>Store: write .metadata.json sidecar
-    ETL->>PG: upsert dataset metadata (optional)
-  end
-
-  Note over Worker,DDB: Brief write window — milliseconds
-  Worker->>DDB: open write connection
-  Worker->>DDB: batch register_parquet() for all experiments
-  Worker->>DDB: close write connection
-
-  Worker->>PG: update job → completed
-
-  User->>API: GET /datasets
-  API->>DDB: duckdb_session(read_only=True)
-  API-->>User: list of registered datasets
-
-  User->>API: GET /dataset/{name}?limit=100
-  API->>DDB: duckdb_session(read_only=True)
-  API-->>User: paginated rows + column types
-```
-
-**Key design decision:** the worker holds no DuckDB connection while parsing experiments. Only after all Parquet files are written does it open a write connection to batch-register views — keeping the exclusive write lock window to milliseconds rather than minutes.
-
----
-
-## Authentication
-
-```mermaid
-flowchart LR
-  REQ[Incoming request] --> HLT{Path = /health?}
-  HLT -->|yes| PASS[Route handler — no auth]
-  HLT -->|no| MW[verify_token dependency]
-  MW -->|MFETHULS_API_KEY not set| ERR500[500 RuntimeError — misconfigured]
-  MW -->|missing / wrong token| ERR401[401 Unauthorized]
-  MW -->|valid Bearer token| ROUTE[Route handler]
-```
-
-All routes registered through the main router require a valid `Authorization: Bearer <token>` header. The token is compared against `MFETHULS_API_KEY` at request time. `GET /health` is registered directly on `app` and is always public — this allows Docker and load-balancer health checks to work without credentials.
-
-**Best practice:** generate a long random token and store it in your `.env`. Never commit the token to version control.
-
-```shell
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
+mfethuls bridges laboratory instrument exports and analysis-ready datasets: a **registry** (spreadsheet) describes experiments; an **ETL pipeline** parses and normalizes raw data; **storage and a query catalog** expose Parquet files and SQL to notebooks and the app.
 
 ---
 
@@ -183,9 +10,9 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 flowchart TD
   A[Experiment from registry] --> B[RegistryValidator]
   B -->|structural error| X[skip — logged as warning]
-  B -->|ok| C[Assign experiment_id via manifest\nauto-generate hex UUID on first ingest]
-  C --> D[Find raw file via os.walk\nmatches raw_data_filename stem]
-  D --> E[Select parser by instrument + model]
+  B -->|ok| C[Assign experiment_id via the manifest\nauto-generate hex ID on first ingest]
+  C --> D[Find raw files via os.walk\nmatches raw_data_filename]
+  D --> E[Select parser by instrument + model\nkeep only files it reads]
   E --> F[collect_dataframe_from_paths\nper-file error isolation]
   F --> G[apply_dataframe_schema\nalias mapping + dtype coercion]
   G --> H[Dataset: data + metadata]
@@ -196,23 +23,40 @@ flowchart TD
   J --> L[StorageManager]
   JT --> L
   K --> L
-  L --> M[Local / S3 / Azure Parquet]
-  L --> N[.metadata.json sidecar]
-  L --> O[Postgres datasets row\noptional]
+  L --> M[Parquet + .metadata.json sidecar]
+  L --> N[DuckDB catalog row + view]
+  L --> O[Metadata sink\noptional]
 ```
 
 | Step | Module |
 |------|--------|
-| Registry load | `experiments.py` — `load_experiment_registry`, `experiment_from_registry_record` |
+| Registry load | `experiments.py` — `Registry.load` / `Registry.from_frame`, `experiment_from_registry_record` |
 | Validation | `registry_validator.py` — `validate_registry_dataframe`, `RegistryValidator` |
-| ID assignment | `manifest.py` — `FileManifestBackend` / `PostgresManifestBackend` |
-| Path resolution | `manifest.py` — `find_data_files()` walks instrument folder by `raw_data_filename` stem |
-| Orchestration | `config/loader.py` — `ingest_experiment_dataset` |
+| ID assignment | `manifest.py` — `FileManifestBackend` (any `ManifestBackend`) |
+| Path resolution | `manifest.py` — `find_data_files()` walks the instrument folder by `raw_data_filename` |
+| Which files are data | `parsers/registry.py` — `data_extensions(parser)`, `reads(parser, path)` |
+| Orchestration | `config/loader.py` — `ingest_experiment_dataset`, `load_experiment_dataset` |
 | Parse | `factory.py`, `parsers/` |
 | Normalize | `schema_normalization.py`, `config/schemas/*.json` |
 | Characterize | `characterizers/dsc.py` (peak profiling), `characterizers/tga.py` (mass_pct) |
-| Persist | `storage/manager.py`, `storage/backends.py`, `storage/metadata.py` |
+| Persist | `storage/manager.py`, `storage/backends.py` |
 | Query catalog | `storage/duckdb_backend.py` — views named after `experiment.name` |
+
+---
+
+## Stores
+
+Ingest, load and reconcile work on a `Stores` object (`stores.py`) that says where ingested data lives:
+
+| Field | What | Local default |
+|---|---|---|
+| `manifest` | Experiment IDs | `FileManifestBackend` — `.mfethuls_manifest.json` in `PATH_TO_DATA` |
+| `storage` | Parquet datasets | `LocalParquetStorage` under `PATH_TO_LOCAL_STORAGE` |
+| `catalog` | DuckDB catalog | open it with `open_local_stores()`; without one, datasets are stored but not registered |
+| `metadata` | Optional sink that receives a copy of each dataset's record | none |
+| `cache` | Where stored datasets are read from | the same as `storage` |
+
+`local_stores()` and `open_local_stores()` build the local stores. Every function that ingests or loads takes `stores=` and defaults to the local ones, so other deployments can supply their own backends without the core knowing about them. The interfaces are `ManifestBackend` (`manifest.py`), `DataStorageBackend` and `MetadataBackend` (`storage/types.py`).
 
 ---
 
@@ -233,7 +77,7 @@ flowchart TD
   INST --> OK
 ```
 
-`POST /registry/preview` and `POST /ingest` run the same validation. The difference is that preview always returns results; ingest blocks submission when `allow_invalid=false` (default) and any row is invalid.
+The "Register new data" dialog and a registry preview run the same validation as ingest.
 
 ---
 
@@ -241,12 +85,11 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  subgraph files [Filesystem / object store]
-    ROOT[PATH_TO_LOCAL_STORAGE\nor S3/Azure bucket]
-    ROOT --> I1[instrument_name/]
+  subgraph files [PATH_TO_LOCAL_STORAGE]
+    I1[instrument_name/]
     I1 --> E1[internal_hex_id/\nauto-assigned, never user-facing]
-    E1 --> P1["name_sample_run.parquet"]
-    E1 --> M1["name_sample_run.metadata.json"]
+    E1 --> P1["id_sample_run.parquet"]
+    E1 --> M1["id_sample_run.metadata.json"]
   end
 
   subgraph duckdb [DuckDB — MFETHULS_DUCKDB_PATH]
@@ -255,13 +98,7 @@ flowchart LR
     REGT --> V1
   end
 
-  subgraph postgres [Postgres — service mode]
-    JOBS[ingest_jobs\nstatus, progress, datasets JSONB]
-    DATASETS[datasets\nmetadata, provenance, schema version]
-  end
-
   P1 --> V1
-  P1 -.->|optional| DATASETS
 ```
 
 **Parquet files are the source of truth for measurements.** DuckDB views are derived from them and can be rebuilt at any time by re-registering.
@@ -273,51 +110,23 @@ Each kind of fact about an experiment has one owner. Everything else is derived 
 | Owner | Holds |
 |---|---|
 | Registry CSV/XLSX | Descriptive fields: name, instrument, sample, run, measurement profile, description, extra columns |
-| Manifest (`.mfethuls_manifest.json`, or the Postgres `experiments` table in service mode) | Identity: `experiment_id` ↔ (instrument, raw file) |
+| Manifest (`.mfethuls_manifest.json`) | Identity: `experiment_id` ↔ (instrument, raw file), the latest name, and a `content_hash` of the raw data files. The file is changed under a lock and replaced atomically; an unreadable manifest stops ingest instead of starting over. |
 | Parquet + `.metadata.json` sidecar | Measurements; the sidecar records what was true at parse time (parser, schema version, schema report) |
-| **DuckDB `dataset_registry` (the catalog)** | One row per dataset, written on each ingest from a single `CatalogRecord` (`storage/catalog.py`): experiment, instrument name/type/model, sample, run, canonical measurement profile, row count, storage path. The Streamlit app, the API `/datasets` endpoint and `storage.notebook.list_datasets()` read only the catalog. |
-| Postgres `datasets` (service mode, optional) | A mirror of the same record plus provenance, for SQL across the team |
+| **DuckDB `dataset_registry` (the catalog)** | One row per dataset, written on each ingest from a single `CatalogRecord` (`storage/catalog.py`): experiment, instrument name/type/model, sample, run, canonical measurement profile, row count, storage path. The app and `storage.notebook.list_datasets()` read only the catalog. |
 
-Catalogs created before this layout get the new columns automatically. Rows without an `experiment_id` are filled from their sidecars the next time the database is opened (any open, read-only included). A changed registry description shows in the catalog after the next ingest of that experiment.
-
----
-
-## DuckDB concurrency model
-
-```mermaid
-sequenceDiagram
-  participant API
-  participant Worker
-  participant DDB as DuckDB file
-
-  Note over API,DDB: Normal operation — reads and writes do not overlap
-
-  API->>DDB: open read-only (milliseconds)
-  API->>DDB: SELECT from dataset_registry / view
-  API->>DDB: close
-
-  Worker->>Worker: parse all experiments, write Parquet
-  Note over Worker,DDB: Write lock held only here ↓
-  Worker->>DDB: open write (milliseconds)
-  Worker->>DDB: batch INSERT into dataset_registry + CREATE VIEW
-  Worker->>DDB: close
-  Note over Worker,DDB: Write lock released ↑
-
-  API->>DDB: open read-only (next request — no contention)
-```
-
-DuckDB uses an OS-level exclusive file lock for write connections. A read connection while a write connection is open will fail. The worker is designed so the write lock is held only during the final batch registration step — after all Parquet files are written — making the window milliseconds rather than minutes.
+Catalogs created before this layout get the new columns automatically. Rows without an `experiment_id` are filled from their sidecars the next time the database is opened (any open, read-only included). The registry is read fresh wherever it is needed (nothing is kept between calls), and when a stored dataset is loaded its descriptive fields (description, extra columns, sample/run ids in the data) are taken from the current registry, not the ingest snapshot. Correcting a sample or run id registers the experiment under a new view name; the old catalog row and view are removed, and the old Parquet file is named in a warning but kept on disk. `reconcile.py` (the app's **Clean up**) removes such leftovers, and the derived records of experiments removed from the registry; see [Cleaning up after registry changes](registry.md#cleaning-up-after-registry-changes).
 
 ---
 
 ## User interfaces
 
-| Interface | Mode | Purpose |
-|-----------|------|---------|
-| Notebooks / CLI | local | Load, compare, plot experiments via Python API |
-| `apps/Home.py` | local + service | Ingest sidebar, dataset browser, interactive plots with SVG/HTML export |
-| FastAPI (`api/`) | service | Preview, ingest, job management, dataset access |
-| Worker (`worker.py`) | service | Background ingest processor |
+| Interface | Purpose |
+|-----------|---------|
+| Notebooks / Python API | Load, compare and plot experiments (`load_experiments`, `load_samples`, `plot_experiments`) |
+| CLI | `mfethuls` (load and plot), `python -m mfethuls.reconcile` (clean up) |
+| App (`mfethuls-app`) | Ingest sidebar, register new data, clean up, dataset browser, interactive plots with SVG/HTML export |
+
+The app is `mfethuls.app`: `page.run(backend)` draws the page for a backend that says where data comes from. `LocalBackend` (`app/backend.py`) uses the registry file, the data folder and the local stores.
 
 ---
 
@@ -326,34 +135,38 @@ DuckDB uses an OS-level exclusive file lock for write connections. A read connec
 ```
 src/mfethuls/
   settings.py             # Settings: every environment variable / .env value, read in one place
-  experiments.py          # Registry model, load_experiment_registry, clear_experiment_registry
+  experiments.py          # Experiment and Registry (load, from_frame, get, for_samples, problems)
   registry_validator.py   # Pre-parse validation + profile matching
-  manifest.py             # experiment_id assignment + find_data_files (os.walk matcher)
+  manifest.py             # experiment_id assignment, content_hash, find_data_files
+  stores.py               # Stores: manifest, storage, catalog, metadata sink; local_stores()
+  discovery.py            # Raw data the registry does not describe yet; proposed registry rows
+  reconcile.py            # plan/apply: bring manifest, catalog and storage in line with the registry
   factory.py              # parse_experiment + instrument_data_path_constructor
   schema_normalization.py # Column aliasing + dtype coercion
   dataset.py              # Dataset dataclass
   comparison.py           # ComparisonSet for multi-experiment analysis
+  main.py                 # The mfethuls command
   characterizers/
     dsc.py                # DSC peak profiling
     tga.py                # TGA mass_pct computation from mass_mg
   config/
-    loader.py             # Ingest orchestration — ingest_experiment_dataset
+    loader.py             # Ingest orchestration — ingest_experiment_dataset, load_experiment_dataset
     instrument_params.json
     schemas/              # Per-instrument JSON schema files
-  parsers/                # Instrument-specific file readers
+  parsers/                # Instrument-specific file readers; registry.py maps (type, model) to a parser
   storage/
-    backends.py           # Local, S3, Azure Parquet backends
-    config.py             # _dataset_basename, _view_basename helpers
-    catalog.py            # CatalogRecord — the one dataset row written to the catalog (and Postgres)
+    types.py              # DataStorageBackend, MetadataBackend, DatasetMetadata
+    backends.py           # LocalParquetStorage
+    config.py             # Storage root, DuckDB path, _dataset_basename, _view_basename
+    catalog.py            # CatalogRecord — the one dataset row written to the catalog
     duckdb_backend.py     # DuckDB catalog — register, query, remove datasets; migrates and backfills older catalogs
-    metadata.py           # PostgresMetadataBackend
-    job_store.py          # Postgres job queue (FIFO, FOR UPDATE SKIP LOCKED)
     manager.py            # StorageManager composition layer
-  api/
-    app.py                # FastAPI wiring + auth dependency
-    auth.py               # verify_token bearer token dependency
-    routes.py             # Route handlers
-  worker.py               # Background job processor + timeout
+    notebook.py           # list_datasets / get_dataset for notebooks
+  app/
+    page.py               # The Streamlit page: run(backend)
+    backend.py            # LocalBackend: where the app's data comes from
+    register.py           # "Register new data" dialog
+    streamlit_app.py, launch.py  # mfethuls-app entry point
   plotting/               # Optional viz (viz extra)
     spec.py               # Backend-neutral PlotSpec (panels, traces, legends, colour bars, limits)
     core.py, comparison.py  # build_dataset_spec / build_experiments_spec, plot_dataset / plot_experiments
@@ -369,7 +182,6 @@ src/mfethuls/
 ## Related docs
 
 - [guides/quickstart.md](../guides/quickstart.md) — entry point for new users
-- [guides/data_analysis.md](../guides/data_analysis.md) — notebook access patterns: Python API, DuckDB SQL, Postgres metadata, model building
+- [guides/data_analysis.md](../guides/data_analysis.md) — notebook access patterns: Python API, DuckDB SQL, model building
 - [reference/registry.md](registry.md) — registry spreadsheet format and column reference
-- [reference/api.md](api.md) — complete endpoint reference with examples
 - [reference/schema.md](schema.md) — canonical column names and normalization rules

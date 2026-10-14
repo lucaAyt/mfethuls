@@ -1,5 +1,6 @@
 from .comparison import ComparisonSet, load_experiments, load_samples
-from .config.mode import use_test_env
+from .settings import use_test_env
+from .experiments import Registry
 
 
 def plot_experiments(*args, **kwargs):
@@ -16,6 +17,7 @@ def set_plot_backend(backend):
 
 __all__ = [
 	"ComparisonSet",
+	"Registry",
 	"load_experiments",
 	"load_samples",
 	"plot_experiments",

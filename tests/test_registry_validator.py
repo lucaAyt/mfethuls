@@ -8,9 +8,6 @@ from mfethuls.registry_validator import (
     RegistryValidator,
     RegistryValidationError,
     validate_registry_dataframe,
-    _check_name_uniqueness,
-    _check_raw_data_filename_uniqueness,
-    _check_raw_data_filename_filesystem_safe,
 )
 from mfethuls.factory import parse_experiment
 
@@ -88,12 +85,6 @@ class TestRegistryValidator:
         is_valid, errors = validator.validate_experiment(exp)
         assert is_valid
 
-    def test_validate_all_diagnostic(self):
-        validator = RegistryValidator()
-        all_valid, errors_dict = validator.validate_all()
-        assert all_valid, f"Some instruments failed validation: {errors_dict}"
-        assert isinstance(errors_dict, dict)
-
     def test_parse_experiment_fails_with_invalid_instrument(self):
         exp = Experiment(name="test_invalid", instrument_name="nonexistent_instrument")
 
@@ -130,60 +121,61 @@ class TestRegistryValidator:
             RegistryValidator.validate_run_id("R1")
 
 
-class TestDataframeValidations:
-    """Tests for the new DataFrame-level uniqueness and safety checks."""
+def _errors_by_row(rows: list[dict]) -> list[list[str]]:
+    result = validate_registry_dataframe(pd.DataFrame(rows))
+    return [[error["message"] for error in row["errors"]] for row in result["rows"]]
 
-    def test_duplicate_name_caught(self):
-        df = pd.DataFrame([
-            {"name": "exp_a", "instrument_name": "dsc"},
-            {"name": "exp_a", "instrument_name": "tga"},
-        ])
-        errors = _check_name_uniqueness(df)
-        assert errors
-        assert "exp_a" in errors[0]
 
-    def test_unique_names_pass(self):
-        df = pd.DataFrame([
-            {"name": "exp_a", "instrument_name": "dsc"},
+class TestTableValidations:
+    """Problems that need the whole table, reported on the rows involved."""
+
+    def test_duplicate_name_is_reported_on_each_row_using_it(self):
+        errors = _errors_by_row([
             {"name": "exp_b", "instrument_name": "dsc"},
-        ])
-        assert _check_name_uniqueness(df) == []
-
-    def test_duplicate_raw_data_filename_per_instrument_caught(self):
-        df = pd.DataFrame([
-            {"name": "exp_a", "instrument_name": "dsc", "raw_data_filename": "run_jan15"},
-            {"name": "exp_b", "instrument_name": "dsc", "raw_data_filename": "run_jan15"},
-        ])
-        errors = _check_raw_data_filename_uniqueness(df)
-        assert errors
-        assert "run_jan15" in errors[0]
-
-    def test_same_filename_different_instruments_is_ok(self):
-        df = pd.DataFrame([
-            {"name": "exp_a", "instrument_name": "dsc", "raw_data_filename": "run_jan15"},
-            {"name": "exp_b", "instrument_name": "tga", "raw_data_filename": "run_jan15"},
-        ])
-        assert _check_raw_data_filename_uniqueness(df) == []
-
-    def test_unsafe_filename_characters_caught(self):
-        df = pd.DataFrame([
-            {"name": "exp_a", "instrument_name": "dsc", "raw_data_filename": "my file (1)"},
-        ])
-        errors = _check_raw_data_filename_filesystem_safe(df)
-        assert errors
-        assert "my file (1)" in errors[0]
-
-    def test_safe_filename_passes(self):
-        df = pd.DataFrame([
-            {"name": "exp_a", "instrument_name": "dsc", "raw_data_filename": "chitosan_jan15"},
-        ])
-        assert _check_raw_data_filename_filesystem_safe(df) == []
-
-    def test_validate_registry_dataframe_catches_global_errors(self):
-        df = pd.DataFrame([
             {"name": "exp_a", "instrument_name": "dsc", "raw_data_filename": "run1"},
             {"name": "exp_a", "instrument_name": "tga", "raw_data_filename": "run2"},
         ])
-        result = validate_registry_dataframe(df)
-        first_row_errors = result["rows"][0]["errors"]
-        assert any(e["field"] == "registry_global" for e in first_row_errors)
+        assert errors[0] == []
+        assert all(any("'exp_a' is used by more than one row" in m for m in row) for row in errors[1:])
+
+    def test_unique_names_pass(self):
+        errors = _errors_by_row([
+            {"name": "exp_a", "instrument_name": "dsc"},
+            {"name": "exp_b", "instrument_name": "dsc"},
+        ])
+        assert errors == [[], []]
+
+    def test_duplicate_raw_data_per_instrument_is_reported_on_both_rows(self):
+        errors = _errors_by_row([
+            {"name": "exp_a", "instrument_name": "dsc", "raw_data_filename": "run_jan15"},
+            {"name": "exp_b", "instrument_name": "DSC", "raw_data_filename": "run_jan15"},
+        ])
+        assert all(any("'run_jan15' is used by more than one dsc row" in m for m in row) for row in errors)
+
+    def test_same_file_for_different_instruments_is_ok(self):
+        errors = _errors_by_row([
+            {"name": "exp_a", "instrument_name": "dsc", "raw_data_filename": "run_jan15"},
+            {"name": "exp_b", "instrument_name": "tga", "raw_data_filename": "run_jan15"},
+        ])
+        assert errors == [[], []]
+
+    def test_rows_without_raw_data_filename_use_their_name(self):
+        # Two rows without raw_data_filename are not duplicates of each other ...
+        assert _errors_by_row([
+            {"name": "exp_a", "instrument_name": "dsc", "raw_data_filename": None},
+            {"name": "exp_b", "instrument_name": "dsc", "raw_data_filename": None},
+        ]) == [[], []]
+        # ... but a name that equals another row's file is.
+        errors = _errors_by_row([
+            {"name": "poly1", "instrument_name": "dsc", "raw_data_filename": None},
+            {"name": "exp_b", "instrument_name": "dsc", "raw_data_filename": "poly1"},
+        ])
+        assert all(any("'poly1' is used by more than one dsc row" in m for m in row) for row in errors)
+
+    def test_unsafe_file_name_is_reported_on_its_row(self):
+        errors = _errors_by_row([
+            {"name": "exp_a", "instrument_name": "dsc", "raw_data_filename": "chitosan_jan15"},
+            {"name": "exp_b", "instrument_name": "dsc", "raw_data_filename": "my file (1)"},
+        ])
+        assert errors[0] == []
+        assert any("'my file (1)' contains characters" in m for m in errors[1])

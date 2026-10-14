@@ -36,8 +36,7 @@ class AgilentSec:
     ):
         """Parse Agilent SEC data.
 
-        Returns a Dataset when experiment context is provided, otherwise a
-        plain DataFrame for backward compatibility.
+        Returns a Dataset.
         """
 
         df = collect_dataframe_from_paths(
@@ -47,9 +46,6 @@ class AgilentSec:
             logger=logger,
             parser_label="SEC",
         )
-
-        if experiment_id is None:
-            return df
 
         df, schema_report = apply_dataframe_schema(
             df,

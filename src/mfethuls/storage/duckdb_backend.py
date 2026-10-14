@@ -6,12 +6,12 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional, Iterator
+from typing import Any, Callable, Dict, List, Optional, Iterator
 
 import pandas as pd
 
 from .catalog import CATALOG_FIELDS, CatalogRecord
-from .config import _get_duckdb_path, _get_duckdb_s3_config, _get_duckdb_s3_endpoint_host
+from .config import _get_duckdb_path
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ def _backfill_catalog(conn) -> int:
     updated = 0
     for table_name, storage_path in rows:
         sidecar = _sidecar_path(storage_path)
-        if DuckDBQueryBackend._is_s3_uri(storage_path) or not os.path.exists(sidecar):
+        if DuckDBQueryBackend._is_remote_uri(storage_path) or not os.path.exists(sidecar):
             continue
         try:
             with open(sidecar, encoding="utf8") as handle:
@@ -94,7 +94,17 @@ def _backfill_catalog(conn) -> int:
 class DuckDBQueryBackend:
     """DuckDB-backed query backend for Parquet datasets."""
 
-    def __init__(self, db_path: Optional[str] = None, read_only: bool = False) -> None:
+    def __init__(
+        self,
+        db_path: Optional[str] = None,
+        read_only: bool = False,
+        setup: Optional[Callable[[Any], None]] = None,
+    ) -> None:
+        """Open the catalog at ``db_path`` (default: in the storage folder).
+
+        ``setup(connection)`` runs right after connecting, before views are
+        recreated, e.g. to give DuckDB credentials for Parquet files in the cloud.
+        """
         if _get_duckdb() is None:
             raise RuntimeError("duckdb is required for DuckDBQueryBackend. Install duckdb.")
 
@@ -110,7 +120,8 @@ class DuckDBQueryBackend:
             _backfill_catalog(init)
             init.close()
         self._conn = _get_duckdb().connect(self.db_path, read_only=read_only)
-        self._s3_configured = False
+        if setup is not None:
+            setup(self._conn)
         self._ensure_registry()
         # Avoid rehydrating views in read-only mode because the registry
         # table may not exist and rehydration attempts will fail.
@@ -119,12 +130,13 @@ class DuckDBQueryBackend:
             self.backfill_catalog()
 
     @staticmethod
-    def _is_s3_uri(storage_path: str) -> bool:
-        return storage_path.strip().lower().startswith("s3://")
+    def _is_remote_uri(storage_path: str) -> bool:
+        """A cloud location (``s3://``, ``az://``, ...); readable once ``setup`` configured access."""
+        return "://" in storage_path
 
     @staticmethod
     def _is_materializable_storage_path(storage_path: str) -> bool:
-        if DuckDBQueryBackend._is_s3_uri(storage_path):
+        if DuckDBQueryBackend._is_remote_uri(storage_path):
             return True
         normalized = os.path.abspath(storage_path)
         return os.path.exists(normalized)
@@ -132,42 +144,6 @@ class DuckDBQueryBackend:
     @staticmethod
     def _sql_string(value: str) -> str:
         return value.replace("'", "''")
-
-    def _ensure_s3_configured(self) -> None:
-        if self._s3_configured:
-            return
-        self._configure_s3_access()
-        self._s3_configured = True
-
-    def _configure_s3_access(self) -> None:
-        config = _get_duckdb_s3_config()
-        if not all(config.get(key) for key in ("region", "endpoint", "access_key_id", "secret_access_key")):
-            return
-
-        try:
-            self._conn.execute("INSTALL httpfs;")
-            self._conn.execute("LOAD httpfs;")
-        except Exception:
-            pass
-
-        endpoint_host = _get_duckdb_s3_endpoint_host(config.get("region"), config.get("endpoint"))
-        if not endpoint_host:
-            return
-
-        self._conn.execute(
-            f"""
-            CREATE OR REPLACE SECRET do_spaces_secret (
-                TYPE S3,
-                PROVIDER CONFIG,
-                KEY_ID '{self._sql_string(config.get('access_key_id', ''))}',
-                SECRET '{self._sql_string(config.get('secret_access_key', ''))}',
-                REGION '{self._sql_string(config.get('region', ''))}',
-                ENDPOINT '{self._sql_string(endpoint_host)}',
-                URL_STYLE 'vhost',
-                USE_SSL TRUE
-            );
-            """
-        )
 
     def _ensure_registry(self) -> None:
         if self.read_only:
@@ -187,8 +163,6 @@ class DuckDBQueryBackend:
         ).fetchall()
         for table_name, storage_path in rows:
             try:
-                if self._is_s3_uri(storage_path):
-                    self._ensure_s3_configured()
                 if self._is_materializable_storage_path(storage_path):
                     self._conn.execute(
                         f'CREATE OR REPLACE VIEW "{self._sql_string(table_name)}" AS SELECT * FROM read_parquet(\'{self._sql_string(storage_path)}\');'
@@ -207,27 +181,20 @@ class DuckDBQueryBackend:
         table_name: Optional[str] = None,
         overwrite: bool = True,
         persist_view: bool = True,
-        experiment_name: Optional[str] = None,
-        raw_data_filename: Optional[str] = None,
         record: Optional[CatalogRecord] = None,
     ) -> str:
         """Create the view for ``storage_path`` and upsert its catalog row.
 
-        Pass ``record`` for a full catalog row; ``experiment_name`` and
-        ``raw_data_filename`` alone give a minimal row (kept for older callers).
+        ``record`` fills the catalog row; without it only the view and path are stored.
         """
 
         if self.read_only:
             raise RuntimeError("Cannot register parquet on a read-only DuckDB connection")
+        fields = record.fields() if record is not None else {}
         if record is not None:
             table_name = table_name or record.table_name
-            fields = record.fields()
-        else:
-            fields = {"experiment_name": experiment_name, "raw_data_filename": raw_data_filename}
         inferred = table_name or os.path.splitext(os.path.basename(storage_path))[0]
         view_name = self._sanitize_table_name(inferred)
-        if self._is_s3_uri(storage_path):
-            self._ensure_s3_configured()
         if overwrite:
             try:
                 self._conn.unregister(view_name)
@@ -249,7 +216,29 @@ class DuckDBQueryBackend:
                 """,
                 [view_name, storage_path, *fields.values()],
             )
+            if fields.get("experiment_id"):
+                self._remove_superseded(fields["experiment_id"], keep=view_name)
         return view_name
+
+    def _remove_superseded(self, experiment_id: str, *, keep: str) -> None:
+        """Drop older catalog rows and views of the same experiment under another name.
+
+        The view and file names include sample and run, so correcting either in
+        the registry registers the experiment under a new name. The old Parquet
+        file is user data and stays on disk; it is named in a warning.
+        """
+
+        stale = self._conn.execute(
+            "SELECT table_name, storage_path FROM dataset_registry WHERE experiment_id = ? AND table_name <> ?;",
+            [experiment_id, keep],
+        ).fetchall()
+        for table_name, old_path in stale:
+            self.remove_dataset(table_name)
+            logger.warning(
+                "Experiment %s is now registered as %r; removed the old catalog entry %r. "
+                "Its file %s is no longer used and can be deleted.",
+                experiment_id, keep, table_name, old_path,
+            )
 
     def list_registered(self) -> List[Dict[str, Any]]:
         """All catalog rows, newest first, as dictionaries of every column."""
