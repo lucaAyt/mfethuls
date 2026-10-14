@@ -120,4 +120,4 @@ Three stores, each with a distinct role — see [docs/guides/data_analysis.md](d
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Versions released before the change were published under the MIT License.
 
-Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). First-time contributors are asked to sign a Contributor License Agreement.
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). First-time contributors are asked to sign the [Contributor License Agreement](CLA.md).

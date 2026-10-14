@@ -4,17 +4,17 @@ Thanks for helping! Bug reports, parsers for new instruments, fixes and document
 
 ## Contributor License Agreement
 
-Before your first pull request can be merged, you sign a Contributor License Agreement (CLA). A bot comments on the pull request with a link; signing takes a minute and covers all your later contributions.
+Before your first pull request can be merged, you sign the [Contributor License Agreement](CLA.md) (CLA). A bot comments on the pull request with a link; signing takes a minute and covers all your later contributions.
 
 The CLA is a licence grant, not a copyright transfer: you keep the copyright to your work. You confirm that you have the right to contribute it, and give the project a broad licence to use, change and distribute it, including under licences other than Apache-2.0. That lets the project keep its licensing flexible.
 
-If you contribute as part of your job, your employer may own your work. Please check with them before signing.
+If you contribute as part of your job, your employer may own your work. Please check with them before signing. If your organization (a company, university or institute) should sign for its employees instead, it signs the [Entity Contributor License Agreement](CLA-entity.md) once and lists who may contribute on its behalf.
 
 ## Development setup
 
 ```bash
 uv venv --python 3.11
-uv pip install -e ".[dev,viz,service]"
+uv pip install -e ".[dev,viz]"
 uv run --no-sync pytest -q
 uv run --no-sync ruff check
 ```
