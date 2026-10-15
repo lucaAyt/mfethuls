@@ -1,6 +1,6 @@
 [project]
 name = "mfethuls"
-version = "0.2.0"
+version = "0.3.0"
 description = "Composable framework for lab instrument data parsing, characterization and analysis for python people in labs."
 authors = [{name = "Luca Bertossi", email = "lucabertossi@gmail.com"}]
 readme = "README.md"
