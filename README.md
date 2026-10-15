@@ -1,5 +1,14 @@
 # mfethuls
 
+[![PyPI](https://img.shields.io/pypi/v/mfethuls)](https://pypi.org/project/mfethuls/)
+[![Python](https://img.shields.io/pypi/pyversions/mfethuls)](https://pypi.org/project/mfethuls/)
+[![Tests](https://github.com/lucaAyt/mfethuls/actions/workflows/tests.yml/badge.svg)](https://github.com/lucaAyt/mfethuls/actions/workflows/tests.yml)
+[![License](https://img.shields.io/pypi/l/mfethuls)](https://github.com/lucaAyt/mfethuls/blob/master/LICENSE)
+
+```shell
+pip install "mfethuls[viz,notebook]"
+```
+
 From scattered instrument files to analysis-ready data. mfethuls is a Python framework that reads, cleans and organises experimental data: raw instrument exports are ingested against an experiment registry, normalised to a canonical schema and stored as traceable, queryable Parquet datasets. Use it from the app (`mfethuls-app`, no code needed), from notebooks, or with SQL. Experimentalists get consistent, comparable data and publication-ready figures; data scientists get harmonised data from every instrument to build features and models on.
 
 ---
