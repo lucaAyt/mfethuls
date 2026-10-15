@@ -14,7 +14,7 @@ from mfethuls.experiments import Experiment
 from mfethuls.storage.duckdb_backend import DuckDBQueryBackend
 from mfethuls.stores import local_stores
 
-EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
+from mfethuls.examples import EXAMPLES_DIR
 
 
 def test_from_frame_keeps_valid_rows_and_records_problems():

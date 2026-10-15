@@ -52,6 +52,8 @@ where = ["src"]
 [tool.setuptools.package-data]
 mfethuls = ["py.typed"]
 "mfethuls.config" = ["*.json", "schemas/*.json"]
+"mfethuls.examples" = ["experiments_registry.csv", "data/**/*"]
+"mfethuls.tutorials" = ["*.py"]
 
 [build-system]
 requires = ["setuptools>=77.0"]  # SPDX license expression and license-files (PEP 639)
@@ -60,3 +62,4 @@ build-backend = "setuptools.build_meta"
 [project.scripts]
 mfethuls = "mfethuls.main:main"
 mfethuls-app = "mfethuls.app.launch:main"
+mfethuls-tutorial = "mfethuls.tutorials:main"

@@ -124,7 +124,8 @@ Catalogs created before this layout get the new columns automatically. Rows with
 |-----------|---------|
 | Notebooks / Python API | Load, compare and plot experiments (`load_experiments`, `load_samples`, `plot_experiments`) |
 | CLI | `mfethuls` (load and plot), `python -m mfethuls.reconcile` (clean up) |
-| App (`mfethuls-app`) | Ingest sidebar, register new data, clean up, dataset browser, interactive plots with SVG/HTML export |
+| App (`mfethuls-app`) | Landing page (Get started, Try the example, Use it from Python); setup of the data folder and registry; getting-started checklist and sidebar tracker; ingest; register new data; dataset browser; interactive plots (colour by, style by, axis limits) with SVG/HTML export; ⚙ Settings: data folder and registry, clean up, data loading, example data |
+| Tutorial (`mfethuls-tutorial`) | The marimo notebook in `tutorials/`, opened on its own copy of the example data |
 
 The app is `mfethuls.app`: `page.run(backend)` draws the page for a backend that says where data comes from. `LocalBackend` (`app/backend.py`) uses the registry file, the data folder and the local stores.
 
@@ -134,7 +135,7 @@ The app is `mfethuls.app`: `page.run(backend)` draws the page for a backend that
 
 ```
 src/mfethuls/
-  settings.py             # Settings: every environment variable / .env value, read in one place
+  settings.py             # Settings in one place: saved by the app (~/.mfethuls/settings.json), then environment / .env; use_folders()
   experiments.py          # Experiment and Registry (load, from_frame, get, for_samples, problems)
   registry_validator.py   # Pre-parse validation + profile matching
   manifest.py             # experiment_id assignment, content_hash, find_data_files
@@ -146,6 +147,9 @@ src/mfethuls/
   dataset.py              # Dataset dataclass
   comparison.py           # ComparisonSet for multi-experiment analysis
   main.py                 # The mfethuls command
+  examples/               # Example instrument data + registry; create_workspace() copies them for trying the app
+  tutorials/              # The marimo tutorial (local_tutorial.py); open_tutorial() / mfethuls-tutorial
+  _files.py               # replace_with_retry: atomic file swaps that survive Windows file locks
   characterizers/
     dsc.py                # DSC peak profiling
     tga.py                # TGA mass_pct computation from mass_mg
@@ -166,6 +170,7 @@ src/mfethuls/
     page.py               # The Streamlit page: run(backend)
     backend.py            # LocalBackend: where the app's data comes from
     register.py           # "Register new data" dialog
+    welcome.py            # Landing page, setup (data folder + registry), getting-started checklist and sidebar tracker, example workspace
     streamlit_app.py, launch.py  # mfethuls-app entry point
   plotting/               # Optional viz (viz extra)
     spec.py               # Backend-neutral PlotSpec (panels, traces, legends, colour bars, limits)

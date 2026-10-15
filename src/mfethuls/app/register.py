@@ -215,21 +215,39 @@ def register_dialog(registry_path: str, data_root: str, *, writes_registry: bool
                 st.caption(path)
 
 
+def _modified(path: str) -> float:
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
 @st.cache_data(show_spinner=False, ttl=600)
-def registry_frame(path: str) -> pd.DataFrame:
-    """The registry table at ``path`` (cached; cleared when rows are added)."""
+def _registry_frame(path: str, modified: float) -> pd.DataFrame:
     return Registry.load(path).frame
 
 
-@st.cache_data(show_spinner=False, ttl=600)
-def count_new_data(registry_path: str, data_root: str) -> int:
-    """How many items under ``data_root`` the registry does not describe yet (cached)."""
+@st.cache_data(show_spinner=False, ttl=60)
+def _count_new_data(registry_path: str, data_root: str, modified: float) -> int:
     return sum(1 for item in discover_unregistered(Registry.load(registry_path), data_root) if not item.issue)
 
 
+def registry_frame(path: str) -> pd.DataFrame:
+    """The registry table at ``path``; cached until the file changes."""
+    return _registry_frame(path, _modified(path))
+
+
+def count_new_data(registry_path: str, data_root: str) -> int:
+    """How many items under ``data_root`` the registry does not describe yet.
+
+    Cached until the registry changes, and for at most a minute, so new raw files show up.
+    """
+    return _count_new_data(registry_path, data_root, _modified(registry_path))
+
+
 def clear_registry_caches() -> None:
-    registry_frame.clear()
-    count_new_data.clear()
+    _registry_frame.clear()
+    _count_new_data.clear()
 
 
 def new_data_prompt(backend, registry_path: str) -> None:
@@ -254,12 +272,15 @@ def new_data_prompt(backend, registry_path: str) -> None:
             on_saved=lambda names, ingest: _after_register(backend, registry_path, names, ingest),
         )
     if rescan_col.button("", icon=":material/refresh:", help="Scan the data folder again", width="stretch"):
-        count_new_data.clear()
+        _count_new_data.clear()
         st.rerun()
 
 
 def _after_register(backend, registry_path: str, names: list[str], ingest: bool) -> None:
     """Refresh after rows were added to the registry, and ingest them if asked."""
+    from mfethuls.app.welcome import mark_done
+
+    mark_done("register")
     clear_registry_caches()
     message = f"Added {len(names)} experiment{'s' if len(names) != 1 else ''} to the registry."
     if ingest:

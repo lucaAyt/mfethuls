@@ -14,6 +14,10 @@ import numpy as np
 
 Scale = Literal["linear", "log"]
 
+# Line styles and marker shapes that stay distinguishable, in the order they are used.
+LINESTYLES = ("-", "--", ":", "-.")
+MARKERS = ("o", "s", "^", "D", "v", "P", "X", "*")
+
 
 class PlotError(ValueError):
     """Raised when a normalized dataset cannot be plotted."""
@@ -21,7 +25,7 @@ class PlotError(ValueError):
 
 @dataclass
 class Trace:
-    """One line. ``color`` and ``linestyle`` use Matplotlib conventions."""
+    """One line. ``color``, ``linestyle`` and ``marker`` use Matplotlib conventions."""
 
     x: np.ndarray
     y: np.ndarray
@@ -29,6 +33,8 @@ class Trace:
     color: Any = None
     linestyle: str = "-"
     mode: Literal["lines", "markers"] = "lines"
+    # Marker shape for ``mode="markers"``: "o", "s", "^", "D", "v", "P", "X" or "*" (see MARKERS).
+    marker: str = "o"
     # Position on the panel's colour bar; overrides ``color`` when the panel has one.
     color_value: Optional[float] = None
     # Plotly only: traces sharing a group are toggled together from the legend.
@@ -40,6 +46,8 @@ class LegendEntry:
     label: str
     color: Any = None
     linestyle: str = "-"
+    # Set to show a marker of this shape instead of a line.
+    marker: Optional[str] = None
     # Plotly only: clicking the entry toggles the traces with this legend_group.
     group: Optional[str] = None
 

@@ -26,6 +26,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from filelock import FileLock
 
+from ._files import replace_with_retry
+
 logger = logging.getLogger(__name__)
 
 MANIFEST_FILENAME = ".mfethuls_manifest.json"
@@ -239,7 +241,7 @@ class FileManifestBackend(ManifestBackend):
                 json.dump(manifest, fh, indent=2)
                 fh.flush()
                 os.fsync(fh.fileno())
-            os.replace(tmp_path, self._manifest_path)
+            replace_with_retry(tmp_path, self._manifest_path)
         except BaseException:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)

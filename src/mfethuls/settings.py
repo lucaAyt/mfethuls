@@ -1,19 +1,28 @@
-"""Runtime configuration, read from environment variables (and ``.env``) in one place.
+"""Runtime configuration, read in one place: settings saved by the app, environment variables and ``.env``.
 
 ``get_settings()`` returns the current :class:`Settings`. Unless settings were set
-explicitly with :func:`configure` (or :func:`using`), they are rebuilt from the
-environment on each call, so changing an environment variable takes effect
-immediately. ``.env`` is loaded once, on the first call, and never overrides
-variables that are already set.
+explicitly with :func:`configure` (or :func:`using`), they are rebuilt on each call,
+so a change takes effect immediately:
+
+1. environment variables, with ``.env`` loaded once on the first call (it never
+   overrides variables that are already set);
+2. then the data folder, registry and storage saved by the app (:func:`save_settings`,
+   in ``~/.mfethuls/settings.json``, or ``MFETHULS_SETTINGS_FILE``). They take
+   precedence, so a change made in the app is not undone by ``.env``.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import os
+import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-import logging
-from typing import Iterator, Mapping, Optional
+from pathlib import Path
+from typing import Any, Dict, Iterator, Mapping, Optional
+
+from ._files import replace_with_retry
 
 _TRUE = {"1", "true", "yes"}
 
@@ -23,6 +32,11 @@ TEST_PATH_VARIABLES = {
     "registry_path": "MFETHULS_TEST_REGISTRY",
     "local_storage": "MFETHULS_TEST_LOCAL_STORAGE",
 }
+
+
+# Settings the app saves; everything else comes from the environment.
+SAVED_FIELDS = ("data_root", "registry_path", "local_storage")
+SETTINGS_FILE_VARIABLE = "MFETHULS_SETTINGS_FILE"
 
 
 def _flag(value: Optional[str]) -> bool:
@@ -90,13 +104,51 @@ def disable_dotenv() -> None:
     _dotenv_loaded = True
 
 
+def settings_file() -> Path:
+    """Where the app saves settings: ``MFETHULS_SETTINGS_FILE``, else ``~/.mfethuls/settings.json``."""
+    return Path(os.environ.get(SETTINGS_FILE_VARIABLE) or Path.home() / ".mfethuls" / "settings.json")
+
+
+def load_saved_settings() -> Dict[str, str]:
+    """The settings saved by the app (empty if none, or if the file cannot be read)."""
+    path = settings_file()
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        logging.getLogger(__name__).warning("Ignoring unreadable settings file %s", path)
+        return {}
+    return {name: str(saved[name]) for name in SAVED_FIELDS if isinstance(saved, dict) and saved.get(name)}
+
+
+def save_settings(**values: Optional[str]) -> Path:
+    """Save some of ``SAVED_FIELDS`` (``None`` or ``""`` removes one); returns the file written."""
+    unknown = set(values) - set(SAVED_FIELDS)
+    if unknown:
+        raise ValueError(f"Only {', '.join(SAVED_FIELDS)} can be saved, not {', '.join(sorted(unknown))}.")
+    saved: Dict[str, Any] = load_saved_settings()
+    for name, value in values.items():
+        if value:
+            saved[name] = str(value)
+        else:
+            saved.pop(name, None)
+    path = settings_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(saved, handle, indent=2)
+    replace_with_retry(tmp, path)
+    return path
+
+
 def get_settings() -> Settings:
-    """The configured settings, or settings read from the environment right now."""
+    """The configured settings, or settings read from the environment and the saved settings right now."""
 
     if _configured is not None:
         return _configured
     load_dotenv_once()
-    return Settings.from_env()
+    return replace(Settings.from_env(), **load_saved_settings())
 
 
 def configure(settings: Optional[Settings]) -> None:
@@ -117,6 +169,23 @@ def using(settings: Settings) -> Iterator[Settings]:
         yield settings
     finally:
         _configured = previous
+
+
+def use_folders(
+    data_root: Optional[str] = None,
+    registry_path: Optional[str] = None,
+    local_storage: Optional[str] = None,
+) -> Settings:
+    """Use these folders for the rest of this session (e.g. a notebook); the ones not given stay as they are.
+
+    Saved and environment settings are not changed. Setting ``os.environ`` in a
+    notebook would not work once folders are saved in the app, as those take precedence.
+    """
+    given = {name: str(value) for name, value in
+             {"data_root": data_root, "registry_path": registry_path, "local_storage": local_storage}.items() if value}
+    settings = replace(get_settings(), **given)
+    configure(settings)
+    return settings
 
 
 def use_test_env() -> None:

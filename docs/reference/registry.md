@@ -147,7 +147,7 @@ Instead of typing rows by hand, let the Streamlit app find raw data that is not 
 - **You choose** which rows to register by ticking **Register**; nothing is ticked at first.
 - **You fill in:** `sample_id`, the instrument where several share a folder (e.g. the DSC models in `DSC/`), `measurement_profile` for DMA and rheometer data, and any other columns your registry has.
 
-**Validation** runs as you type, with the same checks as ingest. It also requires the instrument to be chosen and the raw data to be found exactly once. Rows with problems are marked ✗ with the reason. Data that cannot be registered as found (for example the same file name in two folders) is listed under **Not proposed**, with the reason. Files next to the data that no instrument reads, such as plots, are listed under **Files that will not be read**. They don't stop a row from being registered, and a folder holding only such files isn't proposed.
+**Validation** runs as you type, with the same checks as ingest. It also requires the instrument to be chosen, the raw data to be found exactly once, and the data to read as the chosen instrument's: the first file is test-read with that instrument's parser, so files of another instrument (say, Shimadzu UV-Vis files offered as in-situ Flame data) are flagged before they are registered. Ingest makes the same check on every file and stops with an error instead of storing data it could not read properly. Rows with problems are marked ✗ with the reason. Data that cannot be registered as found (for example the same file name in two folders) is listed under **Not proposed**, with the reason. Files next to the data that no instrument reads, such as plots, are listed under **Files that will not be read**. They don't stop a row from being registered, and a folder holding only such files isn't proposed.
 
 **Saving:**
 - **Save to registry** appends the rows to your CSV or XLSX registry. Existing rows, formatting and other sheets are kept, and the previous version is saved next to it as `<name>.bak.csv` / `<name>.bak.xlsx`. **Save & ingest** also ingests the new experiments. If the registry is open in Excel, close it and save again.
@@ -161,7 +161,7 @@ Which instruments share a folder, and whether they record series, is set per ins
 
 The registry is the source of truth. Ingesting builds everything else from it: the manifest (each experiment's internal ID), the catalog the app lists and the stored Parquet files. When you remove, rename or correct rows, those can fall out of step. **Clean up** brings them back in line. Your raw data is never touched.
 
-In the app, open **Clean up** in the sidebar and press **Check**. It lists what it would do, and nothing changes until you press **Apply**:
+In the app, open **⚙ Settings** (top of the sidebar) → **Clean up** and press **Check**. It lists what it would do, and nothing changes until you press **Apply**:
 
 | Action | When | What happens |
 |---|---|---|

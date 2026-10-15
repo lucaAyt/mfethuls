@@ -25,6 +25,7 @@ import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import lru_cache
 from typing import Collection, Dict, Iterable, List, Optional
 
 import pandas as pd
@@ -291,12 +292,64 @@ def proposed_rows(
     return pd.DataFrame(rows, columns=REGISTRY_COLUMNS + extra + ["_folder", "_modified"])
 
 
+@lru_cache(maxsize=512)
+def _probe_file(instrument_name: str, path: str, modified: float) -> Optional[str]:
+    """Read one raw file with the instrument's parser; the problem, or None. ``modified`` keys the cache."""
+    from .config.loader import check_parsed
+    from .parsers.registry import reads
+
+    entry = next((e for e in _load_instrument_config() if e["name"] == instrument_name), None)
+    if entry is None:
+        return None  # unknown instruments are reported by the registry checks
+    parser = get_parser(entry["type"], entry["model"])
+    if not reads(parser, path):
+        return f"{os.path.basename(path)} is not a {instrument_name} file type"
+    try:
+        dataset = parser.parse(
+            {"probe": [path]},
+            experiment_id="probe",
+            instrument_type=entry["type"],
+            instrument_model=entry["model"],
+            instrument_name=instrument_name,
+        )
+        check_parsed(dataset, instrument_name)
+    except Exception as exc:  # noqa: BLE001 - any failure means "not this instrument's data"
+        return str(exc)
+    return None
+
+
+def probe_raw_data(instrument_name: str, raw_data_filename: str, data_root: Optional[str] = None) -> Optional[str]:
+    """Whether raw data reads as this instrument's data: the problem, or None.
+
+    Reads only the first data file, so it is quick enough to run while rows are edited.
+    Returns None when the files cannot be found (reported elsewhere).
+    """
+    from .manifest import find_data_files
+    from .parsers.registry import reads
+
+    data_root = data_root or get_settings().data_root
+    entry = next((e for e in _load_instrument_config() if e["name"] == instrument_name), None)
+    if entry is None or not data_root:
+        return None
+    try:
+        _, files = find_data_files(os.path.join(data_root, entry["folder_name"]), raw_data_filename)
+    except (FileNotFoundError, ValueError):
+        return None
+    parser = get_parser(entry["type"], entry["model"])
+    data = [f for f in files if reads(parser, f)] or files
+    if not data:
+        return None
+    return _probe_file(instrument_name, data[0], os.path.getmtime(data[0]))
+
+
 def validate_proposed(registry: Registry, rows: pd.DataFrame, data_root: Optional[str] = None) -> List[dict]:
     """Validation results for new rows, checked together with the existing registry.
 
-    The same checks as a registry preview (``validate_registry_dataframe``), plus two
-    that matter for data found on disk: the instrument must be chosen, and the raw
-    data must be found exactly once (problems the general check only warns about).
+    The same checks as a registry preview (``validate_registry_dataframe``), plus three
+    that matter for data found on disk: the instrument must be chosen, the raw data
+    must be found exactly once (problems the general check only warns about), and it
+    must read as the chosen instrument's data (:func:`probe_raw_data`), so files of
+    another instrument are not registered and ingested as this one.
     Returns one result per row: ``{"valid", "errors", "warnings", ...}``.
     """
 
@@ -318,6 +371,16 @@ def validate_proposed(registry: Registry, rows: pd.DataFrame, data_root: Optiona
         # Only the "no instrument" registry warning is replaced by the error above.
         result["warnings"] = [w for w in result["warnings"] if "missing instrument_name" not in w["message"]]
         result["errors"].extend(data_problems)
+        values = result["values"]
+        instrument = _normalize_optional_str(values.get("instrument_name"))
+        raw = _normalize_optional_str(values.get("raw_data_filename")) or _normalize_optional_str(values.get("name"))
+        if not result["errors"] and instrument and raw:
+            problem = probe_raw_data(instrument, raw, data_root)
+            if problem:
+                result["errors"].append({
+                    "field": "instrument_name",
+                    "message": f"This does not read as {instrument} data ({problem}). Is the instrument right?",
+                })
         result["valid"] = not result["errors"]
     return results
 

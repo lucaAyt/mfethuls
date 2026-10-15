@@ -1,11 +1,10 @@
 """Smoke test for the debugging CLI (``python -m mfethuls.main``) on a copy of examples/."""
 
 import shutil
-from pathlib import Path
 
 from mfethuls.main import main
 
-EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
+from mfethuls.examples import EXAMPLES_DIR
 
 
 def test_cli_loads_compares_and_saves_plot(tmp_path, monkeypatch, capsys):

@@ -7,12 +7,5 @@ if ! command -v uv &> /dev/null; then
     exit 1
 fi
 
-if [ ! -f ".env" ]; then
-    echo "First-time setup: configuring paths..."
-    echo
-    bash scripts/setup_env.sh
-    echo
-fi
-
 echo "Starting mfethuls Explorer..."
-uv run --extra viz mfethuls-app
+uv run --extra viz --extra notebook mfethuls-app

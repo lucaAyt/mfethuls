@@ -21,7 +21,7 @@ def _(mo):
     and mfethuls finds the raw files, parses them, stores the results and lets you load,
     compare and plot them by name.
 
-    This notebook walks through the full workflow on the example data that ships with the repo:
+    This notebook walks through the full workflow on the example data that ships with mfethuls:
 
     1. **Setup**: point mfethuls at the example data
     2. **Registry**: see which experiments exist
@@ -45,29 +45,33 @@ def _(mo):
     mo.md(r"""
     ## 1. Setup
 
-    mfethuls reads three paths from your `.env` file:
+    mfethuls needs three locations:
 
-    | Variable | What it points to |
+    | Setting | What it points to |
     |---|---|
-    | `PATH_TO_DATA` | the folder with one subfolder per instrument (`DSC/`, `TGA/`, …) |
-    | `PATH_TO_REGISTRY` | the registry spreadsheet (CSV or Excel) |
-    | `PATH_TO_LOCAL_STORAGE` | where parsed data is stored |
+    | data folder (`PATH_TO_DATA`) | the folder with one subfolder per instrument (`DSC/`, `TGA/`, …) |
+    | registry (`PATH_TO_REGISTRY`) | the registry spreadsheet (CSV or Excel) |
+    | storage (`PATH_TO_LOCAL_STORAGE`) | where parsed data is stored |
 
-    `use_test_env()` switches these to the `MFETHULS_TEST_*` paths in `.env`, so the tutorial
-    runs on the example data and your own data stays untouched.
+    Normally they are the folders you chose in the app (**Get started** or **⚙ Settings**),
+    or set in `.env`. This tutorial instead works on its own copy of the example data in
+    `~/mfethuls-tutorial`, so your data stays untouched.
 
-    > **Using your own data?** Delete the `use_test_env()` line. The switch only lasts while
-    > this notebook's kernel is running, so restart the kernel after removing it.
+    > **Using your own data?** Delete the two `workspace` lines below and restart the kernel.
     """)
     return
 
 
 @app.cell
 def _():
-    from mfethuls import Registry, load_experiments, load_samples, plot_experiments, set_plot_backend, use_test_env
+    from mfethuls import Registry, load_experiments, load_samples, plot_experiments, set_plot_backend
+    from mfethuls.examples import create_workspace
+    from mfethuls.settings import configure, get_settings
+    from mfethuls.tutorials import TUTORIAL_WORKSPACE
 
-    # Point mfethuls at the example data. Remove this line to use your own data.
-    use_test_env()
+    # Work on a copy of the example data. Delete these two lines to use your own data.
+    workspace = create_workspace(TUTORIAL_WORKSPACE, register_all=True)
+    configure(workspace.settings(get_settings()))
 
     # Interactive (zoomable) Plotly figures for the built-in plots.
     # Use backend="matplotlib" on a single call for a publication figure.
@@ -324,11 +328,12 @@ def _(mo):
     mo.md(r"""
     ## Next steps
 
-    - **Use your own data:** set `PATH_TO_DATA`, `PATH_TO_REGISTRY` and `PATH_TO_LOCAL_STORAGE`
-      in `.env`, delete the `use_test_env()` line and restart the kernel.
-    - **Add experiments:** add a row to your registry. `experiments_template.csv` in the repo
-      root has an example row for every supported instrument.
-    - **Learn more** in the `docs/` folder:
+    - **Use your own data:** choose your folders in the app (**Get started** or **⚙ Settings**),
+      delete the two `workspace` lines in the setup cell and restart the kernel.
+    - **Add experiments:** register new raw data in the app (**Ingest** → **Review & register**),
+      or add rows to your registry by hand. `experiments_template.csv` in the mfethuls repository
+      has an example row for every supported instrument.
+    - **Learn more** in the `docs/` folder of the mfethuls repository:
         - `guides/workflow.md`: the day-to-day workflow
         - `guides/data_analysis.md`: queries and analysis in notebooks
         - `reference/registry.md`: every registry column and how raw files are found

@@ -34,6 +34,14 @@ def _get_storage_root() -> str:
 
 # Need to check that file exists to decide 
 # whether to initialise or connect
+def catalog_path() -> str:
+    """Where the DuckDB catalog is (``MFETHULS_DUCKDB_PATH``, else ``mfethuls.duckdb`` in the storage folder).
+
+    For querying it directly: ``duckdb.connect(catalog_path(), read_only=True)``.
+    """
+    return _get_duckdb_path()
+
+
 def _get_duckdb_path() -> str:
     path = get_settings().duckdb_path
     if not path:

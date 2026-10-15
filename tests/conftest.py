@@ -26,6 +26,8 @@ def isolated_settings(monkeypatch, tmp_path):
         if _is_mfethuls_variable(name):
             monkeypatch.delenv(name)
     monkeypatch.setenv("PATH_TO_LOCAL_STORAGE", str(tmp_path / "storage"))
+    # Never read or write the developer's saved app settings.
+    monkeypatch.setenv("MFETHULS_SETTINGS_FILE", str(tmp_path / "settings.json"))
     monkeypatch.chdir(tmp_path)
     mfethuls_settings.configure(None)
     yield

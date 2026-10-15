@@ -4,7 +4,7 @@ This tutorial walks through a complete mfethuls workflow from raw files to noteb
 
 **Prerequisites:** completed [local setup](local_setup.md) — `uv` installed, repo cloned, `launch.bat` / `launch.sh` working.
 
-> **Follow along with example data:** point `PATH_TO_DATA` at `examples/data/` and `PATH_TO_REGISTRY` at `examples/experiments_registry.csv` (both at the repo root) when the setup wizard asks — the files used in this tutorial are included.
+> **Follow along with example data:** in the app, press **Try the example** on the welcome page (or run `from mfethuls.examples import create_workspace; create_workspace(register_all=True)` and point `PATH_TO_DATA` and `PATH_TO_REGISTRY` at the `data/` folder and registry it creates in `~/mfethuls-example`). The files used in this tutorial are included.
 
 ---
 
@@ -53,17 +53,17 @@ Save the CSV. That's the only file you touch before ingesting.
 bash launch.sh
 ```
 
-Streamlit opens at `http://localhost:8501`. On first launch the setup wizard will have asked for your paths — if you need to change them, edit `.env` directly or delete it to re-run the wizard.
+Streamlit opens at `http://localhost:8501`. On first launch, press **Get started** to choose your data folder and registry; change them later under **⚙ Settings** → **Data folder and registry**. From then on, a getting-started checklist (and a compact tracker at the top of the sidebar) shows the next step.
 
 ---
 
 ## Step 3 — Select and ingest
 
-In the Streamlit sidebar, expand **Ingest**. Enter the path to your registry CSV in the text input — the experiment list loads automatically from the file.
+In the Streamlit sidebar, expand **Ingest**. It lists the experiments of the registry you chose.
 
 Select `LB_dsc_001` and `LB_dsc_002` from the multiselect (or tick **"Select all"** if these are the only rows), then click **"Ingest"**. A progress bar advances as each experiment is parsed, normalised, and written to Parquet.
 
-If a row has a validation error (unknown instrument name, file not found, etc.), it will surface as an error message after the ingest attempt. Fix the registry CSV and ingest again — already-successful experiments are skipped unless you tick **"Re-parse even if cached"**.
+If an experiment cannot be ingested (unknown instrument name, file not found, files that do not read as that instrument's data, …), it is listed with the reason and nothing is stored for it. Fix the registry and ingest again; experiments that already succeeded are reused unless you tick **"Re-parse even if cached"**.
 
 When it finishes:
 - Two Parquet files exist under `PATH_TO_LOCAL_STORAGE/dsc_mettler_toledo/<hex_id>/`
@@ -75,23 +75,23 @@ When it finishes:
 
 In the sidebar, expand **Datasets**. Your two experiments appear in the table. Pick `LB_dsc_001` and `LB_dsc_002` in **"Select experiments to plot"**: the main page shows row counts, a preview table and the **Plot** section.
 
-- Choose the **X axis** (`temperature_C`) and **Y axis** (`heat_flow_mW`). Lines are coloured by experiment, and every data point is drawn.
+- Choose the **X axis** (`temperature_C`) and **Y axis** (`heat_flow_mW`). Lines are coloured by experiment, and every data point is drawn. **Style by** next to **Colour by** tells a second column apart by line style (or marker shape in a scatter plot), e.g. colour by experiment and style by sample.
 - Or switch on **Built-in instrument plot**: the DSC plot with one colour per heating/cooling segment and one line style per experiment.
 - Zoom by dragging a box, and double-click to reset.
 
-The toolbar above the chart sets **Axis limits** and downloads the figure as a vector **SVG** (publication style, editable in Inkscape, using your axis limits) or as interactive **HTML**. See the [plotting guide](plotting.md#streamlit-dashboard) for colour scales and data size.
+The toolbar above the chart has an **Axis limits** toggle (it opens min/max fields above the chart, so the axes stay visible) and downloads the figure as a vector **SVG** (publication style, editable in Inkscape, using your axis limits) or as interactive **HTML**. See the [plotting guide](plotting.md#streamlit-dashboard) for colour scales and data size.
 
 ---
 
 ## Step 5 — Query in a notebook
 
-The repo includes `notebooks/local_tutorial.py` — a Marimo notebook that walks through all the patterns below interactively. Open it with:
+mfethuls ships a Marimo tutorial that walks through all the patterns below interactively, on its own copy of the example data. Open it from the app's welcome page (**Use it from Python**) or with:
 
 ```shell
-uv run --extra notebook marimo edit notebooks/local_tutorial.py
+mfethuls-tutorial
 ```
 
-Or open a Jupyter or Marimo notebook of your own in the same project directory (`.env` is loaded automatically).
+Or open a Jupyter or Marimo notebook of your own: mfethuls uses the folders you chose in the app (or set in `.env`). To point a notebook elsewhere for its session, call `mfethuls.settings.use_folders(data_root=..., registry_path=...)`.
 
 ### Check what's been ingested
 
@@ -131,9 +131,9 @@ mfethuls.plot_experiments(cs, backend="plotly")          # interactive version
 
 ```python
 import duckdb
-import os
+from mfethuls.storage import catalog_path
 
-conn = duckdb.connect(os.environ["MFETHULS_DUCKDB_PATH"], read_only=True)
+conn = duckdb.connect(catalog_path(), read_only=True)
 
 df = conn.execute("""
     SELECT experiment_name, temperature_C, heat_flow_mW

@@ -1,8 +1,8 @@
 """Bring what was ingested back in line with the registry.
 
 The registry is the source of truth. Ingest derives everything else from it: the
-manifest (experiment IDs), the DuckDB catalog, the stored Parquet files and, in
-service mode, the Postgres ``datasets`` mirror. When rows are removed or changed in
+manifest (experiment IDs), the DuckDB catalog, the stored Parquet files and any
+metadata sink of the stores (see :mod:`mfethuls.stores`). When rows are removed or changed in
 the registry, those derived records drift. :func:`plan` compares them with the
 registry and lists what to do; :func:`apply` does it.
 
