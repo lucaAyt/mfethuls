@@ -101,3 +101,39 @@ def test_use_test_env_warns_and_keeps_value_when_test_var_missing(runtime_paths,
     assert get_settings().data_root == "test/data"
     assert get_settings().registry_path == "original_PATH_TO_REGISTRY"
     assert "MFETHULS_TEST_REGISTRY is not set" in caplog.text
+
+
+def test_saved_settings_take_precedence_over_the_environment(monkeypatch, tmp_path):
+    from mfethuls.settings import load_saved_settings, save_settings
+
+    monkeypatch.setenv("PATH_TO_DATA", "/from-env")
+    monkeypatch.setenv("PATH_TO_REGISTRY", "/env-registry.csv")
+    assert get_settings().data_root == "/from-env"
+
+    path = save_settings(data_root="/saved-in-app")
+    assert path == tmp_path / "settings.json"  # MFETHULS_SETTINGS_FILE from conftest
+    assert get_settings().data_root == "/saved-in-app"
+    assert get_settings().registry_path == "/env-registry.csv"  # not saved: the environment still applies
+
+    save_settings(data_root=None)
+    assert load_saved_settings() == {}
+    assert get_settings().data_root == "/from-env"
+
+
+def test_unreadable_or_unknown_saved_settings(tmp_path):
+    from mfethuls.settings import load_saved_settings, save_settings
+
+    (tmp_path / "settings.json").write_text("{not json", encoding="utf-8")
+    assert load_saved_settings() == {}
+    with pytest.raises(ValueError, match="can be saved"):
+        save_settings(api_key="secret")
+
+
+def test_use_folders_wins_over_saved_settings_for_this_session(monkeypatch, tmp_path):
+    from mfethuls.settings import save_settings, use_folders
+
+    save_settings(data_root="/saved", registry_path="/saved.csv")
+    use_folders(data_root="/notebook")
+
+    assert get_settings().data_root == "/notebook"
+    assert get_settings().registry_path == "/saved.csv"  # not given: unchanged

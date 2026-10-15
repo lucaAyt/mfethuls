@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 
 from mfethuls.app.register import clear_registry_caches, new_data_prompt, registry_frame
+from mfethuls.app.welcome import is_set_up
 from mfethuls.settings import get_settings
 
 _CATALOG_TEXT_FIELDS = (
@@ -42,12 +43,14 @@ def local_catalog_path() -> Optional[str]:
     return path if os.path.exists(path) else None
 
 
-@st.cache_data(show_spinner=False, ttl=30)
 def list_local_datasets() -> List[Dict[str, Any]]:
-    """Ingested datasets from the local DuckDB catalog (cached for 30 s)."""
+    """Ingested datasets from the local DuckDB catalog (cached for 30 s, per catalog)."""
     db_path = local_catalog_path()
-    if not db_path:
-        return []
+    return _list_catalog(db_path) if db_path else []
+
+
+@st.cache_data(show_spinner=False, ttl=30)
+def _list_catalog(db_path: str) -> List[Dict[str, Any]]:
     from mfethuls.storage import duckdb_session
 
     with duckdb_session(db_path=db_path, read_only=True) as catalog:
@@ -55,12 +58,16 @@ def list_local_datasets() -> List[Dict[str, Any]]:
 
 
 # Cached for 10 minutes: whole datasets are expensive to reload. Refresh clears it.
-@st.cache_data(show_spinner=False, ttl=600)
 def query_local_dataset(name: str, limit: Optional[int] = None, offset: int = 0) -> pd.DataFrame:
     """Rows of a dataset from the local catalog; ``limit=None`` loads all of them."""
+    return _query_catalog(local_catalog_path(), name, limit, offset)
+
+
+@st.cache_data(show_spinner=False, ttl=600)
+def _query_catalog(db_path: str, name: str, limit: Optional[int], offset: int) -> pd.DataFrame:
     from mfethuls.storage import duckdb_session
 
-    with duckdb_session(db_path=local_catalog_path(), read_only=True) as catalog:
+    with duckdb_session(db_path=db_path, read_only=True) as catalog:
         safe = name.replace('"', '""')
         if limit is None:
             return catalog.query(f'SELECT * FROM "{safe}" OFFSET ?', [offset])
@@ -72,6 +79,8 @@ class LocalBackend:
 
     # The "Register new data" dialog may append rows to the registry file.
     writes_registry = True
+    # The getting-started page offers to switch to a copy of the bundled examples.
+    offers_example = True
 
     # -- sidebar ------------------------------------------------------------
 
@@ -80,7 +89,11 @@ class LocalBackend:
 
     def render_ingest(self) -> str:
         """The Ingest sidebar section; returns the registry path in use."""
-        registry_path = st.text_input("Experiment registry path", value=get_settings().registry_path or "")
+        registry_path = get_settings().registry_path or ""
+        if not is_set_up():
+            st.caption("Choose your data folder and registry first: **⚙ Settings** → Data folder and registry.")
+            return registry_path
+        st.caption(f"Registry: `{os.path.basename(registry_path)}`")
         refresh_ingest = st.checkbox("Re-parse even if cached", value=False)
 
         experiment_names: List[str] = []
@@ -126,8 +139,8 @@ class LocalBackend:
         return query_local_dataset(name, limit, offset)
 
     def clear_caches(self) -> None:
-        list_local_datasets.clear()
-        query_local_dataset.clear()
+        _list_catalog.clear()
+        _query_catalog.clear()
 
     def ingest(self, names: List[str], registry_path: str, refresh: bool = False) -> List[tuple]:
         """Ingest experiments into the local stores; returns ``(name, result)`` pairs."""
@@ -144,7 +157,7 @@ class LocalBackend:
                     results.append((name, result or {}))
                 except Exception as exc:
                     results.append((name, {"status": "error", "error": str(exc)}))
-        list_local_datasets.clear()
+        _list_catalog.clear()
         return results
 
     # -- clean up ---------------------------------------------------------------

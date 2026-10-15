@@ -1,6 +1,6 @@
 # mfethuls
 
-A Python framework for parsing, normalising, and managing data from laboratory instruments. Raw instrument exports are ingested against a shared experiment registry, normalised to a canonical schema, and stored as queryable Parquet datasets — accessible via a Streamlit dashboard, REST API, or notebooks.
+From scattered instrument files to analysis-ready data. mfethuls is a Python framework that reads, cleans and organises experimental data: raw instrument exports are ingested against an experiment registry, normalised to a canonical schema and stored as traceable, queryable Parquet datasets. Use it from the app (`mfethuls-app`, no code needed), from notebooks, or with SQL. Experimentalists get consistent, comparable data and publication-ready figures; data scientists get harmonised data from every instrument to build features and models on.
 
 ---
 
@@ -26,45 +26,37 @@ Each parser normalises raw exports to a [canonical column schema](docs/reference
 ## Install
 
 ```shell
-pip install git+https://github.com/lucaAyt/mfethuls.git
+pip install "mfethuls[viz,notebook] @ git+https://github.com/lucaAyt/mfethuls.git"
 ```
 
-Install extras as needed:
+(A PyPI release is planned.) The extras:
 
 | Extra | Installs | Use when |
 |---|---|---|
 | `viz` | Plotly, Matplotlib, Kaleido, Streamlit | The app or notebook plotting |
 | `notebook` | Jupyter, Marimo, Matplotlib, Plotly, seaborn | Interactive notebooks with plotting |
 
-```shell
-pip install "mfethuls[viz,notebook]"
-```
-
 ---
 
-## Getting started — notebooks and the app
+## Getting started
 
-No Docker, no database, no server. Set paths in `.env` (copy from `env_example`):
-
-```
-PATH_TO_DATA=/path/to/raw/instrument/data
-PATH_TO_REGISTRY=/path/to/experiments_template.csv
-PATH_TO_LOCAL_STORAGE=/path/to/parquet/output
-```
-
-`experiments_template.csv` in the repo root is a pre-filled registry template — open in Excel and adapt to your experiments. To try mfethuls without your own data, point `PATH_TO_DATA` at `examples/data/` and `PATH_TO_REGISTRY` at `examples/experiments_registry.csv` — example DSC, TGA, FTIR, and fluorescence in-situ files are included.
-
-**Run the app:**
+No Docker, no database, no server. Start the app:
 
 ```shell
 mfethuls-app
 ```
 
-In the sidebar: ingest experiments, **Review & register** raw data that is not in the registry yet, **Clean up** after editing the registry, and browse, plot and export datasets.
+The welcome page offers three ways in:
 
-Non-technical users on Windows: double-click `launch.bat`. A setup wizard collects paths on first run. Requires only [`uv`](https://docs.astral.sh/uv/). See [docs/guides/local_setup.md](docs/guides/local_setup.md).
+- **Get started**: choose your data folder (one subfolder per instrument) and your registry (CSV or Excel, one row per experiment; the app can create an empty one or give you an example). They are saved in `~/.mfethuls/settings.json`, so notebooks use the same folders; change them any time under **⚙ Settings**.
+- **Try the example**: explore example DSC, TGA, FTIR and fluorescence data, copied to `~/mfethuls-example`. Your own data is not touched.
+- **Use it from Python**: the tutorial notebook (below).
 
-**Python API:**
+A getting-started checklist then walks through registering (**Ingest** → **Review & register**), ingesting, selecting and plotting (**Colour by**, **Style by**, axis limits, SVG/HTML export) and cleaning up (**⚙ Settings** → **Clean up**); a compact tracker stays at the top of the sidebar, next to 🏠 (back to the welcome page) and ⚙.
+
+Non-technical users: double-click `launch.bat` (Windows) or run `bash launch.sh`; it needs only [`uv`](https://docs.astral.sh/uv/). See [docs/guides/local_setup.md](docs/guides/local_setup.md). Folders can also come from `.env` (copy `env_example`); folders saved in the app take precedence. `experiments_template.csv` in the repo root has an example row for every supported instrument.
+
+**Python API:** a guided tutorial (a marimo notebook on its own copy of the example data) opens with `mfethuls-tutorial`, or **Use it from Python** on the app's welcome page.
 
 ```python
 import mfethuls
@@ -105,7 +97,7 @@ Three stores, each with a distinct role — see [docs/guides/data_analysis.md](d
 
 | Document | Contents |
 |---|---|
-| [docs/guides/quickstart.md](docs/guides/quickstart.md) | Start here — Tailscale dashboard access or local Python setup |
+| [docs/guides/quickstart.md](docs/guides/quickstart.md) | Start here: install, the app's first run, and using mfethuls from Python |
 | [docs/guides/workflow.md](docs/guides/workflow.md) | End-to-end tutorial — registry → ingest → dashboard → notebook |
 | [docs/guides/local_setup.md](docs/guides/local_setup.md) | Non-technical user guide — `uv` + launcher |
 | [docs/guides/data_analysis.md](docs/guides/data_analysis.md) | Notebook access — Python API, DuckDB SQL, model building |

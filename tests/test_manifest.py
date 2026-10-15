@@ -343,3 +343,29 @@ def test_find_data_files_raises_when_nothing_found():
 
         with pytest.raises(FileNotFoundError):
             find_data_files(tmpdir, "kinetics_jan15")
+
+
+def test_manifest_write_survives_a_briefly_locked_file(monkeypatch):
+    """Windows refuses to replace a file another process (virus scanner, OneDrive) has open for a moment."""
+    import mfethuls._files as files
+
+    real_replace = os.replace
+    failures = {"left": 2}
+
+    def flaky_replace(source, target):
+        if failures["left"]:
+            failures["left"] -= 1
+            raise PermissionError(5, "Access is denied")
+        real_replace(source, target)
+
+    monkeypatch.setattr(files.os, "replace", flaky_replace)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        backend = FileManifestBackend(tmpdir)
+        eid = backend.get_or_create_experiment_id(instrument_name="dsc", raw_data_filename="a", experiment_name="A")
+        assert [e["experiment_id"] for e in backend.all_mappings()] == [eid]
+        assert failures["left"] == 0
+
+        failures["left"] = 100  # locked for good: give up with the error, leave no temp file behind
+        with pytest.raises(PermissionError):
+            backend.get_or_create_experiment_id(instrument_name="dsc", raw_data_filename="b", experiment_name="B")
+        assert [f for f in os.listdir(tmpdir) if f.endswith(".tmp")] == []

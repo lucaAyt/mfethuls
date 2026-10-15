@@ -5,7 +5,6 @@ manifest into the data folder and parquet/DuckDB files into storage.
 """
 
 import shutil
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -14,7 +13,7 @@ from mfethuls.config.loader import load_experiment_dataset
 from mfethuls.experiments import Registry
 from mfethuls.manifest import FileManifestBackend
 
-EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
+from mfethuls.examples import EXAMPLES_DIR
 EXAMPLE_NAMES = pd.read_csv(EXAMPLES_DIR / "experiments_registry.csv")["name"].tolist()
 
 

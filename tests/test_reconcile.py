@@ -11,7 +11,7 @@ from mfethuls.config.loader import ingest_experiment_dataset
 from mfethuls.reconcile import ReconcileBlocked, apply, plan
 from mfethuls.stores import open_local_stores as open_stores
 
-EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
+from mfethuls.examples import EXAMPLES_DIR
 
 
 @pytest.fixture

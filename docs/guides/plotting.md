@@ -128,20 +128,22 @@ Pass `ax=` to draw into your own axes (overlay and single plots only). The figur
 
 The **Plot** section of the app (`mfethuls-app`) offers two modes:
 
-- **Line or scatter plots of any columns:** choose the x and y columns, colour column, log axes and axis direction.
+- **Line or scatter plots of any columns:** choose the x and y columns, **Colour by** and **Style by** columns, log axes and axis direction.
 - **Built-in instrument plot** (toggle): the plots described above, for the selected experiments.
 
 The toolbar above the chart:
 
 | Control | What it does |
 |---|---|
-| **Axis limits** | Min/max per axis. Empty fields stay automatic, and each shows the automatic value as a hint. Limits apply to the chart and the SVG. The button is highlighted while limits are set; **Reset to automatic** clears them. Not available for histograms, box plots or multi-panel figures. |
+| **Axis limits** | A toggle that opens a row of min/max fields for each axis *above* the chart, so it never covers the axes you are adjusting. Empty fields stay automatic, and each shows the automatic value as a hint. Limits apply to the chart and the SVG and stay applied when the row is closed (a note under the toolbar lists them); **Reset** clears them. Not available for histograms, box plots or multi-panel figures. |
 | **SVG** | Vector figure drawn with Matplotlib in the publication style, using the axis limits. Generated when clicked. |
 | **HTML** | Standalone interactive Plotly page. Generated when clicked. |
 
 **Colours:** categorical colour columns use a discrete palette. A numeric colour column with more than 10 values (e.g. `time_s` on a spectra series) switches to a **Colour scale** picker (viridis, plasma, cividis, coolwarm, …) with a **Reverse** toggle. A column with a different value on almost every row (more than 300 values, e.g. `time_s` in DSC data) is drawn without colour groups.
 
-**Data size:** the **Query** sidebar loads all rows by default, so plots and exports use every data point. Turn off **Load all rows** to load a fixed number of rows per experiment instead. With 500,000 rows, the app takes about half a second per interaction; loaded data is cached for 10 minutes, and **Refresh** reloads it. The **Preview** table shows the first 1,000 rows.
+**Style by:** a second column, told apart by line style (`-`, `--`, `:`, `-.`) in line plots or marker shape (circle, square, triangle, diamond, …) in scatter plots, e.g. colour by experiment and style by sample. **Signal** (the Y column) can be the style when several Y columns are plotted. The colour and style each get their own legend in the app; in the SVG they are two sections of one legend, which always fits in the figure. A style column with more values than there are styles (4 line styles, 8 markers) is ignored with a note.
+
+**Data size:** all rows are loaded by default, so plots and exports use every data point. Under **⚙ Settings** → **Data loading**, turn off **Load all rows** to load a fixed number of rows per experiment instead. With 500,000 rows, the app takes about half a second per interaction; loaded data is cached for 10 minutes, and **Refresh** reloads it. The **Preview** table shows the first 1,000 rows.
 
 ---
 

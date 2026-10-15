@@ -6,6 +6,7 @@ import pandas as pd
 
 from mfethuls import Registry
 from mfethuls.discovery import REGISTRY_COLUMNS, discover_unregistered, proposed_rows
+from mfethuls.examples import DATA_DIR
 
 DSC_MODELS = ["dsc", "dsc_perkin_elmer", "dsc_mettler_toledo", "dsc_default"]
 
@@ -228,7 +229,9 @@ def _proposals_for(tmp_path, registry):
 def test_validate_proposed_requires_instrument_and_found_data(tmp_path):
     from mfethuls.discovery import validate_proposed
 
-    _touch(tmp_path / "DSC" / "poly2.txt")
+    # A real Mettler Toledo export: the chosen instrument must be able to read it.
+    (tmp_path / "DSC").mkdir()
+    (tmp_path / "DSC" / "poly2.txt").write_bytes((DATA_DIR / "DSC" / "poly2.txt").read_bytes())
     registry = _registry()
     rows = _proposals_for(tmp_path, registry)
 

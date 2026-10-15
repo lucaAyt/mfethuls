@@ -1,6 +1,6 @@
 # Running mfethuls Locally
 
-Guide for scientists who want to run the Streamlit explorer on their own machine without managing Python environments.
+Guide for scientists who want to run the mfethuls app on their own machine without managing Python environments.
 
 ---
 
@@ -59,7 +59,7 @@ To update later, run `git pull` from the project folder.
 Before you launch for the first time, organise your raw instrument data like this:
 
 ```
-PATH_TO_DATA/          ← the path you give the setup wizard
+data folder/           ← the folder you choose in the app
   DSC/                 ← Mettler Toledo, PerkinElmer, other
   TGA/                 ← TGA files
   FTIR/                ← Bruker FTIR files
@@ -75,7 +75,7 @@ PATH_TO_DATA/          ← the path you give the setup wizard
 
 Files can be placed **at any depth** inside the instrument folder — subfolders are fine. mfethuls walks the full folder tree to find your files.
 
-> **Not ready with your own data?** The repo includes example files under `examples/data/` (DSC, TGA, FTIR, fluorescence in-situ). When the setup wizard asks for paths, point `PATH_TO_DATA` at `examples/data/` and `PATH_TO_REGISTRY` at `examples/experiments_registry.csv` — you can run a complete ingest and explore the dashboard straight away.
+> **No data yet?** Start the app (`mfethuls-app`) and press **Try the example** on the welcome page: example DSC, TGA, FTIR and fluorescence in-situ files are copied to `~/mfethuls-example`, and the getting-started checklist walks you through registering, ingesting and plotting them. From Python: `from mfethuls.examples import create_workspace; create_workspace()`. Your own folders are not changed; **Back to my data** switches back.
 
 ---
 
@@ -88,19 +88,17 @@ Files can be placed **at any depth** inside the instrument folder — subfolders
 bash launch.sh
 ```
 
-On first launch, a setup wizard collects three paths:
+The app opens in your browser at `http://localhost:8501`. On the welcome page, press **Get started** and fill in:
 
-| Prompt | Example | What it is |
+| Field | Example | What it is |
 |--------|---------|------------|
-| Path to raw data folder | `C:\Lab\RawData` | Root folder with instrument sub-folders (`DSC/`, `TGA/`, etc.) |
-| Path to registry CSV | `C:\Lab\registry.csv` | Your experiment registry spreadsheet |
-| Path for processed storage | *(leave blank for default)* | Where Parquet files will be written |
+| Data folder | `C:\Lab\RawData` | Root folder with instrument sub-folders (`DSC/`, `TGA/`, etc.) |
+| Registry (spreadsheet) | `C:\Lab\registry.xlsx` | Your experiment registry. If it does not exist yet, the app can create an empty one. |
+| Storage folder | *(optional)* | Where processed data is written; by default a `_storage` folder inside the data folder |
 
-These are saved to `.env` in the project folder. You will not be prompted again.
+The app checks both as you type (which instrument folders it recognises, whether the registry can be read) and shows how to organise the data folder. Press **Save**. The folders are saved in `~/.mfethuls/settings.json`, so notebooks use the same ones.
 
 The repo includes `experiments_template.csv` — open it in Excel to see all supported instruments and columns. Replace the placeholder rows with your own experiments, or use it as a starting point for a new registry file.
-
-After the wizard, Streamlit starts automatically and opens at `http://localhost:8501`.
 
 ---
 
@@ -118,20 +116,15 @@ git pull
 ```
 Then launch as normal. `uv` detects changed dependencies and updates them automatically.
 
-**If you downloaded a zip:** download the new zip, unzip to a new folder, then copy your `.env` file from the old folder into the new one (this preserves your path settings).
+**If you downloaded a zip:** download the new zip, unzip to a new folder, and launch it. Your folders are saved outside the project (`~/.mfethuls/settings.json`), so they carry over.
 
 ---
 
 ## Reconfiguring paths
 
-Delete `.env` from the project root and launch again — the setup wizard will run.
+In the app: **⚙ Settings** (top of the sidebar) → **Data folder and registry**, change the paths and press **Save**.
 
-Or edit `.env` directly in a text editor:
-```
-PATH_TO_DATA=C:\Lab\RawData
-PATH_TO_REGISTRY=C:\Lab\registry.csv
-PATH_TO_LOCAL_STORAGE=C:\Lab\mfethuls_storage
-```
+Settings saved in the app take precedence over `PATH_TO_DATA`, `PATH_TO_REGISTRY` and `PATH_TO_LOCAL_STORAGE` in `.env` or the environment, which are only used for what the app has not saved.
 
 ---
 
@@ -140,14 +133,11 @@ PATH_TO_LOCAL_STORAGE=C:\Lab\mfethuls_storage
 **"uv is not installed or not on PATH"**
 Close and reopen your terminal after installing `uv`. If that doesn't help, re-run the install command.
 
-**Setup wizard appears every time**
-The wizard runs when `.env` is missing. Make sure `.env` exists in the project root (the same folder as `launch.bat`), not inside a sub-folder.
-
 **App opens but no datasets appear**
-The Datasets tab is populated after an ingest. Use the sidebar in Streamlit to load your registry CSV and run an ingest first.
+The Datasets list fills after an ingest. Open **Ingest** in the sidebar, select the experiments and press **Ingest**; the getting-started checklist shows what is left.
 
-**`streamlit` command not found**
-The launcher uses `uv run --extra viz`, which installs Streamlit automatically. If running Streamlit manually (outside the launcher), install it first: `uv pip install streamlit`.
+**"Use it from Python" says marimo is not installed**
+The launcher installs it (`uv run --extra viz --extra notebook`). If you installed mfethuls yourself, add the notebook extra: `pip install "mfethuls[viz,notebook] @ git+https://github.com/lucaAyt/mfethuls.git"`.
 
 **Windows: script blocked by security policy**
 Right-click `launch.bat`, choose **Properties**, and click **Unblock** at the bottom of the General tab.

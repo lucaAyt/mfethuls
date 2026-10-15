@@ -26,6 +26,9 @@ TITLE_FONT_SIZE = 20
 # WebGL lines only take named dashes; long dashes stay visible on dense data,
 # where short ones blur into a solid line.
 _DASHES = {"-": "solid", "--": "longdash", ":": "dot", "-.": "longdashdot"}
+# Matplotlib marker codes as Plotly symbols (all available in WebGL).
+_SYMBOLS = {"o": "circle", "s": "square", "^": "triangle-up", "D": "diamond", "v": "triangle-down",
+            "P": "cross", "X": "x", "*": "star"}
 
 
 def plotly_config(filename: str = "figure") -> dict:
@@ -96,7 +99,7 @@ def _add_panel_traces(fig, panel: Panel, *, row: Optional[int]) -> None:
                 mode=trace.mode,
                 name=_text(trace.label) or "",
                 line=_line(color, trace.linestyle),
-                marker={"size": 5, "color": _color(color)},
+                marker={"size": 5, "color": _color(color), "symbol": _SYMBOLS.get(trace.marker, "circle")},
                 legendgroup=trace.legend_group,
                 showlegend=bool(trace.label) and panel.legend and not panel.legends,
             ),
@@ -114,9 +117,10 @@ def _add_panel_traces(fig, panel: Panel, *, row: Optional[int]) -> None:
                 go.Scatter(
                     x=[None],
                     y=[None],
-                    mode="lines",
+                    mode="markers" if entry.marker else "lines",
                     name=_text(entry.label),
                     line=_line(entry.color, entry.linestyle),
+                    marker={"color": _color(entry.color), "symbol": _SYMBOLS.get(entry.marker or "o", "circle")},
                     legendgroup=entry.group or f"{spec_legend.title}:{entry.label}",
                     legend=legend_id,
                     showlegend=True,

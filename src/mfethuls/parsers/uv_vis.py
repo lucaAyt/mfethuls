@@ -95,6 +95,8 @@ class FlameOceanOpticsParser:
                     timestamp = line.split(': ')[-1].strip()
                 if 'Number of Pixels' in line:
                     break
+            else:
+                raise ValueError("not an Ocean Optics Flame export (no 'Number of Pixels' header line)")
             df = pd.read_csv(file, sep='\t', header=1)
 
         if df.shape[1] < 2:

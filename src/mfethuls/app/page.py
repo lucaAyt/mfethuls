@@ -20,11 +20,28 @@ import plotly.io as pio
 import streamlit as st
 from plotly.colors import convert_colors_to_same_type
 
+from mfethuls.app.welcome import (
+    example_folder,
+    is_set_up,
+    landing_requested,
+    mark_done,
+    show_landing,
+    render_example_settings,
+    render_folder_layout,
+    render_landing,
+    render_loading_settings,
+    render_guide_tracker,
+    render_progress,
+    render_setup,
+    render_setup_form,
+    row_limit as loading_row_limit,
+    setup_requested,
+)
 from mfethuls.dataset import Dataset
 from mfethuls.plotting import PlotError, PlotSpec, build_experiments_spec, plotly_config
 from mfethuls.plotting.backend import render
 from mfethuls.plotting.labels import axis_label, legend_name, shared_axis_label
-from mfethuls.plotting.spec import Colorbar, Panel, Trace
+from mfethuls.plotting.spec import LINESTYLES, MARKERS, Colorbar, Legend, LegendEntry, Panel, Trace
 from mfethuls.schema_normalization import add_elapsed_time
 
 # The backend the page is drawn for; set by run().
@@ -88,6 +105,13 @@ _MAX_COLOUR_GROUPS = 50
 # instead of a legend, up to _MAX_COLORBAR_GROUPS lines (e.g. one per spectrum in time_s).
 _MAX_LEGEND_ENTRIES = 10
 _MAX_COLORBAR_GROUPS = 300
+# Style legend entries are drawn in a neutral grey, so they don't read as colour groups.
+_STYLE_LEGEND_COLOUR = "0.35"
+_NO_STYLE = "(none)"
+
+
+def _column_title(column: str) -> str:
+    return _LEGEND_TITLES.get(column, column)
 
 
 def _uses_colorbar(df: pd.DataFrame, color: str | None) -> bool:
@@ -106,6 +130,7 @@ def _xy_spec(
     color: str | None,
     mode: str,
     palette: list,
+    style: str | None = None,
     cmap: str = "viridis",
     title: str,
     ylabel: str,
@@ -113,35 +138,68 @@ def _xy_spec(
     log_y: bool,
     invert_x: bool,
 ) -> PlotSpec:
-    """Line/scatter spec: one colour per value of ``color``, one line per experiment."""
+    """Line/scatter spec: one colour per value of ``color``, one line style (lines) or
+    marker shape (scatter) per value of ``style``, and one line per experiment."""
     split = ["_experiment"] if mode == "lines" and "_experiment" in df.columns else []
-    keys = list(dict.fromkeys(([color] if color else []) + split))
+    keys = list(dict.fromkeys(([color] if color else []) + ([style] if style else []) + split))
     colorbar = None
     if _uses_colorbar(df, color):
         colorbar = Colorbar(
             title=axis_label(color), vmin=float(df[color].min()), vmax=float(df[color].max()), cmap=cmap
         )
+    appearances = LINESTYLES if mode == "lines" else MARKERS
 
     traces: list[Trace] = []
     colour_index: dict[str, int] = {}
+    style_index: dict[str, int] = {}
     groups = df.groupby(keys, dropna=False, sort=False) if keys else [((), df)]
     for key, subset in groups:
-        key = key if isinstance(key, tuple) else (key,)
-        colour_value = str(key[0]) if color else ""
+        values = dict(zip(keys, key if isinstance(key, tuple) else (key,)))
+        colour_value = str(values[color]) if color else ""
         first = colour_value not in colour_index
         idx = colour_index.setdefault(colour_value, len(colour_index))
+        appearance = appearances[style_index.setdefault(str(values[style]), len(style_index)) % len(appearances)] if style else None
         traces.append(
             Trace(
                 subset[x].to_numpy(),
                 subset[y].to_numpy(),
                 # Lines split per experiment share a colour; only the first gets a legend entry.
-                label=_legend_entry(color, colour_value) if color and first else None,
+                # With a style column the legends are built below instead.
+                label=_legend_entry(color, colour_value) if color and first and not style else None,
                 color=palette[idx % len(palette)],
-                color_value=float(key[0]) if colorbar is not None and pd.notna(key[0]) else None,
+                color_value=float(values[color]) if colorbar is not None and pd.notna(values[color]) else None,
                 mode=mode,
+                linestyle=appearance if appearance and mode == "lines" else "-",
+                marker=appearance if appearance and mode == "markers" else "o",
                 legend_group=colour_value,
             )
         )
+
+    legends: list[Legend] = []
+    if style:
+        marker = mode == "markers"
+        if color and colorbar is None:
+            legends.append(Legend(
+                title=_LEGEND_TITLES.get(color) or legend_name(color),
+                entries=[
+                    LegendEntry(_legend_entry(color, value), color=palette[i % len(palette)], group=value,
+                                marker="o" if marker else None)
+                    for value, i in colour_index.items()
+                ],
+            ))
+        legends.append(Legend(
+            title=_LEGEND_TITLES.get(style) or legend_name(style),
+            entries=[
+                LegendEntry(
+                    _legend_entry(style, value),
+                    color=_STYLE_LEGEND_COLOUR,
+                    linestyle="-" if marker else appearances[i % len(appearances)],
+                    marker=appearances[i % len(appearances)] if marker else None,
+                    group=f"style:{value}",
+                )
+                for value, i in style_index.items()
+            ],
+        ))
 
     panel = Panel(
         traces=traces,
@@ -151,9 +209,10 @@ def _xy_spec(
         xscale="log" if log_x else "linear",
         yscale="log" if log_y else "linear",
         x_reversed=invert_x,
-        legend=color is not None and colorbar is None,
+        legend=color is not None and colorbar is None and not style,
         legend_title=_LEGEND_TITLES.get(color) or legend_name(color),
         colorbar=colorbar,
+        legends=legends,
     )
     return PlotSpec([panel])
 
@@ -184,9 +243,15 @@ def _plot_toolbar():
 _LIMIT_FIELDS = ("x_min", "x_max", "y_min", "y_max")
 
 
+def _stored_limits(key: str) -> dict:
+    """The limits typed for one plot, kept while the limits row is closed (closed widgets lose their state)."""
+    return st.session_state.setdefault("_axis_limits", {}).setdefault(key, {})
+
+
 def _reset_axis_limits(key: str) -> None:
+    _stored_limits(key).clear()
     for field in _LIMIT_FIELDS:
-        st.session_state[f"{key}|{field}"] = None
+        st.session_state.pop(f"{key}|{field}", None)
 
 
 def _trace_bounds(arrays: list, *, log: bool):
@@ -211,44 +276,47 @@ def _resolve_limits(low, high, auto, *, log: bool):
     return (low, high), None
 
 
-def _axis_limits_popover(container, panel: Panel, key: str) -> None:
-    """Min/max fields per axis that set ``panel.xlim``/``panel.ylim``; empty fields stay automatic."""
-    customised = any(st.session_state.get(f"{key}|{field}") is not None for field in _LIMIT_FIELDS)
-    with container.popover(
-        "Axis limits",
-        icon=":material/crop_free:",
-        type="primary" if customised else "secondary",
-        width="stretch",
-    ):
-        st.caption("Leave a field empty for the automatic limit. Limits apply to the chart and the SVG.")
-        for axis, label, scale in (("x", panel.xlabel, panel.xscale), ("y", panel.ylabel, panel.yscale)):
-            log = scale == "log"
-            auto = _trace_bounds([getattr(trace, axis) for trace in panel.traces], log=log)
-            st.markdown(f"**{label or axis.upper()}**")
-            low_col, high_col = st.columns(2)
-            low = low_col.number_input(
-                "Min", value=None, format="%g", key=f"{key}|{axis}_min",
-                placeholder=f"{auto[0]:.4g}" if auto else "auto",
-            )
-            high = high_col.number_input(
-                "Max", value=None, format="%g", key=f"{key}|{axis}_max",
-                placeholder=f"{auto[1]:.4g}" if auto else "auto",
-            )
-            limits, problem = _resolve_limits(low, high, auto, log=log)
-            if problem:
-                st.warning(problem, icon=":material/warning:")
-            setattr(panel, f"{axis}lim", limits)
-        st.button(
-            "Reset to automatic",
-            icon=":material/restart_alt:",
-            on_click=_reset_axis_limits,
-            args=(key,),
-            width="stretch",
-        )
+def _axis_limits(toggle_col, panel: Panel, key: str) -> None:
+    """Axis limits for ``panel``: a toolbar toggle opens a row of min/max fields above the chart.
+
+    The row sits between the toolbar and the chart, so it never covers the axes being
+    adjusted. Empty fields stay automatic (their placeholder shows the automatic value);
+    limits apply to the chart and the SVG, and stay applied when the row is closed.
+    """
+    stored = _stored_limits(key)
+    is_open = toggle_col.toggle("Axis limits", key=f"{key}|open",
+                                help="Set min/max per axis. The chart and the SVG use them.")
+    axes = [("x", panel.xlabel, panel.xscale), ("y", panel.ylabel, panel.yscale)]
+    autos = {axis: _trace_bounds([getattr(t, axis) for t in panel.traces], log=scale == "log") for axis, _, scale in axes}
+
+    if is_open:
+        columns = st.columns([1, 1, 1, 1, 1], vertical_alignment="bottom")
+        for position, (axis, label, _) in enumerate(axes):
+            auto = autos[axis]
+            for offset, (end, index) in enumerate((("min", 0), ("max", 1))):
+                field = f"{axis}_{end}"
+                stored[field] = columns[2 * position + offset].number_input(
+                    f"{axis.upper()} {end}", value=stored.get(field), format="%g", key=f"{key}|{field}",
+                    placeholder=f"{auto[index]:.4g}" if auto else "auto", help=label or None,
+                )
+        columns[4].button("Reset", icon=":material/restart_alt:", on_click=_reset_axis_limits, args=(key,),
+                          width="stretch", help="Back to automatic limits")
+
+    applied = []
+    for axis, _, scale in axes:
+        limits, problem = _resolve_limits(stored.get(f"{axis}_min"), stored.get(f"{axis}_max"), autos[axis],
+                                          log=scale == "log")
+        if problem and is_open:
+            st.warning(f"{axis.upper()}: {problem}", icon=":material/warning:")
+        setattr(panel, f"{axis}lim", limits)
+        if limits:
+            applied.append(f"{axis.upper()} {limits[0]:g} to {limits[1]:g}")
+    if applied and not is_open:
+        st.caption(":material/crop_free: Axis limits: " + ", ".join(applied))
 
 
 def _limits_unavailable(container, reason: str) -> None:
-    container.popover("Axis limits", icon=":material/crop_free:", disabled=True, help=reason, width="stretch")
+    container.toggle("Axis limits", disabled=True, help=reason, key="limits-unavailable")
 
 
 def _download_buttons(svg_col, html_col, title: str, *, spec: PlotSpec | None, fig) -> None:
@@ -302,10 +370,8 @@ def _cleanup_section(registry_path: str) -> None:
         "Compares what was ingested with the registry: forgets experiments removed from it, "
         "updates renamed or corrected ones and deletes stored files nothing uses. Raw data is never touched."
     )
-    message = st.session_state.pop("reconcile_message", None)
-    if message:
-        (st.warning if message.startswith("⚠") else st.success)(message)
     if st.button("Check", icon=":material/fact_check:", disabled=not registry_path, width="stretch"):
+        mark_done("cleanup")
         try:
             st.session_state["reconcile_plan"] = backend.reconcile_plan(registry_path)
         except Exception as exc:
@@ -356,25 +422,76 @@ def _cleanup_section(registry_path: str) -> None:
 
 
 
+@st.dialog("Settings", width="large")
+def _settings_dialog(registry_path: str) -> None:
+    with st.expander("Data folder and registry", icon=":material/folder:", expanded=not is_set_up()):
+        render_setup_form(backend, key="settings")
+        st.markdown("**How to organise the data folder**")
+        render_folder_layout()
+    with st.expander("Clean up", icon=":material/mop:"):
+        _cleanup_section(registry_path)
+    with st.expander("Data loading", icon=":material/database:"):
+        render_loading_settings()
+    if getattr(backend, "offers_example", False):
+        with st.expander("Example data", icon=":material/science:", expanded=bool(example_folder())):
+            render_example_settings(backend)
+
+
+# The sidebar's getting-started tracker for this run: where it goes and what it shows.
+_guide: dict = {}
+
+
+def _draw_guide() -> None:
+    if _guide and not _guide["drawn"]:
+        _guide["drawn"] = True
+        with _guide["slot"]:
+            render_guide_tracker(_guide["datasets"])
+
+
+def _stop() -> None:
+    """``st.stop()``, after drawing the getting-started tracker."""
+    _draw_guide()
+    st.stop()
+
+
 def run(app_backend) -> None:
     """Draw the page, with data from ``app_backend`` (e.g. :class:`~mfethuls.app.backend.LocalBackend`)."""
 
     global backend
     backend = app_backend
-    st.set_page_config(page_title="mfethuls", layout="wide", page_icon="🧪")
-    st.title("mfethuls")
-    st.caption("Laboratory data management and scientific exploration platform.")
+    # The landing page starts without the sidebar, so it stays uncluttered.
+    first_visit = not is_set_up() and not example_folder()
+    st.set_page_config(page_title="mfethuls", layout="wide", page_icon="🧪",
+                       initial_sidebar_state="collapsed" if first_visit else "expanded")
+
+    message = st.session_state.pop("reconcile_message", None)
+    if message:
+        st.toast(message, icon=":material/warning:" if message.startswith("⚠") else ":material/check_circle:")
 
     # ===========================================================================
     # SIDEBAR
     # ===========================================================================
+    # The settings button sits at the top; it needs the registry path the Ingest section uses.
+    settings_row = st.sidebar.container()
+    # Getting-started progress; filled at the end of the run, so this run's plot already counts.
+    global _guide
+    _guide = {"slot": st.sidebar.container(), "datasets": [], "drawn": False}
     backend.render_status()
 
     with st.sidebar.expander("Ingest", expanded=False):
         registry_path = backend.render_ingest()
 
-    with st.sidebar.expander("Clean up", expanded=False):
-        _cleanup_section(registry_path)
+    with settings_row:
+        # The two buttons sit side by side, flush with the right edge of the sections below.
+        with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+            st.markdown("**mfethuls**" + ("  \n:material/science: Example data" if example_folder() else ""),
+                        width="stretch")
+            if st.button("", icon=":material/home:", help="Home", width="content"):
+                show_landing()
+                st.rerun()
+            if st.button("", icon=":material/settings:", width="content",
+                         help="Settings: data folder and registry, clean up, data loading, example data"):
+                _settings_dialog(registry_path)
 
     # ---------------------------------------------------------------------------
     # Datasets expander
@@ -421,29 +538,27 @@ def run(app_backend) -> None:
                 options=list(label_to_name.keys()),
             )
 
-    # ---------------------------------------------------------------------------
-    # Query expander
-    # ---------------------------------------------------------------------------
-    with st.sidebar.expander("Query", expanded=False):
-        load_all_rows = st.toggle(
-            "Load all rows",
-            value=True,
-            help="Plots and SVG exports use every data point. Turn off to load fewer rows "
-            "per experiment when browsing very large datasets.",
-        )
-        row_limit = None
-        if not load_all_rows:
-            row_limit = int(st.number_input("Rows per experiment", min_value=10, value=5000, step=500))
-
     # ===========================================================================
     # MAIN CONTENT
     # ===========================================================================
 
     selected_names = [label_to_name[label] for label in selected_labels] if selected_labels else []
+    _guide["datasets"] = datasets
 
+    if landing_requested():
+        render_landing(backend)
+        _stop()
+    if setup_requested():
+        render_setup(backend)
+        _stop()
     if not selected_names:
-        st.info("Select one or more experiments from the **Datasets** sidebar to begin.")
-        st.stop()
+        if is_set_up() or example_folder():
+            render_progress(backend, datasets)
+        else:
+            render_landing(backend)
+        _stop()
+    row_limit = loading_row_limit()
+    mark_done("select")
 
     # ---------------------------------------------------------------------------
     # Load data
@@ -459,7 +574,7 @@ def run(app_backend) -> None:
             st.error(f"Failed to load {name}: {exc}")
 
     if not frames:
-        st.stop()
+        _stop()
 
     data = pd.concat(frames, ignore_index=True)
 
@@ -520,11 +635,12 @@ def run(app_backend) -> None:
                 limits_col, svg_col, html_col = _plot_toolbar()
                 if spec.layout == "single":
                     key = "|".join(["limits", "builtin", comparison_mode, *selected_names])
-                    _axis_limits_popover(limits_col, spec.panel, key)
+                    _axis_limits(limits_col, spec.panel, key)
                 else:
                     _limits_unavailable(limits_col, "Not available for figures with one panel per experiment.")
                 fig = render(spec, backend="plotly")
                 _download_buttons(svg_col, html_col, title, spec=spec, fig=fig)
+                mark_done("plot")
                 st.plotly_chart(
                     fig,
                     width="stretch",
@@ -534,19 +650,29 @@ def run(app_backend) -> None:
         elif len(numeric_cols) < 1:
             st.info("No numeric columns available for plotting.")
         else:
-            ctrl1, ctrl2, ctrl3 = st.columns(3)
-            with ctrl1:
-                plot_type = st.selectbox("Plot type", ["line", "scatter", "histogram", "box"])
-                x_col = st.selectbox("X axis", numeric_cols, index=0)
-            with ctrl2:
-                hue_opts = ["_experiment"] + [c for c in data.columns if c != "_experiment"]
-                color_col = st.selectbox("Colour by", hue_opts, index=0)
-                y_options = [c for c in numeric_cols if c != x_col]
-                y_cols = st.multiselect("Y axis", y_options, default=y_options[:1] if y_options else [])
-            with ctrl3:
-                use_log_x = st.checkbox("Log X")
-                use_log_y = st.checkbox("Log Y")
-                invert_x = st.checkbox("Invert X axis", value=False)
+            # What to plot: type and axes.
+            type_col, x_axis_col, y_axis_col = st.columns([1, 1, 2])
+            plot_type = type_col.selectbox("Plot type", ["line", "scatter", "histogram", "box"])
+            x_col = x_axis_col.selectbox("X axis", numeric_cols, index=0)
+            y_options = [c for c in numeric_cols if c != x_col]
+            y_cols = y_axis_col.multiselect("Y axis", y_options, default=y_options[:1] if y_options else [])
+
+            # How to tell lines apart: colour, and line style / marker shape side by side.
+            hue_opts = ["_experiment"] + [c for c in data.columns if c != "_experiment"]
+            colour_by_col, style_by_col, axes_col = st.columns([1, 1, 2], vertical_alignment="bottom")
+            color_col = colour_by_col.selectbox("Colour by", hue_opts, index=0, format_func=_column_title)
+            # Line styles (line plots) or marker shapes (scatter) by a second column; "Signal" is the Y column.
+            style_opts = [_NO_STYLE, *hue_opts, *(["_y_metric"] if len(y_cols) > 1 else [])]
+            style_col = style_by_col.selectbox(
+                "Style by", style_opts, index=0, format_func=_column_title,
+                disabled=plot_type not in {"line", "scatter"},
+                help="Line plots: one line style per value. Scatter plots: one marker shape per value.",
+            )
+            style_col = None if style_col == _NO_STYLE or plot_type not in {"line", "scatter"} else style_col
+            log_x_col, log_y_col, invert_col = axes_col.columns(3)
+            use_log_x = log_x_col.checkbox("Log X")
+            use_log_y = log_y_col.checkbox("Log Y")
+            invert_x = invert_col.checkbox("Invert X")
 
             # A numeric colour column with many values (e.g. time_s) is drawn on a colour scale.
             continuous = (
@@ -572,9 +698,9 @@ def run(app_backend) -> None:
                 title = f"{x_col} vs {', '.join(y_cols)}" if y_cols else x_col
 
                 if len(y_cols) > 1 or color_col == "_experiment":
-                    id_vars = [x_col, "_experiment"] + (
-                        [color_col] if color_col not in {x_col, "_experiment"} else []
-                    )
+                    id_vars = [x_col, "_experiment"] + [
+                        c for c in (color_col, style_col) if c and c not in {x_col, "_experiment", "_y_metric"}
+                    ]
                     id_vars = list(dict.fromkeys(id_vars))
                     long_df = data[id_vars + y_cols].melt(
                         id_vars=id_vars,
@@ -582,7 +708,10 @@ def run(app_backend) -> None:
                         var_name="_y_metric",
                         value_name="_y_value",
                     )
-                    color = "_y_metric" if len(y_cols) > 1 and color_col == "_experiment" else color_col
+                    # Several Y columns coloured by experiment: tell the signals apart by colour,
+                    # unless they are already told apart by style.
+                    by_signal = len(y_cols) > 1 and color_col == "_experiment" and style_col != "_y_metric"
+                    color = "_y_metric" if by_signal else color_col
                     y_series = "_y_value"
                 else:
                     long_df = data.copy()
@@ -596,13 +725,21 @@ def run(app_backend) -> None:
                     if long_df[color].nunique(dropna=False) > max_groups:
                         st.caption(f"'{color}' has more than {max_groups} values; drawing without colour groups.")
                         color = None
+                    mode = "lines" if plot_type == "line" else "markers"
+                    style = style_col
+                    max_styles = len(LINESTYLES if mode == "lines" else MARKERS)
+                    if style and long_df[style].nunique(dropna=False) > max_styles:
+                        st.caption(f"'{_column_title(style)}' has more than {max_styles} values; "
+                                   "drawing without styles.")
+                        style = None
                     palette, _ = convert_colors_to_same_type(list(discrete_seq), colortype="tuple")
                     spec = _xy_spec(
                         long_df,
                         x=x_col,
                         y=y_series,
                         color=color,
-                        mode="lines" if plot_type == "line" else "markers",
+                        style=style,
+                        mode=mode,
                         palette=palette,
                         cmap=cmap,
                         title=title,
@@ -611,7 +748,7 @@ def run(app_backend) -> None:
                         log_y=use_log_y,
                         invert_x=invert_x,
                     )
-                    _axis_limits_popover(limits_col, spec.panel, "|".join(["limits", x_col, *y_cols]))
+                    _axis_limits(limits_col, spec.panel, "|".join(["limits", x_col, *y_cols]))
                     fig = render(spec, backend="plotly")
                 else:
                     _limits_unavailable(limits_col, "Available for line and scatter plots.")
@@ -629,8 +766,10 @@ def run(app_backend) -> None:
                     spec = None
 
                 _download_buttons(svg_col, html_col, title, spec=spec, fig=fig)
+                mark_done("plot")
                 st.plotly_chart(
                     fig,
                     width="stretch",
                     config=plotly_config(_figure_download_name(title, "svg")),
                 )
+    _draw_guide()

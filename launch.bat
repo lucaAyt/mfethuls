@@ -9,17 +9,5 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-if not exist ".env" (
-    echo First-time setup: configuring paths...
-    echo.
-    call scripts\setup_env.bat
-    if %errorlevel% neq 0 (
-        echo Setup failed. Please try again.
-        pause
-        exit /b 1
-    )
-    echo.
-)
-
 echo Starting mfethuls Explorer...
-uv run --extra viz mfethuls-app
+uv run --extra viz --extra notebook mfethuls-app

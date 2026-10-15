@@ -14,7 +14,7 @@ from mfethuls.storage.catalog import CATALOG_FIELDS, CatalogRecord
 from mfethuls.storage.duckdb_backend import DuckDBQueryBackend
 from mfethuls.stores import local_stores
 
-EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
+from mfethuls.examples import EXAMPLES_DIR
 
 
 def _parquet(path: Path, rows: int = 3) -> Path:

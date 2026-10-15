@@ -1,4 +1,3 @@
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -7,7 +6,7 @@ from mfethuls import ComparisonSet, Registry, load_experiments, load_samples
 from mfethuls.comparison import ComparisonSet as ComparisonSetDirect
 from mfethuls.dataset import Dataset
 
-EXAMPLE_REGISTRY = Path(__file__).resolve().parents[1] / "examples" / "experiments_registry.csv"
+from mfethuls.examples import REGISTRY_PATH as EXAMPLE_REGISTRY
 
 
 def _registry(*rows: tuple[str, str]) -> Registry:

@@ -1,9 +1,9 @@
 import shutil
-from pathlib import Path
 
 import pytest
 import pandas as pd
 
+from mfethuls.examples import DATA_DIR as EXAMPLE_DATA
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.registry import get_parser
 from mfethuls.parsers.sec import AgilentSec
@@ -232,7 +232,6 @@ def test_dma_parser_subset_measurement_profile_maps_to_canonical(monkeypatch):
     assert dataset.metadata.get("measurement_profile") == "oscillatory_frequency_sweep"
 
 
-EXAMPLE_DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 
 @pytest.mark.parametrize(

@@ -3,7 +3,6 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-from matplotlib.legend import Legend
 import pandas as pd
 import pytest
 
@@ -227,10 +226,11 @@ def test_plot_dsc_omits_boundary_profiles_in_comparison_overlay():
     fig, ax = _close(plot_experiments([ds1, ds2], mode="overlay", kind="dsc"))
     # Only the "Heating" segment of each dataset is drawn; "start"/"end" boundaries are skipped
     assert len(ax.lines) == 2
-    # Two legends: segments (colour) and experiments (line style)
-    legends = [artist for artist in ax.artists if isinstance(artist, Legend)] + [ax.get_legend()]
-    texts = {legend.get_title().get_text(): [t.get_text() for t in legend.get_texts()] for legend in legends}
-    assert texts == {"Segment": ["Heating"], "Experiment": ["EXP_DSC_A", "EXP_DSC_B"]}
+    # One legend in two sections: segments (colour), then experiments (line style).
+    legend = ax.get_legend()
+    assert legend.get_title().get_text() == "Segment"
+    assert [t.get_text() for t in legend.get_texts()] == ["Heating", "", "Experiment", "EXP_DSC_A", "EXP_DSC_B"]
+    assert not ax.artists  # nothing outside the layout, so nothing is clipped from saved figures
 
     # Same segment colour for both experiments, different line styles
     assert ax.lines[0].get_color() == ax.lines[1].get_color()

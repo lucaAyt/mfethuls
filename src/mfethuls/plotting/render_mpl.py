@@ -6,7 +6,6 @@ from typing import Any, Tuple
 
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
-from matplotlib.legend import Legend
 from matplotlib.lines import Line2D
 from matplotlib.ticker import AutoMinorLocator
 
@@ -22,48 +21,54 @@ FACET_PANEL_HEIGHT_IN = 2.8
 # so they don't cover the data.
 _MAX_INSIDE_LEGEND_ENTRIES = 4
 
-# Vertical gap, in axes fractions, between hand-built legends stacked right of the axes.
-_LEGEND_GAP = 0.05
-
 # Outside legends and colour bars widen the figure until the axes are within this
 # many inches of their width without them.
 _WIDTH_TOLERANCE_IN = 0.05
 
 
-def _stack_legends(axis) -> None:
-    """Place each hand-built legend just below the previous one, right of the axes."""
+def _legend_handle(entry) -> Line2D:
+    if entry.marker:
+        return Line2D([], [], color=entry.color, linestyle="none", marker=entry.marker)
+    return Line2D([], [], color=entry.color, linestyle=entry.linestyle)
 
-    legends = [artist for artist in axis.artists if isinstance(artist, Legend)] + [axis.get_legend()]
-    if len(legends) < 2:
-        return
 
-    figure = axis.figure
-    figure.draw_without_rendering()
-    renderer = figure.canvas.get_renderer()
-    to_axes = axis.transAxes.inverted()
-    for previous, legend in zip(legends, legends[1:]):
-        bottom = to_axes.transform(previous.get_window_extent(renderer).p0)[1]
-        legend.set_bbox_to_anchor((1.02, bottom - _LEGEND_GAP), transform=axis.transAxes)
+def _draw_hand_built_legends(axis, panel: Panel) -> None:
+    """All hand-built legends as one legend right of the axes, one titled section each.
+
+    One Matplotlib legend, not one per section: constrained layout and tight bounding
+    boxes only account for the axes' own legend, so extra legends would be clipped
+    from the figure and from saved files.
+    """
+
+    handles, labels, headers = [], [], []
+    for idx, spec_legend in enumerate(panel.legends):
+        if idx > 0:
+            # A blank row, then the section title as a bold row without a handle.
+            handles += [Line2D([], [], linestyle="none")] * 2
+            labels += ["", spec_legend.title or ""]
+            headers.append(len(labels) - 1)
+        handles += [_legend_handle(entry) for entry in spec_legend.entries]
+        labels += [entry.label for entry in spec_legend.entries]
+
+    legend = axis.legend(
+        handles,
+        labels,
+        title=panel.legends[0].title,
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.0),
+        frameon=False,
+        fontsize="small",
+        alignment="left",
+    )
+    title_size = legend.get_title().get_fontsize()
+    texts = legend.get_texts()
+    for idx in headers:
+        texts[idx].set_fontsize(title_size)
 
 
 def _draw_legends(axis, panel: Panel, *, outside: bool) -> None:
     if panel.legends:
-        legend_kwargs = {"loc": "upper left", "frameon": False, "fontsize": "small"}
-        for idx, spec_legend in enumerate(panel.legends):
-            handles = [
-                Line2D([], [], color=entry.color, linestyle=entry.linestyle, label=entry.label)
-                for entry in spec_legend.entries
-            ]
-            legend = axis.legend(
-                handles=handles,
-                title=spec_legend.title,
-                bbox_to_anchor=(1.02, 1.0),
-                **legend_kwargs,
-            )
-            # A later axis.legend() call replaces the current one, so keep earlier ones as artists.
-            if idx < len(panel.legends) - 1:
-                axis.add_artist(legend)
-        _stack_legends(axis)
+        _draw_hand_built_legends(axis, panel)
         return
 
     labelled = sum(1 for trace in panel.traces if trace.label)
@@ -89,7 +94,7 @@ def draw_panel(axis, panel: Panel, *, legend_outside: bool = False, colorbar: bo
 
     for trace in panel.traces:
         if trace.mode == "markers":
-            kwargs: dict[str, Any] = {"linestyle": "none", "marker": "o", "markersize": 2}
+            kwargs: dict[str, Any] = {"linestyle": "none", "marker": trace.marker, "markersize": 2}
         else:
             kwargs = {"linestyle": trace.linestyle}
         if trace.label is not None:
@@ -131,11 +136,7 @@ def _add_colorbars_keeping_axes_width(fig, data_axes, panels) -> None:
     then grows until the axes are back to that width.
     """
 
-    legends = []
-    for axis in data_axes:
-        legends += [artist for artist in axis.artists if isinstance(artist, Legend)]
-        if axis.get_legend() is not None:
-            legends.append(axis.get_legend())
+    legends = [axis.get_legend() for axis in data_axes if axis.get_legend() is not None]
 
     if not legends and all(panel.colorbar is None for panel in panels):
         return

@@ -16,6 +16,7 @@ from mfethuls.factory import (
 )
 from mfethuls.experiments import Experiment, Registry
 from mfethuls.manifest import content_hash
+from mfethuls.parsers.ingestion import ParseError
 from mfethuls.parsers.registry import reads
 from mfethuls.schema_normalization import add_elapsed_time
 from mfethuls.settings import get_settings
@@ -190,12 +191,29 @@ def _parse_raw(exp, stores: Stores) -> Dataset:
         ) from exc
 
     files = _data_files(instrument, raw_dict.get(raw_filename, []), exp.name)
+    if not files:
+        raise ParseError(f"No {instrument.name} data files found for {exp.name!r} ({raw_filename}).")
     dataset = _parse_experiment(exp, {exp.experiment_id: files}, instrument)
+    check_parsed(dataset, instrument.name)
     if files:
         stores.manifest.record_content_hash(
             instrument_name=exp.instrument_name, raw_data_filename=raw_filename, content_hash=content_hash(files)
         )
     return dataset
+
+
+def check_parsed(dataset: Dataset, instrument_name: str) -> None:
+    """Raise :class:`ParseError` if the parsed data is empty or lacks the instrument's required columns.
+
+    Files of another instrument often parse into something; this catches it before it is stored.
+    """
+    report = dataset.metadata.get("schema_normalization") if isinstance(dataset.metadata, dict) else None
+    missing = (report or {}).get("missing_required_columns") or []
+    if dataset.data.empty:
+        raise ParseError(f"No data could be read as {instrument_name} data.")
+    if missing:
+        raise ParseError(f"These files do not look like {instrument_name} data: "
+                         f"missing {', '.join(missing)} after reading them.")
 
 
 def _resolve_stores(stores: Optional[Stores], use_storage: bool) -> Stores:

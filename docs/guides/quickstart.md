@@ -1,93 +1,67 @@
 # Quickstart
 
-Pick the path that matches how you're accessing mfethuls:
-
-- **[Path A](#path-a--team-member-with-tailscale-access)** — your team has a shared lab server and you want to browse data in the browser. No Python required.
-- **[Path B](#path-b--local-python-user)** — you want to run everything on your own machine.
+mfethuls runs on your own computer: a Python framework that reads, cleans and organises your instrument data, and an app (`mfethuls-app`) that is the quickest way to use it.
 
 ---
 
-## Path A — Team member with Tailscale access
+## 1. Install
 
-You need: Tailscale installed and connected to the lab tailnet. That's it.
+**Non-technical users (Windows, macOS, Linux):** follow [local setup](local_setup.md). You install [`uv`](https://docs.astral.sh/uv/), download the repository and double-click `launch.bat` (or run `bash launch.sh`); everything else is installed for you.
 
-1. **Open the dashboard** in your browser:
-   ```
-   http://100.x.x.x:8501
-   ```
-   (Replace `100.x.x.x` with the Tailscale IP your admin gave you.)
+**Python users:**
 
-2. **Sync data from OneDrive** — Ingest sidebar → click **"Sync from OneDrive"**. Wait for the spinner to finish. The experiment list populates automatically.
+```shell
+pip install "mfethuls[viz,notebook] @ git+https://github.com/lucaAyt/mfethuls.git"
+```
 
-3. **Select experiments** — tick the ones you want to ingest in the multiselect.
-
-4. **Ingest** — click **"Ingest experiments"**. A progress bar runs while the data is parsed. Completed experiments appear in the Datasets tab.
-
-5. **Browse and plot** — Datasets sidebar → select experiments → choose the axes or switch on the built-in instrument plot → set axis limits if needed → download as SVG (or interactive HTML).
-
-**No install, no Python, no config.**
+(`uv pip install …` works the same way. A release on PyPI is planned, which will make this `pip install "mfethuls[viz,notebook]"`.)
 
 ---
 
-## Path B — Local Python user
-
-You have raw data files and a registry CSV on your machine.
-
-### Install
+## 2. Start the app
 
 ```shell
-pip install "mfethuls[viz,notebook]"
+mfethuls-app
 ```
 
-Or with uv (faster):
+It opens at `http://localhost:8501` with a welcome page:
+
+- **Get started** asks for your **data folder** (one subfolder per instrument: `DSC/`, `TGA/`, …) and your **registry** (a CSV or Excel sheet with one row per experiment; the app can create an empty one, and the setup form offers an example to download). Both are checked as you type, and the page shows how to organise the data folder. They are saved in `~/.mfethuls/settings.json`, so notebooks use the same folders; change them later under **⚙ Settings**.
+- **Try the example** switches the app to a copy of the example DSC, TGA, FTIR and fluorescence data (in `~/mfethuls-example`). Your own folders are not touched; **Back to my data** switches back.
+- **Use it from Python** opens the tutorial notebook (see below).
+
+---
+
+## 3. Work through the checklist
+
+Once set up, a getting-started checklist shows what to do next; a compact version stays at the top of the sidebar (**Guide** shows the full list):
+
+1. **Register new data**: **Ingest** → **Review & register** proposes registry rows for raw files that are not in the registry yet. Rows are checked as you edit them, including a test read of the files with the chosen instrument.
+2. **Ingest**: tick experiments (or **Select all**) and press **Ingest**.
+3. **Select** experiments under **Datasets**, then **plot** them: the built-in plot per instrument, or a line/scatter plot with **Colour by** and **Style by**; set **Axis limits**; export a vector **SVG** or interactive **HTML**.
+4. **Keep it tidy**: after renaming or removing registry rows, **⚙ Settings** → **Clean up**.
+
+The 🏠 button at the top of the sidebar goes back to the welcome page.
+
+---
+
+## 4. Use it from Python
+
+The tutorial walks through loading, comparing and plotting on its own copy of the example data:
+
 ```shell
-uv pip install "mfethuls[viz,notebook]"
+mfethuls-tutorial
 ```
 
-### Configure paths
-
-Copy the example env file and fill in your paths:
-
-```shell
-cp env_example .env
-```
-
-Edit `.env`:
-```
-PATH_TO_DATA=/path/to/raw/instrument/data
-PATH_TO_REGISTRY=/path/to/experiments_template.csv
-PATH_TO_LOCAL_STORAGE=/path/to/parquet/output
-```
-
-`PATH_TO_DATA` should be the root folder containing instrument subfolders (`DSC/`, `TGA/`, etc.).
-
-`experiments_template.csv` in the repo root is a pre-filled starting point — open it in Excel and replace the placeholder rows with your experiments.
-
-**No data yet?** The repo includes example files (`examples/data/` — DSC, TGA, FTIR, fluorescence in-situ). Point `PATH_TO_DATA` at `examples/data/` and `PATH_TO_REGISTRY` at `examples/experiments_registry.csv` to run a complete ingest immediately.
-
-### Launch
-
-**Windows:** double-click `launch.bat`.
-
-**macOS / Linux:**
-```shell
-bash launch.sh
-```
-
-The Streamlit dashboard opens at `http://localhost:8501`. From there, the flow is the same as Path A (steps 3–5 above), minus the sync step.
-
-### Python API
-
-For notebooks, import directly:
+Or directly, with the folders chosen in the app:
 
 ```python
 import mfethuls
 
-cs = mfethuls.load_experiments(["CL_dsc_001", "CL_dsc_002"])
-df = cs.to_dataframe()   # tidy long-format DataFrame
+cs = mfethuls.load_experiments(["LB_dsc_001", "LB_dsc_002"])
+df = cs.to_dataframe()            # tidy long-format DataFrame
+fig, ax = mfethuls.plot_experiments(cs)
 ```
-
-For a complete notebook guide including DuckDB SQL queries and model-building patterns, see [docs/guides/data_analysis.md](data_analysis.md).
 
 ---
 
@@ -95,6 +69,7 @@ For a complete notebook guide including DuckDB SQL queries and model-building pa
 
 | If you want to… | Read |
 |---|---|
-| See the full workflow with a concrete example | [docs/guides/workflow.md](workflow.md) |
-| Understand the registry format (columns, instruments, profiles) | [docs/reference/registry.md](../reference/registry.md) |
-| Query data in notebooks | [docs/guides/data_analysis.md](data_analysis.md) |
+| See the full workflow with a concrete example | [workflow.md](workflow.md) |
+| Understand the registry format (columns, instruments, profiles) | [registry reference](../reference/registry.md) |
+| Query data in notebooks (Python API, DuckDB SQL, model building) | [data_analysis.md](data_analysis.md) |
+| Plot styles, exports and the plot API | [plotting.md](plotting.md) |

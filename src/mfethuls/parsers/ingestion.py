@@ -10,6 +10,10 @@ import pandas as pd
 SOURCE_FILE_COLUMN = "source_file"
 
 
+class ParseError(ValueError):
+    """Raw data files could not be read as the chosen instrument's data."""
+
+
 def collect_dataframe_from_paths(
     dict_paths,
     *,
@@ -22,15 +26,17 @@ def collect_dataframe_from_paths(
 ) -> pd.DataFrame:
     """Collect parser output DataFrame from nested file path mappings.
 
-    The function handles case-insensitive extension checks, optional passthrough
-    loading for parquet files, and per-path exception isolation so one malformed
-    file does not abort the whole parse batch.
+    The function handles case-insensitive extension checks and optional passthrough
+    loading for parquet files. Every file is tried; if any cannot be read, or holds no
+    data, :class:`ParseError` names them all, so wrong data is never stored silently
+    (e.g. files of another instrument).
 
     When more than one file contributes rows, each row gets a ``source_file``
     column with the stem of its file (unless the parser already set one).
     """
 
     frames: list[tuple[str, pd.DataFrame]] = []
+    failures: list[str] = []
     normalized_ext = file_extension.casefold()
     passthrough_exts = tuple(ext.casefold() for ext in passthrough_extensions)
 
@@ -47,7 +53,9 @@ def collect_dataframe_from_paths(
 
                 if parse_raw_path:
                     parsed = parse_raw(path)
-                    if not parsed.empty:
+                    if parsed.empty:
+                        failures.append(f"{Path(path).name}: no data found")
+                    else:
                         frames.append((Path(path).stem, parsed))
 
                 elif path_cf.endswith(passthrough_exts):
@@ -56,7 +64,11 @@ def collect_dataframe_from_paths(
                 else:
                     logger.debug("Skipping unsupported %s path: %s", parser_label, path)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Failed parsing %s path %s: %s", parser_label, path, exc)
+                failures.append(f"{Path(path).name}: {exc}")
+
+    if failures:
+        shown = "; ".join(failures[:5]) + (f"; and {len(failures) - 5} more" if len(failures) > 5 else "")
+        raise ParseError(f"The {parser_label} parser could not read {len(failures)} file(s): {shown}")
 
     if not frames:
         return pd.DataFrame()

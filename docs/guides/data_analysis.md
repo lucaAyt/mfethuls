@@ -53,15 +53,16 @@ list_datasets()[["experiment_name", "instrument_name", "sample_id", "registered_
 
 The Python API handles registry loading and data retrieval in one call.
 
-```python
-import os
-import mfethuls
+mfethuls uses the data folder and registry chosen in the app (**Get started** / **⚙ Settings**), or set in `.env`. To use other folders in a notebook, for this session only:
 
-# Point at the data
-os.environ["PATH_TO_DATA"] = "/path/to/data"
-os.environ["PATH_TO_REGISTRY"] = "/path/to/experiments_template.csv"
-os.environ["MFETHULS_DUCKDB_PATH"] = "/path/to/mfethuls.duckdb"
+```python
+import mfethuls
+from mfethuls.settings import use_folders
+
+use_folders(data_root="/path/to/data", registry_path="/path/to/registry.xlsx")
 ```
+
+(Setting `os.environ` does not work once folders are saved in the app: saved folders take precedence.)
 
 ### Load specific experiments
 
@@ -120,7 +121,9 @@ Use DuckDB when you need aggregations, joins across experiments, or want to buil
 ```python
 import duckdb
 
-conn = duckdb.connect("/path/to/mfethuls.duckdb", read_only=True)
+from mfethuls.storage import catalog_path
+
+conn = duckdb.connect(catalog_path(), read_only=True)
 ```
 
 ### Discover available datasets
