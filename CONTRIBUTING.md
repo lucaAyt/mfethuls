@@ -30,3 +30,19 @@ CI runs the same tests and lint on Ubuntu and Windows.
 ## Licence
 
 mfethuls is licensed under the [Apache License 2.0](LICENSE). Contributions are accepted under the same licence, together with the CLA.
+
+## Releasing (maintainers)
+
+Releases are published to PyPI by GitHub Actions (`.github/workflows/publish.yml`), using trusted publishing; no API token is stored.
+
+1. Set the new version in `pyproject.toml` (`version = "X.Y.Z"`) and merge into `master`.
+2. Optional dry run: **Actions → publish → Run workflow** builds, tests the built package and uploads it to TestPyPI.
+3. Tag the release on `master` and push the tag:
+
+   ```bash
+   git tag -a vX.Y.Z -m "mfethuls X.Y.Z"
+   git push origin vX.Y.Z
+   ```
+
+   The workflow checks that the tag matches the version, builds, tests the built package and publishes it to PyPI.
+4. Write the release notes on GitHub (**Releases → Draft a new release** from the tag).

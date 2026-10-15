@@ -137,7 +137,7 @@ Close and reopen your terminal after installing `uv`. If that doesn't help, re-r
 The Datasets list fills after an ingest. Open **Ingest** in the sidebar, select the experiments and press **Ingest**; the getting-started checklist shows what is left.
 
 **"Use it from Python" says marimo is not installed**
-The launcher installs it (`uv run --extra viz --extra notebook`). If you installed mfethuls yourself, add the notebook extra: `pip install "mfethuls[viz,notebook] @ git+https://github.com/lucaAyt/mfethuls.git"`.
+The launcher installs it (`uv run --extra viz --extra notebook`). If you installed mfethuls yourself, add the notebook extra: `pip install "mfethuls[viz,notebook]"`.
 
 **Windows: script blocked by security policy**
 Right-click `launch.bat`, choose **Properties**, and click **Unblock** at the bottom of the General tab.

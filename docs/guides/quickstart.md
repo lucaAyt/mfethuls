@@ -11,10 +11,10 @@ mfethuls runs on your own computer: a Python framework that reads, cleans and or
 **Python users:**
 
 ```shell
-pip install "mfethuls[viz,notebook] @ git+https://github.com/lucaAyt/mfethuls.git"
+pip install "mfethuls[viz,notebook]"
 ```
 
-(`uv pip install …` works the same way. A release on PyPI is planned, which will make this `pip install "mfethuls[viz,notebook]"`.)
+(`uv pip install …` works the same way.)
 
 ---
 

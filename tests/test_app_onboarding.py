@@ -111,6 +111,7 @@ def test_landing_opens_the_python_tutorial(new_user, monkeypatch):
     started = []
     monkeypatch.setattr(tutorials, "TUTORIAL_WORKSPACE", new_user / "mfethuls-tutorial")
     monkeypatch.setattr(tutorials.subprocess, "Popen", lambda args, cwd: started.append(args))
+    monkeypatch.setattr(tutorials.importlib.util, "find_spec", lambda name: object())  # as if marimo is installed
 
     at = _app()
     _click(at, "Use it from Python")

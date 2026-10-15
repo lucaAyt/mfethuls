@@ -1,12 +1,25 @@
 [project]
 name = "mfethuls"
-version = "0.3.0"
-description = "Composable framework for lab instrument data parsing, characterization and analysis for python people in labs."
+version = "0.3.1"
+description = "From scattered instrument files to analysis-ready data: a Python framework and app that read, clean and organise experimental lab data."
 authors = [{name = "Luca Bertossi", email = "lucabertossi@gmail.com"}]
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
+keywords = ["laboratory", "instrument data", "ETL", "data management", "DSC", "TGA", "FTIR", "UV-Vis", "rheology", "materials science"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
 dependencies = [
     "duckdb>=1.0.0",
     "filelock>=3.12",
@@ -58,6 +71,13 @@ mfethuls = ["py.typed"]
 [build-system]
 requires = ["setuptools>=77.0"]  # SPDX license expression and license-files (PEP 639)
 build-backend = "setuptools.build_meta"
+
+[project.urls]
+Homepage = "https://github.com/lucaAyt/mfethuls"
+Documentation = "https://github.com/lucaAyt/mfethuls/tree/master/docs"
+Repository = "https://github.com/lucaAyt/mfethuls"
+Issues = "https://github.com/lucaAyt/mfethuls/issues"
+Changelog = "https://github.com/lucaAyt/mfethuls/releases"
 
 [project.scripts]
 mfethuls = "mfethuls.main:main"
