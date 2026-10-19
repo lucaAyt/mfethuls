@@ -1,6 +1,6 @@
 # mfethuls
 
-From scattered instrument files to analysis-ready data. mfethuls is a Python framework that reads, cleans and organises experimental data: raw instrument exports are ingested against an experiment registry, normalised to a canonical schema and stored as traceable, queryable Parquet datasets. Use it from the app (`mfethuls-app`, no code needed), from notebooks, or with SQL. Experimentalists get consistent, comparable data and publication-ready figures; data scientists get harmonised data from every instrument to build features and models on.
+From scattered instrument files to analysis-ready data. mfethuls is a Python framework that reads, cleans and organises experimental data: raw instrument exports are ingested against an experiment registry, normalised to a canonical schema and stored as traceable, queryable Parquet datasets. Use it from the app (`mfethuls-app`, no code needed), the command line (`mfethuls`), notebooks, or SQL. Experimentalists get consistent, comparable data and publication-ready figures; data scientists get harmonised data from every instrument to build features and models on.
 
 ---
 
@@ -8,26 +8,38 @@ From scattered instrument files to analysis-ready data. mfethuls is a Python fra
 
 | Instrument | Models |
 |---|---|
-| DSC | Generic, Mettler Toledo, Perkin Elmer |
+| DSC | Generic, Mettler Toledo (current and older STARe export), Perkin Elmer |
 | TGA | Generic |
 | FTIR | Bruker |
 | UV-Vis | Shimadzu, Ocean Optics Flame (in-situ) |
+| Fluorescence | Ocean Optics Flame (in-situ) |
 | NMR | Bruker |
 | Rheometer | Anton Paar |
 | DMA | TA Q800 |
 | SEC | Agilent |
 | SAXS | Anton Paar |
 | MS | Bruker |
+| Tensile tester | ZwickRoell testXpert (Excel) |
 
-Each parser normalises raw exports to a [canonical column schema](https://github.com/lucaAyt/mfethuls/blob/master/docs/reference/schema.md) — same column names and units regardless of instrument model.
+Other instruments that export text or Excel files can be added from the app without code: see [adding an instrument](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/instruments.md).
+
+Each instrument's reader normalises raw exports to a [canonical column schema](https://github.com/lucaAyt/mfethuls/blob/master/docs/reference/schema.md) — same column names and units regardless of instrument model.
 
 ---
 
 ## Install
 
+**Not a Python user?** Follow [docs/guides/local_setup.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/local_setup.md): one small tool (`uv`) installs everything, Python included, and the app then starts with a double-click.
+
+**With Python** (3.11 or newer): install mfethuls in a [virtual environment](https://docs.python.org/3/tutorial/venv.html), so it and its dependencies stay separate from your other Python projects:
+
 ```shell
+python -m venv .venv
+.venv\Scripts\activate          # Windows; on macOS/Linux: source .venv/bin/activate
 pip install "mfethuls[viz,notebook]"
 ```
+
+Or with [uv](https://docs.astral.sh/uv/), which creates the environment for you: `uv tool install "mfethuls[viz]"` makes the `mfethuls` and `mfethuls-app` commands available everywhere.
 
 The latest development version: `pip install "mfethuls[viz,notebook] @ git+https://github.com/lucaAyt/mfethuls.git"`. The extras:
 
@@ -69,6 +81,16 @@ df = cs.to_dataframe()   # tidy long-format DataFrame
 cs = mfethuls.load_samples(["S001", "S002"])
 ```
 
+**Command line:** the same tasks as the app, for terminals and scripts. See [docs/guides/command_line.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/command_line.md).
+
+```shell
+mfethuls settings --data-folder D:\lab-data --registry D:\lab-data\experiments.xlsx
+mfethuls validate --check-files
+mfethuls ingest --all
+mfethuls plot exp_001 exp_002 -o comparison.svg
+mfethuls cleanup --apply
+```
+
 **Plotting:**
 
 ```python
@@ -89,22 +111,35 @@ A shared lab server (API, background ingest, Postgres, cloud storage, OneDrive s
 
 ## Data access for analysis
 
-Three stores, each with a distinct role — see [docs/guides/data_analysis.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/data_analysis.md) for the full guide including DuckDB SQL recipes and model-building patterns.
+Ingested data is stored as one Parquet file per experiment (with a `.metadata.json` sidecar), in the storage folder (`_storage` inside the data folder by default). A DuckDB catalog (`mfethuls.duckdb`) lists every dataset and has one SQL view per dataset over its Parquet file. Load data through the Python API, query it with SQL (`mfethuls.storage.catalog_path()` gives the catalog file), or read the Parquet files directly. See [docs/guides/data_analysis.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/data_analysis.md) for SQL recipes and model-building patterns.
 
 ---
 
 ## Docs
 
-| Document | Contents |
+### Guides
+
+How to do things, step by step.
+
+| Guide | Contents |
 |---|---|
 | [docs/guides/quickstart.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/quickstart.md) | Start here: install, the app's first run, and using mfethuls from Python |
-| [docs/guides/workflow.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/workflow.md) | End-to-end tutorial — registry → ingest → dashboard → notebook |
 | [docs/guides/local_setup.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/local_setup.md) | Non-technical user guide — `uv` + launcher |
+| [docs/guides/workflow.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/workflow.md) | End-to-end tutorial — registry → ingest → dashboard → notebook |
+| [docs/guides/command_line.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/command_line.md) | The `mfethuls` command: settings, ingest, clean up, export and plot from a terminal or script |
 | [docs/guides/data_analysis.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/data_analysis.md) | Notebook access — Python API, DuckDB SQL, model building |
 | [docs/guides/plotting.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/plotting.md) | Built-in plots, Matplotlib/Plotly backends, labels and units, dashboard plotting |
+| [docs/guides/instruments.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/instruments.md) | Adding an instrument from one of its files, without code — instrument definitions |
+
+### Reference
+
+What each format and part is, to look things up.
+
+| Reference | Contents |
+|---|---|
 | [docs/reference/registry.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/reference/registry.md) | Registry format, column reference, measurement profiles |
-| [docs/reference/architecture.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/reference/architecture.md) | System diagrams, ETL pipeline, storage design |
 | [docs/reference/schema.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/reference/schema.md) | Canonical column names, units, normalisation rules |
+| [docs/reference/architecture.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/reference/architecture.md) | System diagrams, ETL pipeline, storage design |
 
 ---
 

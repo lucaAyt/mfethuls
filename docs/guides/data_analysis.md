@@ -207,13 +207,14 @@ Each instrument produces a normalised set of columns after ingest. The canonical
 
 | Instrument | Key columns |
 |---|---|
-| DSC | `temperature_C`, `heat_flow_mW`, `time_s` |
-| TGA | `temperature_C`, `mass_mg`, `mass_pct`, `time_s` |
+| DSC | `temperature_C`, `heat_flow_mW` and/or `heat_flow_W_g`, `time_s`, `sample_mass_mg` (when the file states it) |
+| TGA | `temperature_C`, `mass_mg`, `mass_pct` (% of initial mass), `time_s` |
+| Tensile tester | `strain_mm` or `strain_pct`, `shear_stress_mpa` or `stress_mpa`, `sheet`, `test_date` |
 | FTIR | `wavenumber_cm_inv`, `absorbance_a_u`, `transmittance_pct` |
 | UV-Vis | `wavelength_nm`, `absorbance_a_u` |
 | Rheometer | `angular_frequency_rad_s`, `storage_modulus_pa`, `loss_modulus_pa`, `tan_delta` |
 | SEC | `retention_time_min`, `detector_response_a_u`, `detector_name` |
-| NMR | `chemical_shift_ppm`, `intensity_a_u` |
+| NMR | `chemical_shift_ppm`, `intensity_a_u`, `nucleus`, `solvent` (select one with `data[data["nucleus"] == "13C"]`) |
 | DMA | `temperature_C`, `frequency_hz`, `storage_modulus_mpa`, `loss_modulus_mpa`, `tan_delta` |
 
 All datasets also carry `experiment_name`, `experiment_id` (internal hex, system-assigned), `sample_id`, `run_id` from the registry.

@@ -8,8 +8,8 @@ The registry is a CSV or XLSX spreadsheet that serves as the primary interface b
 
 | Column | Required | Format | Description |
 |--------|----------|--------|-------------|
-| `name` | **yes** | free text, unique | Human-friendly label used as the lookup key throughout the system (e.g. `CL_dsc_001`). This is the primary identifier — it appears in the Streamlit browser, API responses, and DuckDB view names. Should be short and stable. |
-| `instrument_name` | **yes** | see table below | Instrument configuration name from `instrument_params.json`. Must match exactly. |
+| `name` | **yes** | free text, unique | Human-friendly label used as the lookup key throughout the system (e.g. `CL_dsc_001`). This is the primary identifier — it appears in the Streamlit browser, API responses, and DuckDB view names. Should be short and stable. Names must also differ as table names, which ignore case and turn characters other than letters, digits and `_` into `_`: `PEG-1` and `PEG_1`, or `LUB446` and `lub446`, cannot both be used. |
+| `instrument_name` | **yes** | see table below | Instrument name: a built-in instrument (table below) or one added by the lab ([adding an instrument](../guides/instruments.md)). Must match exactly. |
 | `raw_data_filename` | no | filename stem (no extension) | The filename stem of the raw data export (e.g. `chitosan_jan15` for `chitosan_jan15.txt`). If absent, defaults to `name`. Used to locate the file anywhere under the instrument folder. |
 | `sample_id` | no | `S` + 3–6 digits | Identifies the sample (e.g. `S001`). Included in the Parquet filename. |
 | `run_id` | no | `R` + 3–6 digits | Run number within a sample (e.g. `R001`). Defaults to `R001` when absent. |
@@ -36,20 +36,23 @@ These are optional and validated on load. Rows with malformed identifiers are sk
 
 | `instrument_name` | Instrument type | Folder in `PATH_TO_DATA` | Notes |
 |-------------------|----------------|--------------------------|-------|
-| `dsc` | DSC — prior model | `DSC/` | |
-| `dsc_perkin_elmer` | DSC — PerkinElmer | `DSC/` | Higher sensitivity |
-| `dsc_mettler_toledo` | DSC — Mettler Toledo | `DSC/` | |
-| `uv_vis` | UV-Vis — Shimadzu | `UV_Vis/` | |
-| `uv_insitu` | UV-Vis in-situ — Ocean Insight Flame | `UV_Vis/` | |
-| `fluorescence_insitu` | Fluorescence in-situ — Ocean Insight Flame | `Fluorescence/` | Same parser as `uv_insitu` |
-| `rheometer` | Rheometer — Anton Paar | `Rheology/` | `measurement_profile` recommended |
-| `tga` | TGA | `TGA/` | |
-| `nmr` | NMR — Bruker | `NMR/` | |
-| `ftir` | FTIR — Bruker | `FTIR/` | |
-| `sec` | SEC — Agilent | `SEC/` | |
-| `dma` | DMA — TA Q800 | `DMA/` | `measurement_profile` recommended |
-| `saxs` | SAXS — Anton Paar | `SAXS/` | |
-| `ms` | MS — Bruker | `MS/` | |
+| `dsc_mettler_toledo_v0` | DSC — Mettler Toledo, older STARe export (heat flow per gram; called `dsc` before 0.4.0) | `DSC/` | Instrument definition; heat flow as exported in `heat_flow_W_g` (W/g); the sample mass after the table gives `sample_mass_mg` and `heat_flow_mW` too |
+| `dsc_perkin_elmer` | DSC — PerkinElmer | `DSC/` | Higher sensitivity. Instrument definition; segment lines kept as a `segment` column; time read in minutes; `Sample Weight` gives `sample_mass_mg` and `heat_flow_W_g` |
+| `dsc_mettler_toledo_v1` | DSC — Mettler Toledo, current export (called `dsc_mettler_toledo` before 0.4.0) | `DSC/` | Instrument definition |
+| `uv_vis` | UV-Vis — Shimadzu | `UV_Vis/` | Instrument definition; `titrant` from the file name |
+| `uv_insitu` | UV-Vis in-situ — Ocean Insight Flame | `UV_Vis/` | Instrument definition; `timestamp` from the header date plus the milliseconds in the file name |
+| `fluorescence_insitu` | Fluorescence in-situ — Ocean Insight Flame | `Fluorescence/` | Instrument definition, same layout as `uv_insitu` |
+| `rheometer` | Rheometer — Anton Paar | `Rheology/` | Instrument definition; one table per interval, numbered in the `interval` column; `measurement_profile` recommended |
+| `tga` | TGA | `TGA/` | Instrument definition: `.txt` text export and `.csv` export; `mass_pct` is % of the initial mass |
+| `tensile_tester` | Universal testing machine — ZwickRoell testXpert | `tensile_tester/` | Instrument definition, Excel `.xlsx`: lap shear (`strain_mm`, `shear_stress_mpa`) and tensile tests (`strain_pct`, `stress_mpa`); one curve per test sheet; `test_date` from the Results sheet. A workbook with several samples is one experiment (see below) |
+| `nmr` | NMR — Bruker | `NMR/` | Code parser. One dataset folder per experiment, as TopSpin writes it (`NMR/EXP014/1/pdata/1/1r`); `raw_data_filename` = the dataset folder. Every processed spectrum (`<expno>/pdata/<procno>`) is read once, named in `source_file` (`1/pdata/1`), with its `nucleus` and `solvent` on every row; parameters and title in `file_text` |
+| `ftir` | FTIR — Bruker | `FTIR/` | Instrument definition |
+| `sec` | SEC — Agilent | `SEC/` | Instrument definition; `detector_name` (ri, uv, ls, viscometer) from the file name |
+| `dma` | DMA — TA Q800 | `DMA/` | Instrument definition (column names from the `SigN` lines; time read in minutes); `measurement_profile` recommended |
+| `saxs` | SAXS — Anton Paar | `SAXS/` | Instrument definition |
+| `ms` | MS — Bruker | `MS/` | Definition (`ms.json`); rows written twice left out; the `MS Peak List` stored in metadata (`tables.peak_list`) |
+
+Instruments added by the lab (**⚙ Settings → Instruments**) are listed there too; see [adding an instrument](../guides/instruments.md).
 
 ---
 
@@ -118,14 +121,18 @@ PATH_TO_DATA/
 ```
 
 **Rules:**
-- The filename stem must match `raw_data_filename` exactly (case-sensitive on Linux). Every file with that stem is collected, e.g. both `poly1.txt` and `poly1.csv`.
+- The filename stem must match `raw_data_filename`, ignoring case: `lub446` finds `LUB446.txt`. Every file with that stem is collected, e.g. both `poly1.txt` and `poly1.csv`. Two files whose names differ only in case (`LUB446.txt` and `lub446.txt`, possible on Linux) are an error: rename one.
 - If the same filename stem exists in more than one subfolder, ingest raises an error — rename one of the files to remove the ambiguity.
 - A name must match **either** a file **or** a folder, not both. If `poly1.txt` and a folder `poly1/` both exist in different places under the instrument folder, ingest raises an error — rename one of them. A file inside a folder of the same name (`LUB055/LUB055.txt`) is not a conflict: `LUB055` means the folder. To mean only that file (one run of a folder registered per file), give its file name with the extension: `LUB055.txt`.
 - Only files the instrument reads are data (its file extension, e.g. `.txt` for DSC, plus `.csv` for some DSC and TGA models). Other files next to the data, such as a plot saved in the experiment folder, are skipped at ingest with a warning naming them. Notes are better kept in the registry `description`.
-- An experiment may be renamed: change `name` in the registry and ingest again. The experiment keeps its internal ID, because the ID is tied to the instrument and `raw_data_filename`. Renaming the raw data file makes it a new experiment.
+- An experiment may be renamed: change `name` in the registry and ingest again. The experiment keeps its internal ID, because the ID is tied to the instrument and `raw_data_filename`.
+- A raw data file may be renamed too: rename it, update `raw_data_filename` and ingest (or run **Clean up**). mfethuls recognises the file by its contents and the experiment keeps its ID and stored data, as long as exactly one experiment that no row uses any more had those contents.
+- The internal ID is derived from the instrument and `raw_data_filename`, so every computer gives an experiment the same ID.
 - If no matching file is found at ingest time, the row produces a **warning** (not an error) — the experiment can be ingested later once the file is present.
 
-When an experiment has several files (a folder per experiment, or several files with the same stem), each data row gets a `source_file` column with the stem of the file it came from. A titration or time series therefore stays separable: the built-in plots draw one line per file.
+A folder per experiment is collected with its subfolders (Bruker NMR keeps the spectrum in `<expno>/pdata/<procno>/`); hidden folders are left out. When an experiment has several files (a folder per experiment, or several files with the same stem), each data row gets a `source_file` column with the stem of the file it came from. A titration or time series therefore stays separable: the built-in plots draw one line per file.
+
+**One raw file is one experiment.** A file holding several samples, such as an Excel workbook from a tensile tester with one sheet per specimen (`LUB640toLUB644.xlsx`), can't be split across registry rows, because `raw_data_filename` may appear only once per instrument. Register the workbook as **one** experiment: every test is kept as its own curve (named after its sheet, e.g. `LUB642_1`), and you filter curves by name to look at one sample. If each sample needs its own registry row (sample ID, description), export one file per sample from the instrument software. See [several samples in one workbook](../guides/instruments.md#several-samples-in-one-workbook-current-limits).
 
 ---
 
@@ -153,7 +160,7 @@ Instead of typing rows by hand, let the Streamlit app find raw data that is not 
 - **Save to registry** appends the rows to your CSV or XLSX registry. Existing rows, formatting and other sheets are kept, and the previous version is saved next to it as `<name>.bak.csv` / `<name>.bak.xlsx`. **Save & ingest** also ingests the new experiments. If the registry is open in Excel, close it and save again.
 - When the registry is kept elsewhere (for example on OneDrive for a team server), the app does not write it: download the rows (`.csv` or `.xlsx`) and add them to the registry there.
 
-Which instruments share a folder, and whether they record series, is set per instrument in `config/instrument_params.json` (`folder_name`, `data_layout`).
+Which instruments share a folder, and whether they record series, is set per instrument (`folder_name`, `data_layout`): in `config/instrument_params.json` for code parsers, in the instrument's definition otherwise (`config/instruments/*.json`, or the lab's own in `PATH_TO_DATA/.mfethuls/instruments/`).
 
 ---
 
@@ -167,14 +174,15 @@ In the app, open **⚙ Settings** (top of the sidebar) → **Clean up** and pres
 |---|---|---|
 | **Forget** | A row was removed from the registry | Its catalog entry, stored files and manifest entry are deleted. Re-adding the row later ingests it as a new experiment. |
 | **Refresh** | A row's `name`, `sample_id` or `run_id` changed, or it is missing from the catalog | It is ingested again: from the stored copy when the data is unchanged, otherwise from the raw file. It keeps its internal ID. |
-| **Relink** | A raw file was renamed and the row's `raw_data_filename` updated | Recognised by identical file contents, so the experiment keeps its ID and stored data instead of being forgotten and ingested anew. |
+| **Relink** | A raw file was renamed and the row's `raw_data_filename` updated | Recognised by identical file contents, so the experiment keeps its ID and stored data instead of being forgotten and ingested anew. Ingesting the row does the same, so the order (Clean up first or ingest first) does not matter. |
+| **Read again** | The reader changed since the data was read (an instrument definition was edited, or mfethuls' own parser changed version) | The raw data is read again with the current reader. |
 | **Remove files** | Stored files nothing uses (old versions after a sample or run change) | Deleted. |
 
 Check also lists rows that were never ingested, and experiments whose raw data is identical.
 
 **Safety:** rows that are in the registry but invalid (a typo in `sample_id`, say) still protect their data. A plan that would forget more than 10% of your experiments (at least 3) needs an extra confirmation, because a registry file that only partly synced from OneDrive looks just like deleted rows. **Apply** only does what **Check** showed: if anything changed in between, it asks you to check again.
 
-From the command line: `python -m mfethuls.reconcile` shows the plan, and `python -m mfethuls.reconcile --apply` carries it out (`--force` for a large forget).
+From the command line: `mfethuls cleanup` shows the plan, and `mfethuls cleanup --apply` carries it out (`--force` for a large forget).
 
 ---
 
@@ -184,9 +192,9 @@ A realistic multi-instrument registry for one research batch:
 
 ```
 name,instrument_name,sample_id,run_id,raw_data_filename,measurement_profile,description,batch,operator
-CL_dsc_001,dsc_mettler_toledo,S001,R001,,,PB-2024-01,Maria
-CL_dsc_002,dsc_mettler_toledo,S002,R001,,,PB-2024-01,Maria
-CL_dsc_002_repeat,dsc_mettler_toledo,S002,R002,dsc_s002_run2,,PB-2024-01,Maria
+CL_dsc_001,dsc_mettler_toledo_v1,S001,R001,,,PB-2024-01,Maria
+CL_dsc_002,dsc_mettler_toledo_v1,S002,R001,,,PB-2024-01,Maria
+CL_dsc_002_repeat,dsc_mettler_toledo_v1,S002,R002,dsc_s002_run2,,PB-2024-01,Maria
 CL_tga_001,tga,S001,R001,,,PB-2024-01,Carlos
 CL_rheometer_freq,rheometer,S003,R001,,oscillatory_frequency_sweep,,PB-2024-01,Priya
 CL_rheometer_flow,rheometer,S003,R001,,flow_curve,viscometry at 25C,PB-2024-01,Priya

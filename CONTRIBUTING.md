@@ -1,6 +1,6 @@
 # Contributing to mfethuls
 
-Thanks for helping! Bug reports, parsers for new instruments, fixes and documentation are all welcome.
+Thanks for helping! Bug reports, instrument definitions and parsers for new instruments, fixes and documentation are all welcome. Most text-file instruments need no code: see [docs/guides/instruments.md](docs/guides/instruments.md).
 
 ## Contributor License Agreement
 

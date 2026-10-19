@@ -63,7 +63,7 @@ data folder/           ← the folder you choose in the app
   DSC/                 ← Mettler Toledo, PerkinElmer, other
   TGA/                 ← TGA files
   FTIR/                ← Bruker FTIR files
-  NMR/                 ← Bruker NMR folders
+  NMR/                 ← Bruker NMR dataset folders, as TopSpin writes them (EXP014/1/pdata/1/...)
   SEC/                 ← Agilent SEC files
   Rheology/            ← Anton Paar rheometer files
   DMA/                 ← TA Q800 DMA files
@@ -125,6 +125,14 @@ Then launch as normal. `uv` detects changed dependencies and updates them automa
 In the app: **⚙ Settings** (top of the sidebar) → **Data folder and registry**, change the paths and press **Save**.
 
 Settings saved in the app take precedence over `PATH_TO_DATA`, `PATH_TO_REGISTRY` and `PATH_TO_LOCAL_STORAGE` in `.env` or the environment, which are only used for what the app has not saved.
+
+### A data folder shared through OneDrive (or another sync service)
+
+Several people can work from one data folder synced to each computer. Then:
+
+- **Keep the storage folder local on each computer.** Set the *Storage folder* (in **⚙ Settings → Data folder and registry**, or `PATH_TO_LOCAL_STORAGE`) to a folder that is not synced, e.g. `C:\Users\<you>\mfethuls-storage`. Without it, the catalog is stored in `_storage` inside the data folder, and a database file changed on two computers cannot be merged by the sync service. Each computer then keeps its own stored copy; ingesting rebuilds it from the shared raw data.
+- **The manifest is shared**, and that is safe: an experiment gets the same internal ID on every computer. If two computers ingest at the same time and OneDrive keeps both versions (`.mfethuls_manifest-<COMPUTER>.json`), mfethuls merges them the next time it writes the manifest and renames the copy to `...json.merged`.
+- **Lab instruments** (`.mfethuls/instruments/`) are shared with everyone using the folder, as intended.
 
 ---
 
