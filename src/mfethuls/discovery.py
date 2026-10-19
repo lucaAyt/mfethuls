@@ -32,6 +32,7 @@ import pandas as pd
 
 from .experiments import Registry, _normalize_optional_str
 from .manifest import MANIFEST_FILENAME
+from .naming import stem_key
 from .parsers.registry import data_extensions, get_parser
 from .registry_validator import _load_instrument_config
 from .settings import get_settings
@@ -101,7 +102,8 @@ def _walk_files(directory: str) -> List[str]:
 
 
 def _registered(registry: Registry, instrument_names: set[str]) -> set[str]:
-    """Raw data names already used by registry rows of these instruments (or rows without one).
+    """Raw data names (as :func:`~mfethuls.manifest.stem_key`) already used by registry rows of these
+    instruments (or rows without one).
 
     Rows skipped as invalid still count, so their data is not proposed again.
     """
@@ -116,7 +118,7 @@ def _registered(registry: Registry, instrument_names: set[str]) -> set[str]:
             continue
         stem = _normalize_optional_str(rec.get("raw_data_filename")) or _normalize_optional_str(rec.get("name"))
         if stem:
-            used.add(stem)
+            used.add(stem_key(stem))
     return used
 
 
@@ -126,7 +128,8 @@ def _by_stem(paths: Iterable[str], extensions: set[str], registered: set[str]) -
         name = os.path.basename(path)
         stem, ext = os.path.splitext(name)
         # Registered by stem, or by file name (a run named like its folder, see proposed_rows).
-        if _visible(name) and ext.casefold() in extensions and stem not in registered and name not in registered:
+        if (_visible(name) and ext.casefold() in extensions and stem_key(stem) not in registered
+                and stem_key(name) not in registered):
             stems[stem].append(path)
     return dict(sorted(stems.items()))
 
@@ -162,7 +165,7 @@ def _scan_group(folder_name: str, entries: list[dict], data_root: str, registere
 
     for child in sorted(os.listdir(folder)):
         path = os.path.join(folder, child)
-        if not os.path.isdir(path) or child.startswith(".") or child in registered:
+        if not os.path.isdir(path) or child.startswith(".") or stem_key(child) in registered:
             continue
         found = _walk_files(path)
         others = ignored(found)
@@ -196,16 +199,23 @@ def _scan_group(folder_name: str, entries: list[dict], data_root: str, registere
             )
         )
 
-    # A stem in more than one directory cannot be found unambiguously at ingest.
+    # A stem in more than one directory, or written in two cases, cannot be found unambiguously at ingest.
     directories: Dict[str, set[str]] = defaultdict(set)
+    spellings: Dict[str, set[str]] = defaultdict(set)
     for item in items:
         stems = {item.raw_data_filename: item.files} if item.layout == "file" else item.runs
         for stem, paths in stems.items():
-            directories[stem].update(os.path.dirname(p) for p in paths)
+            directories[stem_key(stem)].update(os.path.dirname(p) for p in paths)
+            spellings[stem_key(stem)].add(stem)
+
     def ambiguity(stem: str) -> Optional[str]:
-        if len(directories[stem]) < 2:
+        key = stem_key(stem)
+        if len(spellings[key]) > 1:
+            return (f"{' and '.join(map(repr, sorted(spellings[key])))} differ only in case; rename one so the "
+                    "experiment is unambiguous.")
+        if len(directories[key]) < 2:
             return None
-        places = ", ".join(os.path.relpath(d, data_root) for d in sorted(directories[stem]))
+        places = ", ".join(os.path.relpath(d, data_root) for d in sorted(directories[key]))
         return f"'{stem}' exists in several folders ({places}); rename one so the experiment is unambiguous."
 
     for item in items:
@@ -413,3 +423,80 @@ def filter_new_data(
         return True
 
     return sorted((item for item in items if matches(item)), key=lambda item: item.modified, reverse=True)
+
+
+@dataclass
+class UnclaimedFolder:
+    """A folder in the data folder that no instrument reads (``folder_name``)."""
+
+    folder_name: str
+    files: List[str]  # paths relative to the folder, up to ``limit``
+    file_count: int
+    # True when counting stopped at ``max_count``: the folder holds more files.
+    more: bool = False
+
+    @property
+    def count_label(self) -> str:
+        """``file_count`` for display: "1,000+" when counting stopped early."""
+        return f"{self.file_count:,}+" if self.more else f"{self.file_count:,}"
+
+
+def instrument_folders(data_root: Optional[str] = None) -> List[os.DirEntry]:
+    """Folders directly under ``data_root`` that can hold an instrument's data.
+
+    Hidden folders (``.mfethuls``) and mfethuls' own storage folder (``_storage``, or the
+    configured storage folder when it is inside the data folder) are left out.
+    """
+    data_root = data_root or get_settings().data_root
+    if not data_root or not os.path.isdir(data_root):
+        return []
+    storage = _storage_folders(data_root)
+    return sorted(
+        (entry for entry in os.scandir(data_root)
+         if entry.is_dir() and not entry.name.startswith(".") and os.path.normcase(os.path.abspath(entry.path)) not in storage),
+        key=lambda e: e.name.casefold(),
+    )
+
+
+def _storage_folders(data_root: str) -> set:
+    """Where mfethuls stores parsed data, as normalised absolute paths."""
+    settings = get_settings()
+    folders = [os.path.join(data_root, "_storage")]
+    if settings.local_storage:
+        folders.append(settings.local_storage)
+    return {os.path.normcase(os.path.abspath(folder)) for folder in folders}
+
+
+def unclaimed_folders(
+    data_root: Optional[str] = None, *, limit: int = 200, max_count: int = 1000
+) -> List[UnclaimedFolder]:
+    """Folders directly under ``data_root`` holding files but no known instrument's data.
+
+    These are what "Add instrument" offers: data of an instrument mfethuls cannot read yet.
+    Hidden folders (``.mfethuls``) and the storage folder are left out. Counting stops at
+    ``max_count`` files per folder, so a large archive folder is not walked to the end.
+    """
+    known = {str(entry["folder_name"]).casefold() for entry in _load_instrument_config()}
+    found = []
+    for entry in instrument_folders(data_root):
+        if entry.name.casefold() in known:
+            continue
+        files = []
+        count = 0
+        more = False
+        for root, dirs, names in os.walk(entry.path):
+            dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+            for name in sorted(names):
+                if name in _IGNORED_NAMES or name.startswith("."):
+                    continue
+                if count == max_count:
+                    more = True
+                    break
+                count += 1
+                if len(files) < limit:
+                    files.append(os.path.relpath(os.path.join(root, name), entry.path))
+            if more:
+                break
+        if count:
+            found.append(UnclaimedFolder(entry.name, files, count, more))
+    return found

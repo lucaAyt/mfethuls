@@ -24,7 +24,7 @@ def test_walkthrough_workspace_registers_only_some_examples(tmp_path):
 
 def test_existing_workspace_is_kept_and_fresh_starts_again(tmp_path):
     workspace = create_workspace(tmp_path / "example")
-    pd.DataFrame([{"name": "mine", "instrument_name": "dsc"}]).to_csv(workspace.registry_path, index=False)
+    pd.DataFrame([{"name": "mine", "instrument_name": "dsc_mettler_toledo_v0"}]).to_csv(workspace.registry_path, index=False)
 
     assert list(pd.read_csv(create_workspace(tmp_path / "example").registry_path)["name"]) == ["mine"]
     again = create_workspace(tmp_path / "example", fresh=True, register_all=True)
@@ -41,10 +41,9 @@ def test_fresh_never_deletes_a_folder_that_is_not_a_workspace(tmp_path):
 
 def test_workspace_settings_use_its_own_folders_and_catalog(tmp_path):
     workspace = create_workspace(tmp_path / "example")
-    settings = workspace.settings(Settings(data_root="/mine", duckdb_path="/mine/catalog.duckdb", storage_debug=True))
+    settings = workspace.settings(Settings(data_root="/mine", duckdb_path="/mine/catalog.duckdb"))
 
     assert settings.data_root == str(workspace.data_root)
     assert settings.registry_path == str(workspace.registry_path)
     assert settings.local_storage == str(workspace.storage)
     assert settings.duckdb_path is None  # the catalog goes in the workspace storage
-    assert settings.storage_debug is True

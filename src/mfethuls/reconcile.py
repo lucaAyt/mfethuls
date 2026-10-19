@@ -10,11 +10,14 @@ registry and lists what to do; :func:`apply` does it.
   entry of the same instrument has exactly the same content hash. The raw file was
   renamed: the entry is pointed at the new name and keeps its experiment ID and data.
 - **forget**: a manifest entry, catalog row or stored dataset that no registry row
-  produces any more. Its catalog rows, stored files, Postgres rows and manifest entry
-  are removed. Raw data is never touched.
+  produces any more. Its catalog rows, stored files, metadata sink records and
+  manifest entry are removed. Raw data is never touched.
 - **refresh**: an experiment whose catalog row disagrees with the registry (renamed,
   sample or run corrected) or is missing. It is ingested again, from the stored
   dataset when possible.
+- **reparse**: an experiment whose reader changed since it was ingested: its
+  instrument definition was edited, it is now read by a definition, or mfethuls'
+  code parser for it was improved (each has a version). Its raw data is read again.
 - **remove_files**: stored files no experiment uses any more (older versions left
   behind after a sample or run change, or files of unknown experiments).
 
@@ -26,13 +29,12 @@ forgotten because of a typo. A plan that would forget more than ``max_forget``
 experiments (by default 10% of them, at least 3) is blocked unless ``force`` is
 given, because a half-synced registry file looks just like deleted rows.
 
-Run it from the command line with ``python -m mfethuls.reconcile`` (add ``--apply``
-to carry out the plan); it uses the local stores (:func:`mfethuls.stores.open_local_stores`).
+From the command line: ``mfethuls cleanup`` shows the plan, ``mfethuls cleanup --apply``
+carries it out (on the local stores).
 """
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import logging
@@ -44,14 +46,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .experiments import Experiment, Registry, _normalize_optional_str
 from .manifest import content_hash
+from .naming import stem_key
 from .parsers.registry import reads
 from .storage.config import _dataset_basename
-from .stores import Stores, open_local_stores
+from .stores import Stores
 
 logger = logging.getLogger(__name__)
 
 # Order in which apply carries out actions.
-_ORDER = {"relink": 0, "forget": 1, "refresh": 2, "remove_files": 3}
+_ORDER = {"relink": 0, "forget": 1, "refresh": 2, "reparse": 3, "remove_files": 4}
+LABELS = {"relink": "Relink", "forget": "Forget", "refresh": "Refresh", "reparse": "Read again",
+          "remove_files": "Remove files"}
 # Fields a catalog row must share with the registry row to be up to date.
 _CATALOG_FIELDS = ("experiment_name", "raw_data_filename", "instrument_name", "sample_id", "run_id")
 
@@ -62,7 +67,7 @@ class ReconcileBlocked(RuntimeError):
 
 @dataclass
 class Action:
-    kind: str  # "relink", "forget", "refresh" or "remove_files"
+    kind: str  # "relink", "forget", "refresh", "reparse" or "remove_files"
     reason: str
     name: Optional[str] = None  # registry name, or the last known name of a forgotten experiment
     experiment_id: Optional[str] = None
@@ -125,7 +130,11 @@ class Plan:
 
 
 def _key(instrument_name: Any, raw_data_filename: Any) -> Tuple[Optional[str], Optional[str]]:
-    return _normalize_optional_str(instrument_name), _normalize_optional_str(raw_data_filename)
+    # Instrument names are case-insensitive ("SEC" in the registry is the instrument "sec"), as at ingest.
+    # Raw data names too: "lub446" in the registry is the experiment of LUB446.txt (manifest.stem_key).
+    instrument = _normalize_optional_str(instrument_name)
+    raw = _normalize_optional_str(raw_data_filename)
+    return (instrument.casefold() if instrument else instrument), (stem_key(raw) if raw else raw)
 
 
 def _registry_keys(registry: Registry) -> set:
@@ -133,8 +142,9 @@ def _registry_keys(registry: Registry) -> set:
 
     keys = set()
     for rec in registry.frame.to_dict(orient="records"):
-        instrument, raw = _key(rec.get("instrument_name"), rec.get("raw_data_filename"))
-        raw = raw or _normalize_optional_str(rec.get("name"))
+        # A row's raw data is its raw_data_filename, else its name; both go through _key (case-folded).
+        raw = _normalize_optional_str(rec.get("raw_data_filename")) or _normalize_optional_str(rec.get("name"))
+        instrument, raw = _key(rec.get("instrument_name"), raw)
         if instrument and raw:
             keys.add((instrument, raw))
     return keys
@@ -159,6 +169,26 @@ def raw_data_hash(exp: Experiment) -> Optional[str]:
     return content_hash(files) if files else None
 
 
+def renamed_entry(exp: Experiment, registry: Registry, entries: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The manifest entry ``exp``'s raw data was renamed from, or None.
+
+    The rule of the relink action, for one registry row whose raw data has no entry:
+    exactly one entry of the same instrument that no registry row produces any more has
+    the same content hash. The raw files are only hashed when such entries exist.
+    """
+    if not exp.instrument_name:
+        return None
+    registry_keys = _registry_keys(registry)
+    candidates = [e for e in entries if e.get("content_hash")
+                  and _key(e["instrument_name"], e["raw_data_filename"])[0] == exp.instrument_name
+                  and _key(e["instrument_name"], e["raw_data_filename"]) not in registry_keys]
+    if not candidates:
+        return None
+    raw_hash = raw_data_hash(exp)
+    matches = [e for e in candidates if e["content_hash"] == raw_hash] if raw_hash else []
+    return matches[0] if len(matches) == 1 else None
+
+
 def _stored_files(stores: Stores) -> Dict[Tuple[str, str], List[str]]:
     if stores.storage is None:
         return {}
@@ -178,6 +208,34 @@ def _stale_catalog_fields(row: Dict[str, Any], exp: Experiment) -> List[str]:
         "run_id": exp.run_id,
     }
     return [name for name in _CATALOG_FIELDS if _normalize_optional_str(row.get(name)) != _normalize_optional_str(wanted[name])]
+
+
+def _reader_change(rows: List[Dict[str, Any]], exp: Experiment) -> Optional[str]:
+    """Why the experiment's raw data must be read again: its reader changed since it was read."""
+    from .instruments.configured import definition_for, instrument_entries
+    from .parsers.registry import get_parser, reader_fingerprint
+
+    entry = next((e for e in instrument_entries() if e["name"] == str(exp.instrument_name or "").casefold()), None)
+    if entry is None:
+        return None
+    try:
+        current = reader_fingerprint(get_parser(entry["type"], entry["model"]))
+    except ValueError:
+        return None
+    stored = {_normalize_optional_str(row.get("reader_fingerprint")) for row in rows}
+    if stored == {current}:
+        return None
+    definition = definition_for(exp.instrument_name)
+    if definition is None:
+        before = ", ".join(sorted(value for value in stored if value)) or "an older reader"
+        return f"read by another version of mfethuls' {exp.instrument_name} reader ({before} -> {current})"
+    if stored <= {None} or any(value and "-v" in value for value in stored):
+        return f"{exp.instrument_name} is now read by an instrument definition"
+    definition_part, _, engine = current.partition("@")
+    if any(value and value.partition("@")[0] == definition_part for value in stored):
+        before = ", ".join(sorted(value.partition("@")[2] or "an older reader" for value in stored if value))
+        return f"read by another version of mfethuls' definition reader ({before} -> {engine})"
+    return f"the instrument definition of {exp.instrument_name} has changed"
 
 
 def plan(registry: Registry, stores: Stores, *, max_forget: Optional[int] = None) -> Plan:
@@ -256,7 +314,11 @@ def plan(registry: Registry, stores: Stores, *, max_forget: Optional[int] = None
         else:
             changed = sorted({f for row in rows for f in _stale_catalog_fields(row, exp)})
             reason = f"changed in the registry: {', '.join(changed)}" if changed else None
-        if reason:
+        reread = _reader_change(rows, exp) if rows else None
+        if reread:
+            actions.append(Action("reparse", reread, name=exp.name, experiment_id=experiment_id,
+                                  instrument_name=exp.instrument_name))
+        elif reason:
             actions.append(Action("refresh", reason, name=exp.name, experiment_id=experiment_id,
                                   instrument_name=exp.instrument_name))
 
@@ -303,7 +365,8 @@ def _forget(action: Action, stores: Stores) -> None:
 def _refresh(action: Action, registry: Registry, stores: Stores) -> None:
     from .config.loader import ingest_experiment_dataset
 
-    result = ingest_experiment_dataset(action.name, registry=registry, stores=stores)
+    result = ingest_experiment_dataset(action.name, registry=registry, stores=stores,
+                                       refresh=action.kind == "reparse")
     status = (result or {}).get("status")
     if status not in {"registered", "persisted"}:
         raise RuntimeError(f"ingest returned status {status!r}")
@@ -344,7 +407,7 @@ def apply(plan: Plan, registry: Registry, stores: Stores, *, force: bool = False
                 stores.manifest.relink(experiment_id=action.experiment_id, raw_data_filename=action.raw_data_filename)
             elif action.kind == "forget":
                 _forget(action, stores)
-            elif action.kind == "refresh":
+            elif action.kind in ("refresh", "reparse"):
                 try:
                     _refresh(action, registry, stores)
                 except Exception:
@@ -365,10 +428,10 @@ def apply(plan: Plan, registry: Registry, stores: Stores, *, force: bool = False
 
 
 def format_plan(plan: Plan) -> str:
-    """The plan as plain text, for the command line."""
+    """The plan as plain text, for ``mfethuls cleanup``."""
 
     lines = []
-    labels = {"relink": "Relink", "forget": "Forget", "refresh": "Refresh", "remove_files": "Remove files"}
+    labels = LABELS
     for action in plan.actions:
         who = action.name or action.experiment_id
         extra = f" ({len(action.paths)} files)" if action.paths else ""
@@ -382,38 +445,3 @@ def format_plan(plan: Plan) -> str:
     if plan.blocked:
         lines.append(f"BLOCKED: {plan.blocked_reason}")
     return "\n".join(lines)
-
-
-def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="python -m mfethuls.reconcile",
-        description="Compare what was ingested with the registry; with --apply, bring it in line.",
-    )
-    parser.add_argument("--registry", help="Registry file (default PATH_TO_REGISTRY).")
-    parser.add_argument("--apply", action="store_true", help="Carry out the plan (default: only show it).")
-    parser.add_argument("--force", action="store_true", help="Apply even if it would forget many experiments.")
-    args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.WARNING, format="%(levelname)s:%(name)s:%(message)s")
-
-    registry = Registry.load(args.registry)
-    with open_local_stores() as stores:
-        current = plan(registry, stores)
-        print(format_plan(current))
-        if not args.apply:
-            if current.actions:
-                print("\nNothing was changed. Run again with --apply to carry this out.")
-            return 0
-        try:
-            results = apply(current, registry, stores, force=args.force)
-        except ReconcileBlocked as exc:
-            print(f"\nNot applied: {exc}")
-            return 2
-    errors = [r for r in results if r["status"] == "error"]
-    print(f"\nApplied {len(results) - len(errors)} of {len(results)} actions.")
-    for result in errors:
-        print(f"  Failed {result['kind']} of {result['name'] or result['experiment_id']}: {result['error']}")
-    return 1 if errors else 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

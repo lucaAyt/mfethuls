@@ -17,14 +17,14 @@ class TestRegistryValidator:
 
     def test_validate_valid_experiment(self):
         validator = RegistryValidator()
-        exp = Experiment(name="test_dsc", instrument_name="dsc")
+        exp = Experiment(name="test_dsc", instrument_name="dsc_mettler_toledo_v0")
         is_valid, errors = validator.validate_experiment(exp)
         assert is_valid, f"Validation failed with errors: {errors}"
         assert len(errors) == 0
 
     def test_validate_valid_experiment_is_case_insensitive(self):
         validator = RegistryValidator()
-        exp = Experiment(name="test_dsc_upper", instrument_name="DSC")
+        exp = Experiment(name="test_dsc_upper", instrument_name="DSC_Mettler_Toledo_V1")
         is_valid, errors = validator.validate_experiment(exp)
         assert is_valid, f"Validation failed with errors: {errors}"
 
@@ -33,7 +33,7 @@ class TestRegistryValidator:
         exp = Experiment(name="test_unknown", instrument_name="nonexistent_instrument")
         is_valid, errors = validator.validate_experiment(exp)
         assert not is_valid
-        assert any("not found in instrument_params.json" in err for err in errors)
+        assert any("is not a known instrument" in err for err in errors)
 
     def test_validate_rheometer_with_valid_profile(self):
         validator = RegistryValidator()
@@ -85,6 +85,12 @@ class TestRegistryValidator:
         is_valid, errors = validator.validate_experiment(exp)
         assert is_valid
 
+    def test_a_renamed_instrument_names_its_new_name(self):
+        exp = Experiment(name="old_dsc", instrument_name="dsc", sample_id="S001")
+        is_valid, errors = RegistryValidator().validate_experiment(exp)
+        assert not is_valid
+        assert "renamed to 'dsc_mettler_toledo_v0'" in errors[0]
+
     def test_parse_experiment_fails_with_invalid_instrument(self):
         exp = Experiment(name="test_invalid", instrument_name="nonexistent_instrument")
 
@@ -131,8 +137,8 @@ class TestTableValidations:
 
     def test_duplicate_name_is_reported_on_each_row_using_it(self):
         errors = _errors_by_row([
-            {"name": "exp_b", "instrument_name": "dsc"},
-            {"name": "exp_a", "instrument_name": "dsc", "raw_data_filename": "run1"},
+            {"name": "exp_b", "instrument_name": "dsc_mettler_toledo_v0"},
+            {"name": "exp_a", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "run1"},
             {"name": "exp_a", "instrument_name": "tga", "raw_data_filename": "run2"},
         ])
         assert errors[0] == []
@@ -140,21 +146,21 @@ class TestTableValidations:
 
     def test_unique_names_pass(self):
         errors = _errors_by_row([
-            {"name": "exp_a", "instrument_name": "dsc"},
-            {"name": "exp_b", "instrument_name": "dsc"},
+            {"name": "exp_a", "instrument_name": "dsc_mettler_toledo_v0"},
+            {"name": "exp_b", "instrument_name": "dsc_mettler_toledo_v0"},
         ])
         assert errors == [[], []]
 
     def test_duplicate_raw_data_per_instrument_is_reported_on_both_rows(self):
         errors = _errors_by_row([
-            {"name": "exp_a", "instrument_name": "dsc", "raw_data_filename": "run_jan15"},
-            {"name": "exp_b", "instrument_name": "DSC", "raw_data_filename": "run_jan15"},
+            {"name": "exp_a", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "run_jan15"},
+            {"name": "exp_b", "instrument_name": "DSC_Mettler_Toledo_V0", "raw_data_filename": "run_jan15"},
         ])
-        assert all(any("'run_jan15' is used by more than one dsc row" in m for m in row) for row in errors)
+        assert all(any("'run_jan15' is used by more than one dsc_mettler_toledo_v0 row" in m for m in row) for row in errors)
 
     def test_same_file_for_different_instruments_is_ok(self):
         errors = _errors_by_row([
-            {"name": "exp_a", "instrument_name": "dsc", "raw_data_filename": "run_jan15"},
+            {"name": "exp_a", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "run_jan15"},
             {"name": "exp_b", "instrument_name": "tga", "raw_data_filename": "run_jan15"},
         ])
         assert errors == [[], []]
@@ -162,20 +168,20 @@ class TestTableValidations:
     def test_rows_without_raw_data_filename_use_their_name(self):
         # Two rows without raw_data_filename are not duplicates of each other ...
         assert _errors_by_row([
-            {"name": "exp_a", "instrument_name": "dsc", "raw_data_filename": None},
-            {"name": "exp_b", "instrument_name": "dsc", "raw_data_filename": None},
+            {"name": "exp_a", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": None},
+            {"name": "exp_b", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": None},
         ]) == [[], []]
         # ... but a name that equals another row's file is.
         errors = _errors_by_row([
-            {"name": "poly1", "instrument_name": "dsc", "raw_data_filename": None},
-            {"name": "exp_b", "instrument_name": "dsc", "raw_data_filename": "poly1"},
+            {"name": "poly1", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": None},
+            {"name": "exp_b", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "poly1"},
         ])
-        assert all(any("'poly1' is used by more than one dsc row" in m for m in row) for row in errors)
+        assert all(any("'poly1' is used by more than one dsc_mettler_toledo_v0 row" in m for m in row) for row in errors)
 
     def test_unsafe_file_name_is_reported_on_its_row(self):
         errors = _errors_by_row([
-            {"name": "exp_a", "instrument_name": "dsc", "raw_data_filename": "chitosan_jan15"},
-            {"name": "exp_b", "instrument_name": "dsc", "raw_data_filename": "my file (1)"},
+            {"name": "exp_a", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "chitosan_jan15"},
+            {"name": "exp_b", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "my file (1)"},
         ])
         assert errors[0] == []
         assert any("'my file (1)' contains characters" in m for m in errors[1])

@@ -102,7 +102,7 @@ def test_renamed_experiment_is_refreshed_and_keeps_its_id(lab):
 def test_sample_change_refreshes_and_removes_the_old_file(lab):
     _, storage_root, frame = lab
     _, manifest = _state()
-    experiment_dir = storage_root / "dsc_mettler_toledo" / manifest["LB_dsc_002"]["experiment_id"]
+    experiment_dir = storage_root / "dsc_mettler_toledo_v1" / manifest["LB_dsc_002"]["experiment_id"]
     old_files = sorted(p.name for p in experiment_dir.iterdir())
     changed = frame.copy()
     changed.loc[changed["name"] == "LB_dsc_002", "sample_id"] = "S009"
@@ -135,7 +135,7 @@ def test_renamed_raw_file_is_relinked_and_keeps_its_id_and_data(lab):
     assert manifest["LB_dsc_002"]["experiment_id"] == old["experiment_id"]
     assert manifest["LB_dsc_002"]["raw_data_filename"] == "polymer2"
     assert catalog["LB_dsc_002"]["raw_data_filename"] == "polymer2"
-    assert (storage_root / "dsc_mettler_toledo" / old["experiment_id"]).exists()
+    assert (storage_root / "dsc_mettler_toledo_v1" / old["experiment_id"]).exists()
     assert _plan(moved).actions == []
 
 
@@ -170,7 +170,7 @@ def test_new_rows_are_pending_and_unknown_stored_data_is_removed(lab):
     stray = storage_root / "dsc" / "0123456789ab"
     stray.mkdir(parents=True)
     (stray / "0123456789ab_S001_R001.parquet").write_bytes(b"")
-    extra = pd.concat([frame, pd.DataFrame([{"name": "LB_dsc_009", "instrument_name": "dsc_mettler_toledo",
+    extra = pd.concat([frame, pd.DataFrame([{"name": "LB_dsc_009", "instrument_name": "dsc_mettler_toledo_v1",
                                              "sample_id": "S009", "raw_data_filename": "poly9"}])])
 
     current = _plan(extra)
@@ -184,7 +184,7 @@ def test_new_rows_are_pending_and_unknown_stored_data_is_removed(lab):
 def test_identical_raw_data_is_reported_as_duplicates(lab):
     data_root, _, frame = lab
     shutil.copyfile(data_root / "DSC" / "poly1.txt", data_root / "DSC" / "poly9.txt")  # raw data: copy bytes, not text
-    extra = pd.concat([frame, pd.DataFrame([{"name": "LB_dsc_009", "instrument_name": "dsc_mettler_toledo",
+    extra = pd.concat([frame, pd.DataFrame([{"name": "LB_dsc_009", "instrument_name": "dsc_mettler_toledo_v1",
                                              "sample_id": "S009", "raw_data_filename": "poly9"}])])
     registry = Registry.from_frame(extra)
     with open_stores() as stores:
@@ -193,18 +193,10 @@ def test_identical_raw_data_is_reported_as_duplicates(lab):
     assert _plan(extra).duplicates == [["LB_dsc_001", "LB_dsc_009"]]
 
 
-def test_command_line_shows_the_plan_and_applies_only_when_asked(lab, tmp_path, capsys):
-    from mfethuls.reconcile import main
-
+def test_instrument_names_in_capitals_are_the_same_instrument(lab):
+    """A registry writing 'TGA' or 'DSC_Mettler_Toledo' ingests fine; Clean up must not forget that data."""
     _, _, frame = lab
-    registry_path = tmp_path / "registry.csv"
-    frame[frame["name"] != "LB_tga_002"].to_csv(registry_path, index=False)
-
-    assert main(["--registry", str(registry_path)]) == 0
-    out = capsys.readouterr().out
-    assert "Forget" in out and "LB_tga_002" in out and "--apply" in out
-    assert "LB_tga_002" in _state()[1]  # only shown, not changed
-
-    assert main(["--registry", str(registry_path), "--apply"]) == 0
-    assert "Applied 1 of 1" in capsys.readouterr().out
-    assert "LB_tga_002" not in _state()[1]
+    shouted = frame.assign(instrument_name=frame["instrument_name"].str.upper())
+    current = _plan(shouted)
+    assert [a for a in current.actions if a.kind == "forget"] == []
+    assert not current.blocked

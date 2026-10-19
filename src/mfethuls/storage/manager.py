@@ -77,7 +77,7 @@ class StorageManager:
         parquet_path, meta_path = self.data_backend.save_dataset(experiment, dataset)
         locations = self.data_backend.locations(experiment)
 
-        # One record feeds both the DuckDB catalog and the Postgres mirror.
+        # One record feeds both the DuckDB catalog and the metadata sink.
         record = CatalogRecord.build(
             experiment,
             parquet_path,

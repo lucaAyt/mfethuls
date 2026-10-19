@@ -43,9 +43,9 @@ def _sidecar(storage_path: Path) -> None:
         json.dumps(
             {
                 "experiment_id": "abc123",
-                "instrument_name": "dsc_mettler_toledo",
+                "instrument_name": "dsc_mettler_toledo_v1",
                 "instrument_type": "dsc",
-                "instrument_model": "mettler_toledo",
+                "instrument_model": "mettler_toledo_v1",
                 "sample_id": "S001",
                 "run_id": "R001",
                 "measurement_profile": None,
@@ -56,18 +56,19 @@ def _sidecar(storage_path: Path) -> None:
 
 
 def test_record_from_experiment_and_dataset_metadata():
-    exp = Experiment(name="LB_dsc_001", instrument_name="dsc_mettler_toledo", experiment_id="abc123",
+    exp = Experiment(name="LB_dsc_001", instrument_name="dsc_mettler_toledo_v1", experiment_id="abc123",
                      raw_data_filename="poly1", sample_id="S001", run_id="R001")
 
     record = CatalogRecord.build(exp, "/store/abc123_S001_R001.parquet",
-                                 dataset_metadata={"instrument_type": "dsc", "instrument_model": "mettler_toledo"},
+                                 dataset_metadata={"instrument_type": "dsc", "instrument_model": "mettler_toledo_v1"},
                                  rows=42)
 
     assert record.table_name == "LB_dsc_001_S001_R001"
     assert record.fields() == {
         "experiment_id": "abc123", "experiment_name": "LB_dsc_001", "raw_data_filename": "poly1",
-        "instrument_name": "dsc_mettler_toledo", "instrument_type": "dsc", "instrument_model": "mettler_toledo",
+        "instrument_name": "dsc_mettler_toledo_v1", "instrument_type": "dsc", "instrument_model": "mettler_toledo_v1",
         "sample_id": "S001", "run_id": "R001", "measurement_profile": None, "rows": 42,
+        "reader_fingerprint": None,
     }
 
 
@@ -98,7 +99,7 @@ def test_old_database_is_migrated_and_backfilled_from_sidecars(tmp_path, read_on
         (row,) = backend.list_registered()
 
     assert row["experiment_name"] == "LB_dsc_001"
-    assert (row["experiment_id"], row["instrument_type"], row["instrument_model"]) == ("abc123", "dsc", "mettler_toledo")
+    assert (row["experiment_id"], row["instrument_type"], row["instrument_model"]) == ("abc123", "dsc", "mettler_toledo_v1")
     assert (row["sample_id"], row["run_id"], row["rows"]) == ("S001", "R001", 5)
 
 
@@ -131,6 +132,6 @@ def test_ingest_registers_full_catalog_row(tmp_path, monkeypatch):
     assert result["catalog_record"].table_name == row["table_name"]
     assert row["experiment_name"] == "LB_dsc_001"
     assert row["experiment_id"]
-    assert (row["instrument_name"], row["instrument_type"]) == ("dsc_mettler_toledo", "dsc")
+    assert (row["instrument_name"], row["instrument_type"]) == ("dsc_mettler_toledo_v1", "dsc")
     assert (row["sample_id"], row["run_id"]) == ("S001", "R001")
     assert row["rows"] == view_rows > 0
