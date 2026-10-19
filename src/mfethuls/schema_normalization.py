@@ -1,3 +1,5 @@
+"""Check a parsed table against its instrument type's schema (config/schemas): required columns, dtypes, profiles."""
+
 from __future__ import annotations
 
 import json
@@ -74,17 +76,29 @@ def _merge_dtypes(*layers: Dict[str, Any]) -> Dict[str, str]:
     return merged
 
 
-def _merge_required_columns(*layers: Dict[str, Any]) -> List[str]:
-    required: List[str] = []
+def _merge_required_columns(*layers: Dict[str, Any]) -> List[Any]:
+    """Required columns of all layers; an entry that is a list means "one of these"."""
+    required: List[Any] = []
     for layer in layers:
         cols = layer.get("required_columns", []) if isinstance(layer, dict) else []
         if not isinstance(cols, list):
             continue
         for col in cols:
-            col_str = str(col)
-            if col_str not in required:
-                required.append(col_str)
+            entry = [str(c) for c in col] if isinstance(col, list) else str(col)
+            if entry not in required:
+                required.append(entry)
     return required
+
+
+def missing_required(required: List[Any], columns) -> List[str]:
+    """The required entries ``columns`` lacks; a "one of" entry is shown as ``a or b``."""
+    present = set(columns)
+    missing: List[str] = []
+    for entry in required:
+        options = entry if isinstance(entry, list) else [entry]
+        if not present.intersection(options):
+            missing.append(" or ".join(options))
+    return missing
 
 
 def _safe_layer(container: Dict[str, Any], key: Optional[str]) -> Dict[str, Any]:
@@ -123,26 +137,12 @@ def apply_dataframe_schema(
             "warnings": [f"No schema config found for instrument_type={instrument_type!r}"],
         }
 
-    instrument_model_map = schema.get("models", {})
-    if not isinstance(instrument_model_map, dict):
-        instrument_model_map = {}
-    instrument_model_schema = _safe_layer(instrument_model_map, instrument_model)
-
+    # How a model's files are read (column names, units) is its instrument definition's job;
+    # the schema is the type's contract: required columns, dtypes and measurement profiles.
     global_profile_map = schema.get("profiles", {}) if isinstance(schema.get("profiles", {}), dict) else {}
-    model_profile_map = (
-        instrument_model_schema.get("profiles", {})
-        if isinstance(instrument_model_schema.get("profiles", {}), dict)
-        else {}
-    )
     profile_schema = _safe_layer(global_profile_map, measurement_profile)
-    model_profile_schema = _safe_layer(model_profile_map, measurement_profile)
 
-    layers = [
-        schema,
-        instrument_model_schema,
-        profile_schema,
-        model_profile_schema,
-    ]
+    layers = [schema, profile_schema]
 
     aliases = _merge_aliases(*layers)
     required_columns = _merge_required_columns(*layers)
@@ -153,7 +153,7 @@ def apply_dataframe_schema(
     warnings: List[str] = []
 
     if measurement_profile:
-        known_profiles = set(global_profile_map) | set(model_profile_map)
+        known_profiles = set(global_profile_map)
         if known_profiles and measurement_profile not in known_profiles:
             warnings.append(
                 f"Unknown measurement_profile={measurement_profile!r} for instrument_type={instrument_type!r}, "
@@ -190,7 +190,7 @@ def apply_dataframe_schema(
 
     normalized = add_elapsed_time(normalized)
 
-    missing_required_columns = [col for col in required_columns if col not in normalized.columns]
+    missing_required_columns = missing_required(required_columns, normalized.columns)
 
     report = {
         "schema_applied": True,
@@ -200,8 +200,7 @@ def apply_dataframe_schema(
         "warnings": warnings,
         "measurement_profile": measurement_profile,
         "layers_applied": {
-            "model": bool(instrument_model_schema),
-            "profile": bool(profile_schema or model_profile_schema),
+            "profile": bool(profile_schema),
         },
     }
     return normalized, report

@@ -1,2 +1,2 @@
 name,instrument_name,raw_data_filename,sample_id,run_id,status
-api_smoke_test,dsc_mettler_toledo,api_smoke_test,S001,R001,to_analyse
+api_smoke_test,dsc_mettler_toledo_v1,api_smoke_test,S001,R001,to_analyse

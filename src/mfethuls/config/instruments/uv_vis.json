@@ -1,0 +1,17 @@
+{
+  "spec_version": 1,
+  "name": "uv_vis",
+  "type": "uv_vis",
+  "model": "Shimadzu",
+  "folder_name": "UV_Vis",
+  "data_layout": "file",
+  "description": "Shimadzu UVProbe text export: a title line, quoted column names, tab-separated numbers. In titration series the file name ends with the step after the last underscore (..._005, ..._110hcl); without leading zeros it fills the titrant column.",
+  "file": { "extensions": [".txt"], "encoding": "auto", "delimiter": "tab", "header": { "skip_lines": 1, "rows": 1 },
+            "data_ends": "first_non_numeric_row" },
+  "columns": [
+    { "source": ["Wavelength nm.", "Wavelength (nm)", "Wavelength [nm]", "nm"], "quantity": "wavelength", "unit": "nm" },
+    { "source": ["Abs.", "Absorbance", "Absorbance [a.u.]"], "quantity": "absorbance", "unit": "a.u." }
+  ],
+  "name_from": "folder",
+  "from_file_name": [ { "column": "titrant", "pattern": "_0*([^_]+)$" } ]
+}

@@ -1,0 +1,45 @@
+{
+  "spec_version": 1,
+  "name": "dsc_perkin_elmer",
+  "type": "dsc",
+  "model": "perkin_elmer",
+  "folder_name": "DSC",
+  "data_layout": "file",
+  "description": "PerkinElmer Pyris text export: method and sample header, a two-line header (names, then their second words), segment lines (e.g. '2) DSC 8500 Temperature Scan') inside the table. Time is in minutes. Or a CSV export.",
+  "formats": [
+    {
+      "label": "Pyris text export",
+      "file": {
+        "extensions": [".txt"],
+        "encoding": "auto",
+        "delimiter": "tab",
+        "header": { "starts_at": "Unsubtracted", "rows": 2 },
+        "data_ends": "first_non_numeric_row",
+        "segment_lines": true
+      },
+      "columns": [
+        { "source": "Time", "quantity": "time", "unit": "min" },
+        { "source": ["Program Temperature", "Temperature [°C]", "Temperature [C]"], "quantity": "temperature", "unit": "°C" },
+        { "source": ["Sample Temperature", "Sample Temperature [°C]", "Sample Temperature [C]"], "quantity": "sample_temperature", "unit": "°C" },
+        { "source": ["Unsubtracted Heat Flow", "Heat Flow [mW]", "Value [mW]", "HeatFlow [mW]"], "quantity": "heat_flow", "unit": "mW" }
+      ]
+    },
+    {
+      "label": "CSV export",
+      "file": { "extensions": [".csv"], "encoding": "auto", "delimiter": "comma" },
+      "columns": [
+        { "source": ["Time [s]"], "quantity": "time", "unit": "s" },
+        { "source": ["Program Temperature", "Temperature [°C]", "Temperature [C]"], "quantity": "temperature", "unit": "°C" },
+        { "source": ["Sample Temperature [°C]", "Sample Temperature [C]"], "quantity": "sample_temperature", "unit": "°C" },
+        { "source": ["Unsubtracted Heat Flow", "Heat Flow [mW]", "Value [mW]", "HeatFlow [mW]"], "quantity": "heat_flow", "unit": "mW" }
+      ]
+    }
+  ],
+  "from_header": [
+    { "column": "sample_mass_mg", "pattern": "^Sample Weight:\\s*([0-9.]+)\\s*mg", "type": "number" }
+  ],
+  "derived": [
+    { "op": "divide", "column": "heat_flow_mW", "by": "sample_mass_mg", "into": "heat_flow_W_g" }
+  ],
+  "characterizer": { "type": "dsc_profiling", "sensitivity": 0.01 }
+}

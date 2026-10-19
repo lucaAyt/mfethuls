@@ -1,0 +1,30 @@
+{
+  "spec_version": 1,
+  "name": "dsc_mettler_toledo_v0",
+  "type": "dsc",
+  "model": "mettler_toledo_v0",
+  "folder_name": "DSC",
+  "data_layout": "file",
+  "description": "Mettler Toledo DSC, older STARe export (replaced by dsc_mettler_toledo_v1), heat flow per gram: a title block, an 'Index' header line, a line of units (none under Index), the table, then the sample, method and adjustment text.",
+  "file": {
+    "extensions": [".txt"],
+    "encoding": "auto",
+    "delimiter": "whitespace",
+    "header": { "starts_at": "Index", "rows": 2 },
+    "data_ends": "first_non_numeric_row"
+  },
+  "columns": [
+    { "source": ["Tr [°C]", "Tr [C]", "Temperature [°C]", "Temperature [C]"], "quantity": "temperature", "unit": "°C" },
+    { "source": ["Ts [°C]", "Ts [C]"], "quantity": "sample_temperature", "unit": "°C" },
+    { "source": ["t [s]", "Time [s]"], "quantity": "time", "unit": "s" },
+    { "source": ["Value [Wg^-1]", "Value [W/g]"], "quantity": "specific_heat_flow", "unit": "W/g" },
+    { "source": ["Value [mW]", "Heat Flow [mW]", "HeatFlow [mW]"], "quantity": "heat_flow", "unit": "mW" }
+  ],
+  "from_header": [
+    { "column": "sample_mass_mg", "pattern": "^\\s*\\S.*,\\s*([0-9.]+)\\s*mg\\s*$", "type": "number" }
+  ],
+  "derived": [
+    { "op": "multiply", "column": "heat_flow_W_g", "by": "sample_mass_mg", "into": "heat_flow_mW" }
+  ],
+  "characterizer": { "type": "dsc_profiling", "sensitivity": 0.1 }
+}

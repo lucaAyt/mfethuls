@@ -1,3 +1,5 @@
+"""The :class:`Dataset`: a parsed experiment's table and its metadata."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

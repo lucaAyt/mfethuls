@@ -12,49 +12,5 @@
     "mass_loss_pct": "float64",
     "d_mass_dt_pct_min": "float64",
     "heat_flow_mW": "float64"
-  },
-  "models": {
-    "tgaX": {
-      "aliases": {
-        "temperature_C": [
-          "Temperature [\u00b0C]",
-          "Temperature [C]",
-          "Tr [\u00b0C]",
-          "Tr [C]",
-          "Temperature",
-          "Tr [mg]",
-          "Program Temperature"
-        ],
-        "mass_pct": [
-          "Mass [%]",
-          "Weight [%]",
-          "Weight Percent [%]"
-        ],
-        "time_s": [
-          "Time [s]",
-          "t [s]",
-          "t [°C]"
-        ],
-        "mass_mg": [
-          "Mass [mg]",
-          "Weight [mg]",
-          "Weight [mg]",
-          "Unsubtracted Weight"
-        ],
-        "mass_loss_pct": [
-          "Mass Loss [%]",
-          "Weight Loss [%]"
-        ],
-        "d_mass_dt_pct_min": [
-          "DTG [%/min]",
-          "dW/dt",
-          "Derivative Weight [%/min]"
-        ],
-        "heat_flow_mW": [
-          "Heat Flow [mW]",
-          "HF [mW]"
-        ]
-      }
-    }
   }
 }

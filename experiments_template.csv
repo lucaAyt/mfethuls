@@ -1,5 +1,5 @@
 name,instrument_name,sample_id,run_id,raw_data_filename,measurement_profile,description,operator
-MY_DSC_001,dsc_mettler_toledo,S001,R001,,,First DSC run,
+MY_DSC_001,dsc_mettler_toledo_v1,S001,R001,,,First DSC run,
 MY_DSC_002,dsc_perkin_elmer,S001,R001,,,PerkinElmer DSC run,
 MY_TGA_001,tga,S001,R001,,,TGA run,
 MY_FTIR_001,ftir,S001,R001,,,FTIR spectrum,
@@ -13,3 +13,4 @@ MY_UVVIS_INSITU_001,uv_insitu,S001,R001,,,UV-Vis in-situ kinetics (folder-per-ex
 MY_FLUORESCENCE_001,fluorescence_insitu,S001,R001,,,Fluorescence in-situ kinetics (folder-per-experiment — set raw_data_filename to folder name),
 MY_SAXS_001,saxs,S001,R001,,,SAXS pattern,
 MY_MS_001,ms,S001,R001,,,Mass spectrum,
+MY_TENSILE_001,tensile_tester,S001,R001,,,Tensile or lap-shear test (Excel workbook; several tests in one workbook are one experiment),
