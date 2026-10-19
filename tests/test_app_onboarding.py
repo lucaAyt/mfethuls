@@ -135,7 +135,7 @@ def test_progress_on_own_data_is_kept_across_restarts(new_user):
     shutil.copyfile(examples.DATA_DIR / "DSC" / "poly1.txt", lab / "DSC" / "poly1.txt")
     (lab / "DSC" / "old_run.txt").write_text("never registered", encoding="utf-8")  # leftovers don't block step 2
     registry = new_user / "experiments.csv"
-    pd.DataFrame([{"name": "LB_dsc_001", "instrument_name": "dsc_mettler_toledo", "sample_id": "S001",
+    pd.DataFrame([{"name": "LB_dsc_001", "instrument_name": "dsc_mettler_toledo_v1", "sample_id": "S001",
                    "raw_data_filename": "poly1"}]).to_csv(registry, index=False)
     save_settings(data_root=str(lab), registry_path=str(registry))
 
@@ -150,3 +150,22 @@ def test_progress_on_own_data_is_kept_across_restarts(new_user):
     restarted = _app()  # a new session: nothing in memory
     assert _tracker(restarted) == ["Getting started: 5 of 6"]
     assert _steps_done(restarted) == "5 of 6 steps done"
+
+
+def test_a_backend_serving_other_people_offers_nothing_that_changes_the_host(new_user):
+    """edits_settings / offers_example False (the team server): no folder form, example or tutorial."""
+    script = (
+        "from mfethuls.app.backend import LocalBackend\n"
+        "from mfethuls.app.page import run\n"
+        "class Shared(LocalBackend):\n"
+        "    edits_settings = False\n"
+        "    offers_example = False\n"
+        "run(Shared())\n"
+    )
+    at = AppTest.from_string(script, default_timeout=120).run()
+    assert not at.exception, at.exception
+    labels = {b.label for b in at.button}
+    assert "Try the example" not in labels and "Use it from Python" not in labels
+    _click(at, "Get started")
+    assert not any(t.label == "Data folder" for t in at.text_input)
+    assert any("set by whoever runs this app" in c.value for c in at.caption)
