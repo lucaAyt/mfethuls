@@ -7,21 +7,5 @@
   "dtypes": {
     "mz": "float64",
     "intensity_a_u": "float64"
-  },
-  "models": {
-    "bruker": {
-      "aliases": {
-        "mz": [
-          "m/z",
-          "mz",
-          "Mass/Charge"
-        ],
-        "intensity_a_u": [
-          "intensity",
-          "Intensity",
-          "signal"
-        ]
-      }
-    }
   }
 }

@@ -10,54 +10,6 @@
     "loss_modulus_mpa": "float64",
     "tan_delta": "float64"
   },
-  "models": {
-    "ta_q800": {
-      "aliases": {
-        "time_s": [
-          "Time [s]",
-          "Time",
-          "t [s]",
-          "time (min)"
-        ],
-        "temperature_C": [
-          "Temperature [\u00b0C]",
-          "Temperature",
-          "Temp [\u00b0C]",
-          "Temp",
-          "temperature (â°c)"
-        ],
-        "frequency_hz": [
-          "Frequency [Hz]",
-          "frequency (hz)",
-          "Frequency",
-          "f [Hz]",
-          "Hz"
-        ],
-        "strain_pct": [
-          "Strain [%]",
-          "gamma [%]",
-          "\u03b3 [%]"
-        ],
-        "storage_modulus_mpa": [
-          "Storage Modulus [MPa]",
-          "G' [MPa]",
-          "Storage Modulus",
-          "storage modulus (mpa)"
-        ],
-        "loss_modulus_mpa": [
-          "Loss Modulus [MPa]",
-          "G'' [MPa]",
-          "Loss Modulus",
-          "loss modulus (mpa)"
-        ],
-        "tan_delta": [
-          "tan \u03b4",
-          "tan delta",
-          "Tan Delta"
-        ]
-      }
-    }
-  },
   "profiles": {
     "oscillatory_temperature_sweep": {
       "required_columns": [

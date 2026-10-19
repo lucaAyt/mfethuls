@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 from typing import Any, Callable, Dict, List, Optional, Iterator
 
 import pandas as pd
 
 from .catalog import CATALOG_FIELDS, CatalogRecord
+from ..naming import view_name
 from .config import _get_duckdb_path
 from contextlib import contextmanager
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Fields copied from a dataset's .metadata.json sidecar when backfilling older catalog rows.
 _SIDECAR_FIELDS = (
     "experiment_id", "experiment_name", "instrument_name", "instrument_type",
-    "instrument_model", "sample_id", "run_id", "measurement_profile",
+    "instrument_model", "sample_id", "run_id", "measurement_profile", "reader_fingerprint",
 )
 
 try:
@@ -172,8 +172,7 @@ class DuckDBQueryBackend:
 
     @staticmethod
     def _sanitize_table_name(name: str) -> str:
-        safe = re.sub(r"[^A-Za-z0-9_]+", "_", name).strip("_")
-        return safe or "dataset"
+        return view_name(name)
 
     def register_parquet(
         self,
@@ -283,8 +282,8 @@ class DuckDBQueryBackend:
 def duckdb_session(*, db_path: Optional[str] = None, read_only: bool = True) -> Iterator["DuckDBQueryBackend"]:
     """Open a short-lived DuckDBQueryBackend and close it on exit.
 
-    Mirrors the pattern used by the API layer but stays inside the storage package
-    to avoid cross-package imports.
+    Opens read-only by default: the app reads the catalog this way, so it does not
+    hold DuckDB's single-writer lock while an ingest may need it.
     """
     backend = DuckDBQueryBackend(db_path=db_path, read_only=read_only)
     try:

@@ -98,3 +98,10 @@ def test_colour_and_style_legend_fits_in_the_saved_figure():
     assert legend_right <= fig.get_figwidth() + 1e-6
     assert fig.get_tightbbox(renderer).x1 >= legend_right - 1e-6
     plt.close(fig)
+
+
+def test_csv_export_keeps_every_column_with_the_experiment_first():
+    from mfethuls.app.page import _csv_bytes
+
+    data = pd.DataFrame({"x": [1.0, 2.0], "name": ["a", "b"], "_experiment": ["E1", "E1"]})
+    assert _csv_bytes(data).decode("utf-8").splitlines() == ["experiment,x,name", "E1,1.0,a", "E1,2.0,b"]

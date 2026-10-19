@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "required_columns": [
+    ["strain_mm", "strain_pct"],
+    ["stress_mpa", "shear_stress_mpa"]
+  ],
+  "dtypes": {
+    "strain_mm": "float64",
+    "strain_pct": "float64",
+    "stress_mpa": "float64",
+    "shear_stress_mpa": "float64",
+    "force_N": "float64"
+  }
+}

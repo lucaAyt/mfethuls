@@ -30,8 +30,6 @@ def examples_config(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH_TO_DATA", str(data_root))
     monkeypatch.setenv("PATH_TO_REGISTRY", str(registry_path))
     monkeypatch.setenv("PATH_TO_LOCAL_STORAGE", str(local_storage))
-    monkeypatch.setenv("MFETHULS_MODE", "local")
-    monkeypatch.setenv("MFETHULS_DISABLE_STORAGE", "0")
     monkeypatch.delenv("MFETHULS_DUCKDB_PATH", raising=False)
     return data_root, registry_path, local_storage
 

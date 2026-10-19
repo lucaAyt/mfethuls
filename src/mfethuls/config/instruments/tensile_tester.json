@@ -1,0 +1,39 @@
+{
+  "spec_version": 1,
+  "name": "tensile_tester",
+  "type": "tensile",
+  "model": "ZwickRoell_testXpert",
+  "folder_name": "tensile_tester",
+  "data_layout": "file",
+  "description": "Universal testing machine, Excel export (testXpert style): sheets Parameters, Results, Statistics, then one sheet per test named after the specimen (sample name, three header rows: name, column names, units). Lap shear (EN 2243-1): Strain in mm, Shearing stress in MPa. Tensile (ASTM D 638): Elongation in %, 'Standard force' in kPa (a stress). A workbook may hold several tests; each is a curve named after its sheet. The test date comes from the specimen's row in the Results sheet.",
+  "name_from": "sheet",
+  "formats": [
+    {
+      "label": "lap shear",
+      "file": {
+        "extensions": [".xlsx"],
+        "contains": "Shearing stress",
+        "header": { "starts_at": "Strain", "rows": 2 }
+      },
+      "columns": [
+        { "source": "Strain mm", "quantity": "strain", "unit": "mm" },
+        { "source": "Shearing stress MPa", "quantity": "shear_stress", "unit": "MPa" }
+      ]
+    },
+    {
+      "label": "tensile",
+      "file": {
+        "extensions": [".xlsx"],
+        "contains": "Elongation",
+        "header": { "starts_at": "Elongation", "rows": 2 }
+      },
+      "columns": [
+        { "source": "Elongation %", "quantity": "strain", "unit": "%" },
+        { "source": "Standard force kPa", "quantity": "stress", "unit": "kPa" }
+      ]
+    }
+  ],
+  "from_header": [
+    { "column": "test_date", "pattern": "^{sheet}\\t([0-9]+\\.[0-9]+)\\t", "type": "datetime", "timezone": "Europe/Zurich" }
+  ]
+}

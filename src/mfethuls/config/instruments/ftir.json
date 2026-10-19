@@ -1,0 +1,21 @@
+{
+  "spec_version": 1,
+  "name": "ftir",
+  "type": "ftir",
+  "model": "bruker",
+  "folder_name": "FTIR",
+  "data_layout": "file",
+  "description": "Bruker FTIR spectra exported as CSV: one line of text, then 'cm-1,%T' (or absorbance).",
+  "file": {
+    "extensions": [".csv"],
+    "encoding": "utf-8",
+    "delimiter": "comma",
+    "decimal": ".",
+    "header": { "skip_lines": 1, "rows": 1 }
+  },
+  "columns": [
+    { "source": ["cm-1", "Wavenumber [cm-1]", "Wavenumber [cm^-1]", "Wavenumber"], "quantity": "wavenumber", "unit": "cm-1" },
+    { "source": ["%T", "Transmittance [%]", "Transmission [%]"], "quantity": "transmittance", "unit": "%" },
+    { "source": ["Absorbance", "Absorbance [a.u.]", "A"], "quantity": "absorbance", "unit": "a.u." }
+  ]
+}

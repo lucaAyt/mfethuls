@@ -79,8 +79,21 @@ class LocalBackend:
 
     # The "Register new data" dialog may append rows to the registry file.
     writes_registry = True
-    # The getting-started page offers to switch to a copy of the bundled examples.
+    # The getting-started page offers to switch to a copy of the bundled examples and to
+    # open the Python tutorial (it starts marimo on the computer running the app).
     offers_example = True
+    # ⚙ Settings may change the data folder, registry and storage folder saved on the
+    # computer running the app (and lists folders there while they are typed).
+    # A backend serving other people sets this and offers_example to False.
+    edits_settings = True
+
+    @property
+    def writes_definitions(self) -> bool:
+        """Whether "Add instrument" may save definitions in the data folder (else: offered as downloads).
+
+        Where the registry is kept elsewhere (OneDrive), so is the data folder's ``.mfethuls``.
+        """
+        return self.writes_registry
 
     # -- sidebar ------------------------------------------------------------
 

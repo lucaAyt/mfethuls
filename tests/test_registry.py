@@ -21,10 +21,10 @@ def test_from_frame_keeps_valid_rows_and_records_problems():
     registry = Registry.from_frame(
         pd.DataFrame(
             [
-                {"name": "ok", "instrument_name": "dsc", "sample_id": "S001"},
+                {"name": "ok", "instrument_name": "dsc_mettler_toledo_v0", "sample_id": "S001"},
                 {"name": "bad_instrument", "instrument_name": "no_such_instrument"},
                 {"name": "placeholder", "instrument_name": None},
-                {"name": None, "instrument_name": "dsc"},
+                {"name": None, "instrument_name": "dsc_mettler_toledo_v0"},
             ]
         )
     )
@@ -50,9 +50,9 @@ def test_for_samples_keeps_registry_order():
     registry = Registry.from_frame(
         pd.DataFrame(
             [
-                {"name": "a", "instrument_name": "dsc", "sample_id": "S001"},
-                {"name": "b", "instrument_name": "dsc", "sample_id": "S002"},
-                {"name": "c", "instrument_name": "dsc", "sample_id": "S001"},
+                {"name": "a", "instrument_name": "dsc_mettler_toledo_v0", "sample_id": "S001"},
+                {"name": "b", "instrument_name": "dsc_mettler_toledo_v0", "sample_id": "S002"},
+                {"name": "c", "instrument_name": "dsc_mettler_toledo_v0", "sample_id": "S001"},
             ]
         )
     )
@@ -73,7 +73,7 @@ def test_apply_registry_fields_overrides_stored_snapshot():
         data=pd.DataFrame({"temperature_C": [1.0, 2.0], "sample_id": ["S001", "S001"], "run_id": ["R001", "R001"]}),
         metadata={"sample_id": "S001", "description": "old text", "operator": "AB", "schema_version": "1.1"},
     )
-    exp = Experiment(name="exp", instrument_name="dsc", experiment_id="abc", sample_id="S002", run_id="R003",
+    exp = Experiment(name="exp", instrument_name="dsc_mettler_toledo_v0", experiment_id="abc", sample_id="S002", run_id="R003",
                      metadata={"description": "new text", "operator": "CD"})
 
     apply_registry_fields(stored, exp)

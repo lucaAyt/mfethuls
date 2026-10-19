@@ -24,8 +24,6 @@ from typing import Any, Dict, Iterator, Mapping, Optional
 
 from ._files import replace_with_retry
 
-_TRUE = {"1", "true", "yes"}
-
 # MFETHULS_TEST_* variables that use_test_env() swaps in for the runtime paths.
 TEST_PATH_VARIABLES = {
     "data_root": "MFETHULS_TEST_DATA_ROOT",
@@ -39,18 +37,12 @@ SAVED_FIELDS = ("data_root", "registry_path", "local_storage")
 SETTINGS_FILE_VARIABLE = "MFETHULS_SETTINGS_FILE"
 
 
-def _flag(value: Optional[str]) -> bool:
-    return (value or "").strip().lower() in _TRUE
-
-
 @dataclass(frozen=True)
 class Settings:
     data_root: Optional[str] = None
     registry_path: Optional[str] = None
     local_storage: Optional[str] = None
     duckdb_path: Optional[str] = None
-    disable_storage: bool = False
-    storage_debug: bool = False
 
     @classmethod
     def from_env(cls, environ: Optional[Mapping[str, str]] = None) -> "Settings":
@@ -64,8 +56,6 @@ class Settings:
             registry_path=get("PATH_TO_REGISTRY") or None,
             local_storage=get("PATH_TO_LOCAL_STORAGE") or None,
             duckdb_path=get("MFETHULS_DUCKDB_PATH") or None,
-            disable_storage=_flag(get("MFETHULS_DISABLE_STORAGE")),
-            storage_debug=bool(get("MFETHULS_STORAGE_DEBUG")),
         )
 
     def with_test_paths(self, environ: Optional[Mapping[str, str]] = None) -> tuple["Settings", list[str]]:

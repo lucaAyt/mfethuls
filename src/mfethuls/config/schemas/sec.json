@@ -9,28 +9,5 @@
     "retention_time_min": "float64",
     "detector_response_a_u": "float64",
     "detector_name": "string"
-  },
-  "models": {
-    "agilent": {
-      "aliases": {
-        "retention_time_min": [
-          "time (min)",
-          "Time (min)",
-          "Retention Time [min]"
-        ],
-        "detector_response_a_u": [
-          "value",
-          "Value",
-          "Detector Response",
-          "Signal"
-        ],
-        "detector_name": [
-          "detector",
-          "Detector",
-          "detector_name",
-          "Detector Name"
-        ]
-      }
-    }
   }
 }

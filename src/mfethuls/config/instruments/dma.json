@@ -1,0 +1,25 @@
+{
+  "spec_version": 1,
+  "name": "dma",
+  "type": "dma",
+  "model": "ta_q800",
+  "folder_name": "DMA",
+  "data_layout": "file",
+  "description": "TA Instruments Q800 text export: a header with the method and sample, the signals listed one per line ('Sig1<tab>Time (min)', ...), then the tab-separated table after 'StartOfData'.",
+  "file": {
+    "extensions": [".txt"],
+    "encoding": "auto",
+    "delimiter": "tab",
+    "header": { "starts_at": "StartOfData", "skip_lines": 1, "rows": 0, "names_from": "^Sig\\d+\\t(.+)$" },
+    "data_ends": "first_non_numeric_row"
+  },
+  "columns": [
+    { "source": "Time (min)", "quantity": "time", "unit": "min" },
+    { "source": ["Temperature (°C)", "Temperature (C)", "Temperature [°C]", "Temp [°C]"], "quantity": "temperature", "unit": "°C" },
+    { "source": ["Storage Modulus (MPa)", "Storage Modulus [MPa]", "E' [MPa]", "G' [MPa]"], "quantity": "storage_modulus", "unit": "MPa" },
+    { "source": ["Loss Modulus (MPa)", "Loss Modulus [MPa]", "E'' [MPa]", "G'' [MPa]"], "quantity": "loss_modulus", "unit": "MPa" },
+    { "source": ["Tan Delta", "tan δ"], "quantity": "tan_delta" },
+    { "source": ["Frequency (Hz)", "Frequency [Hz]", "f [Hz]"], "quantity": "frequency", "unit": "Hz" },
+    { "source": ["Strain (%)", "Strain [%]", "gamma [%]", "γ [%]"], "quantity": "strain", "unit": "%" }
+  ]
+}

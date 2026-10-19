@@ -1,10 +1,11 @@
+"""Ingest and load experiments: find the raw files, parse, store, register, and read back from storage."""
+
 import os
-import json
 import logging
 
 from collections import namedtuple
 from dataclasses import replace
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 from mfethuls.dataset import Dataset
 from mfethuls.factory import (
@@ -15,24 +16,25 @@ from mfethuls.factory import (
     parse_experiment as _parse_experiment,
 )
 from mfethuls.experiments import Experiment, Registry
+from mfethuls.instruments.configured import instrument_entries
 from mfethuls.manifest import content_hash
 from mfethuls.parsers.ingestion import ParseError
 from mfethuls.parsers.registry import reads
 from mfethuls.schema_normalization import add_elapsed_time
-from mfethuls.settings import get_settings
 from mfethuls.storage.catalog import CatalogRecord
 from mfethuls.storage.manager import StorageManager
 from mfethuls.stores import Stores, local_stores
 
 logger = logging.getLogger(__name__)
 
-# Load config
-instrument_config_path = os.path.join(os.path.dirname(__file__), "instrument_params.json")
-with open(instrument_config_path, encoding="utf8") as f:
-    config = json.load(f)
-    for entry in config:
+
+def instrument_config():
+    """Every instrument entry (listed and defined), names normalised to lower case."""
+    entries = instrument_entries()
+    for entry in entries:
         if isinstance(entry.get("name"), str):
             entry["name"] = entry["name"].strip().casefold()
+    return entries
 
 InstrumentBundle = namedtuple("InstrumentBundle", ["instruments", "data_paths"])
 
@@ -56,12 +58,13 @@ def prepare_instruments(filters=None, experiments=None):
         instruments[name] = instr
 
         # Load data paths assoc. with instrument and experiments specified
-        dict_data_paths[name] = instrument_data_path_constructor(data_path, experiments)
+        dict_data_paths[name] = instrument_data_path_constructor(data_path, experiments or [])
 
     return InstrumentBundle(instruments, dict_data_paths)
 
 
 def filter_entries(filters):
+    config = instrument_config()
     if not filters:
         return config
     return [
@@ -98,8 +101,18 @@ def apply_registry_fields(dataset: Dataset, exp: Experiment) -> Dataset:
     return dataset
 
 
-def _resolve_experiment(experiment_name: str, registry: Optional[Registry]) -> Experiment:
-    return (registry if registry is not None else Registry.load()).get(experiment_name)
+def _without_instrument(exp: Experiment, experiment_name: str) -> bool:
+    """True (and a warning) for a registry row without an instrument: it cannot be read yet."""
+    if exp.instrument_name is not None:
+        return False
+    logger.warning("Skipping experiment %r: it is registered but has no associated instrument data yet.",
+                   experiment_name)
+    return True
+
+
+def _resolve_experiment(experiment_name: str, registry: Optional[Registry]) -> Tuple[Experiment, Registry]:
+    registry = registry if registry is not None else Registry.load()
+    return registry.get(experiment_name), registry
 
 
 def get_cached_dataset(exp, cache_backend, experiment_name: str) -> Optional[Dataset]:
@@ -107,12 +120,8 @@ def get_cached_dataset(exp, cache_backend, experiment_name: str) -> Optional[Dat
         return None
 
     if cache_backend.dataset_in_storage(exp):
-        if get_settings().storage_debug:
-            logger.warning(
-                "Loading Dataset for experiment %s from storage cache in %s",
-                experiment_name,
-                cache_backend.__class__.__name__,
-            )
+        logger.debug("Loading Dataset for experiment %s from storage cache in %s",
+                     experiment_name, cache_backend.__class__.__name__)
         dataset = cache_backend.load_dataset(exp)
         # Datasets stored before time_s was derived during normalization.
         dataset.data = add_elapsed_time(dataset.data)
@@ -152,13 +161,30 @@ def persist_dataset(exp, dataset: Dataset, stores: Stores) -> tuple[Optional[str
         return None, None, None
     manager = StorageManager(data_backend=stores.storage, metadata_backend=stores.metadata, query_backend=stores.catalog)
     parquet_path, meta_path, dataset_id = manager.save_and_persist(exp, dataset)
-    if get_settings().storage_debug:
-        logger.info("Saved dataset of experiment %s (metadata id %s)", exp.name, dataset_id)
+    logger.debug("Saved dataset of experiment %s (metadata id %s)", exp.name, dataset_id)
     return parquet_path, meta_path, dataset_id
 
 
-def _assign_experiment_id(exp, stores: Stores) -> None:
-    """Assign experiment_id from the manifest (created on first ingest)."""
+def _assign_experiment_id(exp, stores: Stores, registry: Optional[Registry] = None) -> None:
+    """Assign experiment_id from the manifest (created on first ingest).
+
+    Raw data that is new to the manifest but has the same content as the data of an
+    experiment no registry row produces any more was renamed: that entry is relinked
+    and keeps its ID and stored data (the relink rule of Clean up, see
+    :func:`mfethuls.reconcile.renamed_entry`), whether or not Clean up ran first.
+    """
+    raw = exp.raw_data_filename or exp.name
+    if registry is not None:
+        from mfethuls.reconcile import _key, renamed_entry
+
+        entries = stores.manifest.all_mappings()
+        known = {_key(e["instrument_name"], e["raw_data_filename"]) for e in entries}
+        if _key(exp.instrument_name, raw) not in known:
+            entry = renamed_entry(exp, registry, entries)
+            if entry is not None:
+                stores.manifest.relink(experiment_id=entry["experiment_id"], raw_data_filename=raw)
+                logger.info("Experiment %r: raw data %r is %r renamed (same content); keeping experiment_id %s.",
+                            exp.name, raw, entry["raw_data_filename"], entry["experiment_id"])
     exp.experiment_id = stores.manifest.get_or_create_experiment_id(
         instrument_name=exp.instrument_name,
         raw_data_filename=exp.raw_data_filename or exp.name,
@@ -218,7 +244,7 @@ def check_parsed(dataset: Dataset, instrument_name: str) -> None:
 
 def _resolve_stores(stores: Optional[Stores], use_storage: bool) -> Stores:
     stores = stores if stores is not None else local_stores()
-    if not use_storage or get_settings().disable_storage:
+    if not use_storage:
         return replace(stores, storage=None, catalog=None, metadata=None, cache=None)
     return stores
 
@@ -238,18 +264,14 @@ def ingest_experiment_dataset(
     without a catalog; pass stores with an open catalog to register the dataset.
     """
 
-    exp = _resolve_experiment(experiment_name, registry)
-    if exp.instrument_name is None:
-        logger.warning(
-            "Skipping experiment %r: it is registered but has no associated instrument data yet.",
-            experiment_name,
-        )
+    exp, registry = _resolve_experiment(experiment_name, registry)
+    if _without_instrument(exp, experiment_name):
         return {"status": "skipped"}
 
     stores = _resolve_stores(stores, use_storage)
     if stores.storage is None:
         return {"status": "skipped"}
-    _assign_experiment_id(exp, stores)
+    _assign_experiment_id(exp, stores, registry)
 
     if not refresh:
         cached_dataset = get_cached_dataset(exp, stores.reads_from, experiment_name)
@@ -291,16 +313,12 @@ def load_experiment_dataset(
     :func:`~mfethuls.stores.local_stores`.
     """
 
-    exp = _resolve_experiment(experiment_name, registry)
-    if exp.instrument_name is None:
-        logger.warning(
-            "Skipping experiment %r: it is registered but has no associated instrument data yet.",
-            experiment_name,
-        )
+    exp, registry = _resolve_experiment(experiment_name, registry)
+    if _without_instrument(exp, experiment_name):
         return None
 
     stores = _resolve_stores(stores, use_storage)
-    _assign_experiment_id(exp, stores)
+    _assign_experiment_id(exp, stores, registry)
 
     if stores.reads_from is not None and not refresh:
         cached_dataset = get_cached_dataset(exp, stores.reads_from, experiment_name)

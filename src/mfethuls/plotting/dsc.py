@@ -103,7 +103,9 @@ def build_dsc_spec(
     linestyle: str = "-",
 ) -> PlotSpec:
     x_column = "temperature_C"
-    y_column = "heat_flow_mW"
+    # Heat flow in mW, or per gram of sample when the instrument exports it that way.
+    columns = dataset.data.columns
+    y_column = "heat_flow_W_g" if "heat_flow_mW" not in columns and "heat_flow_W_g" in columns else "heat_flow_mW"
     resolved_group_by = group_by
     if resolved_group_by is None and "profile" in dataset.data.columns:
         resolved_group_by = "profile"

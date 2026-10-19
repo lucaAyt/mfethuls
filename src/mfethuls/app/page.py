@@ -20,6 +20,7 @@ import plotly.io as pio
 import streamlit as st
 from plotly.colors import convert_colors_to_same_type
 
+from mfethuls.app.instruments import open_requested_dialog, render_instruments_section
 from mfethuls.app.welcome import (
     example_folder,
     is_set_up,
@@ -42,6 +43,7 @@ from mfethuls.plotting import PlotError, PlotSpec, build_experiments_spec, plotl
 from mfethuls.plotting.backend import render
 from mfethuls.plotting.labels import axis_label, legend_name, shared_axis_label
 from mfethuls.plotting.spec import LINESTYLES, MARKERS, Colorbar, Legend, LegendEntry, Panel, Trace
+from mfethuls.reconcile import LABELS as _RECONCILE_LABELS
 from mfethuls.schema_normalization import add_elapsed_time
 
 # The backend the page is drawn for; set by run().
@@ -235,9 +237,9 @@ def _builtin_datasets(data: pd.DataFrame, datasets_meta: dict) -> list[Dataset]:
 
 
 def _plot_toolbar():
-    """Row above the chart: axis limits, SVG download, HTML download."""
-    limits_col, svg_col, html_col, _ = st.columns([1, 1, 1, 3], vertical_alignment="bottom")
-    return limits_col, svg_col, html_col
+    """Row above the chart: axis limits, then the SVG, HTML and CSV downloads."""
+    limits_col, svg_col, html_col, csv_col, _ = st.columns([1, 1, 1, 1, 2], vertical_alignment="bottom")
+    return limits_col, (svg_col, html_col, csv_col)
 
 
 _LIMIT_FIELDS = ("x_min", "x_max", "y_min", "y_max")
@@ -319,8 +321,17 @@ def _limits_unavailable(container, reason: str) -> None:
     container.toggle("Axis limits", disabled=True, help=reason, key="limits-unavailable")
 
 
-def _download_buttons(svg_col, html_col, title: str, *, spec: PlotSpec | None, fig) -> None:
-    """SVG and HTML downloads, generated only when clicked (large figures take a moment)."""
+def _csv_bytes(data: pd.DataFrame) -> bytes:
+    """The rows behind the plot, every column, with the experiment's name first."""
+    frame = data.rename(columns={"_experiment": "experiment"})
+    if "experiment" in frame.columns:
+        frame = frame[["experiment", *[c for c in frame.columns if c != "experiment"]]]
+    return frame.to_csv(index=False).encode("utf-8")
+
+
+def _download_buttons(columns, title: str, *, spec: PlotSpec | None, fig, data: pd.DataFrame) -> None:
+    """SVG, HTML and CSV downloads, generated only when clicked (large figures take a moment)."""
+    svg_col, html_col, csv_col = columns
     svg_col.download_button(
         "SVG",
         icon=":material/download:",
@@ -337,6 +348,15 @@ def _download_buttons(svg_col, html_col, title: str, *, spec: PlotSpec | None, f
         data=lambda: _figure_bytes(fig, "html"),
         file_name=_figure_download_name(title, "html"),
         mime="text/html",
+        width="stretch",
+    )
+    csv_col.download_button(
+        "CSV",
+        icon=":material/download:",
+        help="The data of the selected experiments (after filters), every column, for plotting elsewhere.",
+        data=lambda: _csv_bytes(data),
+        file_name=_figure_download_name(title, "csv"),
+        mime="text/csv",
         width="stretch",
     )
 
@@ -359,9 +379,6 @@ def _finite_bounds(values: pd.Series):
 
 def _storage_label(path: str) -> str:
     return "☁️ cloud" if path.startswith(("s3://", "az://", "https://")) else "📁 local"
-
-
-_RECONCILE_LABELS = {"relink": "Relink", "forget": "Forget", "refresh": "Refresh", "remove_files": "Remove files"}
 
 
 def _cleanup_section(registry_path: str) -> None:
@@ -428,6 +445,8 @@ def _settings_dialog(registry_path: str) -> None:
         render_setup_form(backend, key="settings")
         st.markdown("**How to organise the data folder**")
         render_folder_layout()
+    with st.expander("Instruments", icon=":material/biotech:"):
+        render_instruments_section(backend, registry_path)
     with st.expander("Clean up", icon=":material/mop:"):
         _cleanup_section(registry_path)
     with st.expander("Data loading", icon=":material/database:"):
@@ -490,8 +509,9 @@ def run(app_backend) -> None:
                 show_landing()
                 st.rerun()
             if st.button("", icon=":material/settings:", width="content",
-                         help="Settings: data folder and registry, clean up, data loading, example data"):
+                         help="Settings: data folder and registry, instruments, clean up, data loading, example data"):
                 _settings_dialog(registry_path)
+    open_requested_dialog(backend)
 
     # ---------------------------------------------------------------------------
     # Datasets expander
@@ -632,14 +652,14 @@ def run(app_backend) -> None:
                 st.warning(f"No built-in plot for this selection: {exc}")
             else:
                 title = spec.title or spec.panel.title or "mfethuls"
-                limits_col, svg_col, html_col = _plot_toolbar()
+                limits_col, downloads = _plot_toolbar()
                 if spec.layout == "single":
                     key = "|".join(["limits", "builtin", comparison_mode, *selected_names])
                     _axis_limits(limits_col, spec.panel, key)
                 else:
                     _limits_unavailable(limits_col, "Not available for figures with one panel per experiment.")
                 fig = render(spec, backend="plotly")
-                _download_buttons(svg_col, html_col, title, spec=spec, fig=fig)
+                _download_buttons(downloads, title, spec=spec, fig=fig, data=data)
                 mark_done("plot")
                 st.plotly_chart(
                     fig,
@@ -655,7 +675,11 @@ def run(app_backend) -> None:
             plot_type = type_col.selectbox("Plot type", ["line", "scatter", "histogram", "box"])
             x_col = x_axis_col.selectbox("X axis", numeric_cols, index=0)
             y_options = [c for c in numeric_cols if c != x_col]
-            y_cols = y_axis_col.multiselect("Y axis", y_options, default=y_options[:1] if y_options else [])
+            # Changing X changes the Y options, which makes Streamlit start the Y box afresh:
+            # keep the previous Y columns instead of falling back to the first option (often the old X).
+            kept = [c for c in st.session_state.get("_y_cols", []) if c in y_options]
+            y_cols = y_axis_col.multiselect("Y axis", y_options, default=kept or y_options[:1])
+            st.session_state["_y_cols"] = y_cols
 
             # How to tell lines apart: colour, and line style / marker shape side by side.
             hue_opts = ["_experiment"] + [c for c in data.columns if c != "_experiment"]
@@ -718,7 +742,7 @@ def run(app_backend) -> None:
                     y_series = y_cols[0] if y_cols else x_col
                     color = color_col
 
-                limits_col, svg_col, html_col = _plot_toolbar()
+                limits_col, downloads = _plot_toolbar()
                 if plot_type in {"line", "scatter"}:
                     # WebGL (Plotly) on screen and Matplotlib for the vector SVG: no downsampling.
                     max_groups = _MAX_COLORBAR_GROUPS if _uses_colorbar(long_df, color) else _MAX_COLOUR_GROUPS
@@ -765,7 +789,7 @@ def run(app_backend) -> None:
                     fig.update_yaxes(type="log" if use_log_y else "linear")
                     spec = None
 
-                _download_buttons(svg_col, html_col, title, spec=spec, fig=fig)
+                _download_buttons(downloads, title, spec=spec, fig=fig, data=data)
                 mark_done("plot")
                 st.plotly_chart(
                     fig,

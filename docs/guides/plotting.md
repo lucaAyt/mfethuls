@@ -37,7 +37,7 @@ mfethuls.plot_experiments(cs, mode="stacked", stacked_offset=0.5)   # overlay, s
 mfethuls.plot_experiments(cs, mode="facet")     # one panel per experiment
 ```
 
-Other options: `kind=` forces a plot family (`"dsc"`, `"ftir"`, …), `signal=` picks the y column where a family offers a choice (e.g. `"transmittance_pct"` for FTIR), `group_by=` splits one dataset into several lines, and `title=` sets the title.
+Other options: `kind=` forces a plot family (`"dsc"`, `"ftir"`, …), `signal=` picks the y column where a family offers a choice (e.g. `"transmittance_pct"` for FTIR), `group_by=` splits one dataset into several lines, and `title=` sets the title of the Plotly figure (Matplotlib figures have none; see [Publication figures](#publication-figures-matplotlib)).
 
 ### Single datasets
 
@@ -59,11 +59,11 @@ fig, ax = plot_ftir(dataset, signal="transmittance_pct")
 | FTIR | Wavenumber, high to low | Absorbance or transmittance | |
 | UV/Vis | Wavelength | Absorbance or transmittance | |
 | Fluorescence | Wavelength | Emission intensity | Spectra series are coloured by time (see below) |
-| DMA | Depends on the measurement profile | Storage and loss modulus E′, E″ | Log scales, except a linear time or temperature axis |
+| DMA | Depends on the measurement profile | Storage and loss modulus | Log scales, except a linear time or temperature axis |
 | Rheology | Depends on the measurement profile | G′, G″, or stress and viscosity | Log scales, except a linear time axis |
 | SEC | Retention time | Detector response | One line per detector |
 | MS | m/z | Intensity | |
-| NMR | Chemical shift, high to low | Intensity | |
+| NMR | Chemical shift, high to low | Intensity | One panel per nucleus (¹H first, then ¹³C, …), its axis naming the nucleus; in comparisons each experiment keeps its colour in every panel |
 | SAXS | q | Intensity | Log–log |
 
 ### Several lines from one dataset
@@ -71,6 +71,8 @@ fig, ax = plot_ftir(dataset, signal="transmittance_pct")
 When a dataset holds several curves on the same x values (e.g. a series of spectra), mfethuls finds the column that separates them and draws one line per value, or you can name it with `group_by=`.
 
 - An experiment made of several files (a titration, a series) has a `source_file` column, so each file is its own line, labelled by file name.
+- A workbook holding several tests (one per sheet) is one experiment whose curves carry their sheet's name in `name`. In the app's line plot, choose **Colour by → name** to draw each test as its own line.
+- Overlays of several experiments give each experiment its own colour (families drawn in one colour, such as FTIR or NMR, would otherwise draw them alike).
 - Up to 10 lines: a normal legend.
 - More than 10 lines of a **numeric** column (e.g. `time_s`): a continuous colour bar instead of a legend. Overlays of several such experiments share one colour bar and use line style to mark the experiment.
 
@@ -82,9 +84,9 @@ Instruments that only record a wall-clock `timestamp` per spectrum (e.g. Ocean O
 
 ## Labels and units
 
-Axis titles and legend entries use the quantity and unit of each canonical column, e.g. *Temperature (°C)*, *Wavenumber (cm⁻¹)* or *Storage modulus E′*. Several columns sharing a quantity and unit share one axis title (*Modulus (MPa)*).
+Axis titles and legend entries use the name and unit of each canonical column, e.g. *Temperature (°C)*, *Wavenumber (cm⁻¹)* or *Stress (MPa)*. Symbols (σ, E′, η, …) are not shown: names read without knowing a field's conventions. Several columns sharing a quantity and unit share one axis title (*Modulus (MPa)*).
 
-Labels live in `src/mfethuls/plotting/labels.py`, written in Matplotlib mathtext for superscripts and symbols:
+Labels live in `src/mfethuls/plotting/labels.py`, written in Matplotlib mathtext for superscripts. Each label also records the usual symbol, which is not drawn:
 
 ```python
 "wavenumber_cm_inv": ColumnLabel("Wavenumber", r"cm$^{-1}$"),
@@ -101,8 +103,9 @@ Matplotlib figures use a fixed publication style, whatever the global Matplotlib
 
 - seaborn's `paper` context at `font_scale=1.75`, lines 1.75 pt, written out as `PUBLICATION_RC` in `plotting/style.py` (seaborn itself is not needed)
 - black text and axes on a white background, so figures stay readable when saved, even from marimo's dark theme
-- no top or right spine; one minor tick between major ticks on linear x-axes
-- long legends, and legends in multi-panel figures, sit outside the axes. The figure widens by their width so the plot area keeps its size.
+- no title: a publication figure's title belongs in its caption (`ax.set_title(...)` adds one)
+- no top or right spine; one minor tick between major ticks on linear axes (x and y)
+- legends sit right of the axes, so they never cover a curve. A legend taller than the figure is split into columns (e.g. a workbook of 18 tests), and the figure widens by the legend's width so the plot area keeps its size.
 
 Adjust and save the result like any Matplotlib figure:
 
@@ -138,6 +141,7 @@ The toolbar above the chart:
 | **Axis limits** | A toggle that opens a row of min/max fields for each axis *above* the chart, so it never covers the axes you are adjusting. Empty fields stay automatic, and each shows the automatic value as a hint. Limits apply to the chart and the SVG and stay applied when the row is closed (a note under the toolbar lists them); **Reset** clears them. Not available for histograms, box plots or multi-panel figures. |
 | **SVG** | Vector figure drawn with Matplotlib in the publication style, using the axis limits. Generated when clicked. |
 | **HTML** | Standalone interactive Plotly page. Generated when clicked. |
+| **CSV** | The data of the selected experiments after filters, every column, with an `experiment` column first, for plotting in other software. Generated when clicked. |
 
 **Colours:** categorical colour columns use a discrete palette. A numeric colour column with more than 10 values (e.g. `time_s` on a spectra series) switches to a **Colour scale** picker (viridis, plasma, cividis, coolwarm, …) with a **Reverse** toggle. A column with a different value on almost every row (more than 300 values, e.g. `time_s` in DSC data) is drawn without colour groups.
 

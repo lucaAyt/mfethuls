@@ -1,3 +1,5 @@
+"""Plot several experiments together: overlay, stacked (offset) or one panel per experiment."""
+
 from __future__ import annotations
 
 import logging
@@ -6,9 +8,10 @@ from typing import Literal, Sequence
 from ..dataset import Dataset
 from ..comparison import ComparisonSet
 from .backend import Backend, render
-from .core import PlotError, _resolve_plot_kind, build_dataset_spec
+from .core import PlotError, _definition_with_plot, _resolve_plot_kind, build_dataset_spec
 from .dsc import dsc_overlay_legends, experiment_legend, experiment_legend_group, experiment_linestyle
 from .labels import axis_label
+from .nmr import nuclei, nucleus_axis_label, sort_nuclei, split_by_nucleus
 from .spec import Colorbar, Panel, PlotSpec
 
 
@@ -64,6 +67,10 @@ def _resolve_x_column(dataset: Dataset, resolved_kind: str) -> str | None:
     }
     if resolved_kind in simple_x:
         candidate = simple_x[resolved_kind]
+        return candidate if candidate in columns else None
+    if resolved_kind.startswith("definition:"):
+        definition = _definition_with_plot(dataset)
+        candidate = definition.plot["x"] if definition is not None else None
         return candidate if candidate in columns else None
 
     if resolved_kind == "dma":
@@ -179,6 +186,29 @@ def build_experiments_spec(
             )
         resolved_kinds.append(resolved_kind)
 
+    nucleus = None
+    if all(resolved == "nmr" for resolved in resolved_kinds) and mode != "facet":
+        split = _nmr_by_nucleus(datasets, labels)
+        nucleus = next(iter(split)) if len(split) == 1 else None
+        if len(split) > 1:
+            # 1H and 13C cover different ppm ranges: one overlay panel per nucleus.
+            panels = []
+            # Each experiment keeps one colour in every panel.
+            colours = {label: EXPERIMENT_COLOURS[i % len(EXPERIMENT_COLOURS)] for i, label in enumerate(labels)}
+            for nucleus in sort_nuclei(n for n in split if n is not None) + ([None] if None in split else []):
+                parts, part_labels = split[nucleus]
+                panel = build_experiments_spec(
+                    ComparisonSet(datasets=parts, labels=part_labels), kind=kind, mode=mode, signal=signal,
+                    group_by=group_by, max_groups=max_groups, stacked_offset=stacked_offset, strict=strict,
+                ).panel
+                panel.title = None
+                panel.xlabel = nucleus_axis_label(nucleus)
+                if len(datasets) > 1:
+                    for trace in panel.traces:
+                        trace.color = colours.get(str(trace.label).split(" | ")[0], trace.color)
+                panels.append(panel)
+            return PlotSpec(panels, layout="facet", title=title)
+
     x_compatible, shared_x = _is_x_axis_compatible(datasets, resolved_kinds)
 
     resolved_mode = mode
@@ -204,9 +234,10 @@ def build_experiments_spec(
     if resolved_mode == "facet":
         panels = []
         for dataset in datasets:
-            panel = build_dataset_spec(dataset, **dataset_kwargs).panel
-            panel.title = None
-            panels.append(panel)
+            # Every panel of the dataset's plot (an NMR dataset has one per nucleus).
+            for panel in build_dataset_spec(dataset, **dataset_kwargs).panels:
+                panel.title = None
+                panels.append(panel)
         return PlotSpec(panels, layout="facet", title=title)
 
     all_dsc = all(resolved == "dsc" for resolved in resolved_kinds)
@@ -230,6 +261,10 @@ def build_experiments_spec(
         colorbar=colorbar,
     )
     segment_colors: dict[str, object] = {}
+    # A family drawn in one fixed colour (FTIR orange, NMR brown, ...) would draw every
+    # experiment alike: give each experiment its own colour instead.
+    recolour = len(panels) > 1 and not all_dsc and colorbar is None and all(
+        len({str(trace.color) for trace in panel.traces}) <= 1 for panel in panels)
     for idx, (panel, label) in enumerate(zip(panels, labels)):
         # Every dataset shares the x-axis, so its scale and direction carry over.
         if idx == 0:
@@ -237,6 +272,8 @@ def build_experiments_spec(
             overlay.yscale = panel.yscale
             overlay.x_reversed = panel.x_reversed
         overlay.ylabel = panel.ylabel
+        if nucleus:
+            overlay.xlabel = panel.xlabel  # names the nucleus, e.g. 13C chemical shift
 
         for trace in panel.traces:
             if trace.label:
@@ -244,6 +281,8 @@ def build_experiments_spec(
                 trace.label = f"{label} | {trace.label}"
             else:
                 trace.label = label
+            if recolour:
+                trace.color = EXPERIMENT_COLOURS[idx % len(EXPERIMENT_COLOURS)]
             if resolved_mode == "stacked":
                 trace.y = trace.y + (idx * stacked_offset)
             if colorbar is not None:
@@ -258,6 +297,23 @@ def build_experiments_spec(
         overlay.legends = [experiment_legend(labels)]
 
     return PlotSpec([overlay])
+
+
+# Matplotlib's default cycle (tab10), one colour per experiment in overlays.
+EXPERIMENT_COLOURS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+                      "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+
+
+def _nmr_by_nucleus(datasets, labels) -> dict:
+    """``{nucleus: ([datasets], [labels])}`` over all datasets; datasets without a nucleus go under None."""
+    split: dict = {}
+    for dataset, label in zip(datasets, labels):
+        parts = split_by_nucleus(dataset) if nuclei(dataset) else [(None, dataset)]
+        for nucleus, part in parts:
+            entry = split.setdefault(nucleus, ([], []))
+            entry[0].append(part)
+            entry[1].append(label)
+    return split
 
 
 def plot_experiments(

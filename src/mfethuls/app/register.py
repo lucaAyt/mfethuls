@@ -115,6 +115,7 @@ def register_dialog(registry_path: str, data_root: str, *, writes_registry: bool
     """Propose registry rows for unregistered raw data, validate them live, then save or download."""
 
     registry = Registry.load(registry_path)
+    _unclaimed_note(data_root)
     items = discover_unregistered(registry, data_root)
     if not items:
         st.success("Everything in the data folder is already in the registry.")
@@ -215,6 +216,27 @@ def register_dialog(registry_path: str, data_root: str, *, writes_registry: bool
                 st.caption(path)
 
 
+@st.cache_data(show_spinner=False, ttl=30)
+def unclaimed(data_root: str) -> list:
+    """:func:`~mfethuls.discovery.unclaimed_folders`, cached: the dialogs ask on every rerun, and
+    walking a large folder on a synced drive is slow. Cleared with the registry caches."""
+    from mfethuls.discovery import unclaimed_folders
+
+    return unclaimed_folders(data_root)
+
+
+def _unclaimed_note(data_root: str) -> None:
+    """Folders of data no instrument reads, each with a way to add the instrument."""
+    from mfethuls.app.instruments import request_dialog
+
+    for folder in unclaimed(data_root):
+        text_col, button_col = st.columns([3, 1], vertical_alignment="center")
+        text_col.info(f"**{folder.folder_name}** holds {folder.count_label} file(s) that no instrument reads.",
+                      icon=":material/help:")
+        if button_col.button("Add instrument", key=f"unclaimed-{folder.folder_name}", width="stretch"):
+            request_dialog(folder.folder_name)
+
+
 def _modified(path: str) -> float:
     try:
         return os.path.getmtime(path)
@@ -248,6 +270,7 @@ def count_new_data(registry_path: str, data_root: str) -> int:
 def clear_registry_caches() -> None:
     _registry_frame.clear()
     _count_new_data.clear()
+    unclaimed.clear()
 
 
 def new_data_prompt(backend, registry_path: str) -> None:

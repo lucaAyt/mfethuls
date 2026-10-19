@@ -31,8 +31,8 @@ Open `experiments_template.csv` (included in the repo root) in Excel. Delete the
 
 ```
 name,instrument_name,sample_id,run_id,raw_data_filename,description,operator
-LB_dsc_001,dsc_mettler_toledo,S001,R001,poly1,DSC run — polymer 1,LB
-LB_dsc_002,dsc_mettler_toledo,S002,R001,poly2,DSC run — polymer 2,LB
+LB_dsc_001,dsc_mettler_toledo_v1,S001,R001,poly1,DSC run — polymer 1,LB
+LB_dsc_002,dsc_mettler_toledo_v1,S002,R001,poly2,DSC run — polymer 2,LB
 ```
 
 Key points:
@@ -66,7 +66,7 @@ Select `LB_dsc_001` and `LB_dsc_002` from the multiselect (or tick **"Select all
 If an experiment cannot be ingested (unknown instrument name, file not found, files that do not read as that instrument's data, …), it is listed with the reason and nothing is stored for it. Fix the registry and ingest again; experiments that already succeeded are reused unless you tick **"Re-parse even if cached"**.
 
 When it finishes:
-- Two Parquet files exist under `PATH_TO_LOCAL_STORAGE/dsc_mettler_toledo/<hex_id>/`
+- Two Parquet files exist under `PATH_TO_LOCAL_STORAGE/dsc_mettler_toledo_v1/<hex_id>/`
 - Two views are registered in the DuckDB catalog: `LB_dsc_001_S001_R001`, `LB_dsc_002_S002_R001`
 
 ---

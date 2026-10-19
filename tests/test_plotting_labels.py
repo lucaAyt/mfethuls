@@ -23,7 +23,9 @@ def _schema_columns() -> set[str]:
     columns: set[str] = set()
     for path in SCHEMA_DIR.glob("*.json"):
         schema = json.loads(path.read_text(encoding="utf8"))
-        columns |= set(schema.get("required_columns", [])) | set(schema.get("dtypes", {}))
+        for entry in schema.get("required_columns", []):  # a list means "one of these"
+            columns |= set(entry) if isinstance(entry, list) else {entry}
+        columns |= set(schema.get("dtypes", {}))
     return columns
 
 
@@ -37,7 +39,8 @@ def test_every_schema_column_has_a_label():
     [
         ("temperature_C", "Temperature (°C)"),
         ("wavenumber_cm_inv", r"Wavenumber (cm$^{-1}$)"),
-        ("viscosity_pa_s", r"Viscosity $\eta$ (Pa$\cdot$s)"),
+        ("viscosity_pa_s", r"Viscosity (Pa$\cdot$s)"),
+        ("stress_mpa", "Stress (MPa)"),
         ("mz", r"$m/z$"),
         ("some_custom_column", "some_custom_column"),
     ],
@@ -47,14 +50,14 @@ def test_axis_label(column, expected):
 
 
 def test_legend_name_has_no_unit():
-    assert legend_name("storage_modulus_pa") == r"Storage modulus $G'$"
+    assert legend_name("storage_modulus_pa") == "Storage modulus"
     assert legend_name("timestamp") == "timestamp"
 
 
 def test_shared_axis_label_groups_same_kind_and_unit():
     assert shared_axis_label(["storage_modulus_mpa", "loss_modulus_mpa"]) == "Modulus (MPa)"
     assert shared_axis_label(["shear_stress_pa", "viscosity_pa_s"]) == (
-        r"Shear stress $\tau$ (Pa), Viscosity $\eta$ (Pa$\cdot$s)"
+        r"Shear stress (Pa), Viscosity (Pa$\cdot$s)"
     )
     assert shared_axis_label(["heat_flow_mW"]) == "Heat flow (mW)"
 

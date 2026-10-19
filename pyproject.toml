@@ -21,6 +21,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 dependencies = [
+    "defusedxml>=0.7.1",  # openpyxl uses it to read .xlsx files safely
     "duckdb>=1.0.0",
     "filelock>=3.12",
     "nmrglue>=0.11",
@@ -30,6 +31,7 @@ dependencies = [
     "pyarrow>=20.0.0",
     "python-dotenv>=1.0.0",
     "pytz>=2024.1",
+    "regex>=2024.11.6",
 ]
 
 [project.optional-dependencies]
@@ -64,7 +66,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 mfethuls = ["py.typed"]
-"mfethuls.config" = ["*.json", "schemas/*.json"]
+"mfethuls.config" = ["*.json", "schemas/*.json", "instruments/*.json"]
 "mfethuls.examples" = ["experiments_registry.csv", "data/**/*"]
 "mfethuls.tutorials" = ["*.py"]
 
@@ -80,6 +82,6 @@ Issues = "https://github.com/lucaAyt/mfethuls/issues"
 Changelog = "https://github.com/lucaAyt/mfethuls/releases"
 
 [project.scripts]
-mfethuls = "mfethuls.main:main"
+mfethuls = "mfethuls.cli:main"
 mfethuls-app = "mfethuls.app.launch:main"
 mfethuls-tutorial = "mfethuls.tutorials:main"

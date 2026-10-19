@@ -2,9 +2,9 @@
 
 The catalog is derived data, rebuilt on each ingest from the owners of each fact:
 the registry (descriptive fields), the manifest (``experiment_id``) and the parsed
-dataset (instrument type/model, canonical measurement profile, row count). The app,
-the API ``/datasets`` endpoint and ``storage.notebook`` read only the catalog; the
-optional Postgres ``datasets`` table is written from the same record.
+dataset (instrument type/model, canonical measurement profile, row count). The app
+and ``storage.notebook`` read only the catalog; the metadata sink of the stores, if
+any, receives the same record (see :mod:`mfethuls.stores`).
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ CATALOG_FIELDS: dict[str, str] = {
     "run_id": "TEXT",
     "measurement_profile": "TEXT",
     "rows": "BIGINT",
+    "reader_fingerprint": "TEXT",
 }
 
 
@@ -43,6 +44,8 @@ class CatalogRecord:
     run_id: Optional[str] = None
     measurement_profile: Optional[str] = None
     rows: Optional[int] = None
+    # Which reader read the data: a definition's fingerprint, or "<Class>-v<N>" for a code parser.
+    reader_fingerprint: Optional[str] = None
 
     @classmethod
     def build(
@@ -73,6 +76,7 @@ class CatalogRecord:
             run_id=experiment.run_id,
             measurement_profile=metadata.get("measurement_profile"),
             rows=rows,
+            reader_fingerprint=metadata.get("reader_fingerprint"),
         )
 
     def fields(self) -> dict[str, Any]:

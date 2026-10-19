@@ -369,3 +369,17 @@ def test_manifest_write_survives_a_briefly_locked_file(monkeypatch):
         with pytest.raises(PermissionError):
             backend.get_or_create_experiment_id(instrument_name="dsc", raw_data_filename="b", experiment_name="B")
         assert [f for f in os.listdir(tmpdir) if f.endswith(".tmp")] == []
+
+
+def test_find_data_files_collects_an_experiment_folder_with_its_subfolders(tmp_path):
+    """Bruker NMR: EXP014/1/pdata/1/1r. Hidden folders and parquet files stay out."""
+    for relative in ["EXP014/1/acqus", "EXP014/1/fid", "EXP014/1/pdata/1/1r", "EXP014/1/pdata/1/procs",
+                     "EXP014/.cache/x", "EXP014/1/old.parquet"]:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x", encoding="utf-8")
+
+    parent, files = find_data_files(str(tmp_path), "EXP014")
+    assert parent == str(tmp_path / "EXP014")
+    assert sorted(os.path.relpath(f, parent).replace(os.sep, "/") for f in files) == [
+        "1/acqus", "1/fid", "1/pdata/1/1r", "1/pdata/1/procs"]

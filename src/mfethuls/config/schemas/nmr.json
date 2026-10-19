@@ -6,22 +6,8 @@
   ],
   "dtypes": {
     "chemical_shift_ppm": "float64",
-    "intensity_a_u": "float64"
-  },
-  "models": {
-    "bruker_nmr": {
-      "aliases": {
-        "chemical_shift_ppm": [
-          "ppm",
-          "chemical shift",
-          "chemical_shift"
-        ],
-        "intensity_a_u": [
-          "intensity",
-          "signal",
-          "real"
-        ]
-      }
-    }
+    "intensity_a_u": "float64",
+    "nucleus": "string",
+    "solvent": "string"
   }
 }

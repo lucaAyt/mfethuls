@@ -1,0 +1,19 @@
+{
+  "spec_version": 1,
+  "name": "sec",
+  "type": "sec",
+  "model": "agilent",
+  "folder_name": "SEC",
+  "data_layout": "file",
+  "description": "Agilent SEC export: one file per detector (..._RID1A.CSV, ..._VWD1A.CSV), two columns of numbers (retention time in minutes, detector response) and no header. The detector code at the end of the file name fills detector_name.",
+  "file": { "extensions": [".csv"], "encoding": "auto", "delimiter": "comma", "header": { "rows": 0 } },
+  "columns": [
+    { "source": "column_1", "quantity": "retention_time", "unit": "min" },
+    { "source": "column_2", "quantity": "detector_response", "unit": "a.u." }
+  ],
+  "from_file_name": [
+    { "column": "detector_name", "pattern": "_([^_.]+)$",
+      "values": { "ri": "^(RID|DRI|RI|refractive)", "uv": "^(VWD|DAD|PDA|UV)",
+                  "ls": "^(MALS|RALS|LALS|LS|light)", "viscometer": "^(VISC|DP)" } }
+  ]
+}

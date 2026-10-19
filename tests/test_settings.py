@@ -11,7 +11,6 @@ def test_defaults_without_environment():
 
     assert settings.data_root is None
     assert settings.registry_path is None
-    assert settings.disable_storage is False
 
 
 def test_from_env_parses_values():
@@ -20,7 +19,6 @@ def test_from_env_parses_values():
             "PATH_TO_DATA": "/data",
             "PATH_TO_REGISTRY": "/registry.csv",
             "PATH_TO_LOCAL_STORAGE": "/storage",
-            "MFETHULS_DISABLE_STORAGE": "yes",
         }
     )
 
@@ -29,7 +27,6 @@ def test_from_env_parses_values():
         "/registry.csv",
         "/storage",
     )
-    assert settings.disable_storage is True
 
 
 def test_get_settings_follows_the_environment_until_configured(monkeypatch):
