@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Tuple
 
 from matplotlib.cm import ScalarMappable
@@ -17,9 +18,10 @@ from .style import apply_axes_style, new_figure, publication_style
 FACET_WIDTH_IN = 7.0
 FACET_PANEL_HEIGHT_IN = 2.8
 
-# Legends with more entries than this, and all facet legends, go right of the axes
-# so they don't cover the data.
-_MAX_INSIDE_LEGEND_ENTRIES = 4
+# Legends go right of the axes so they never cover the data. A legend taller than this
+# share of the figure height is split into columns (the figure widens instead of the
+# axes being squashed).
+_LEGEND_HEIGHT_SHARE = 0.9
 
 # Outside legends and colour bars widen the figure until the axes are within this
 # many inches of their width without them.
@@ -59,6 +61,7 @@ def _draw_hand_built_legends(axis, panel: Panel) -> None:
         frameon=False,
         fontsize="small",
         alignment="left",
+        ncols=_legend_columns(axis, len(labels), titled=True, fontsize="small"),
     )
     title_size = legend.get_title().get_fontsize()
     texts = legend.get_texts()
@@ -66,17 +69,25 @@ def _draw_hand_built_legends(axis, panel: Panel) -> None:
         texts[idx].set_fontsize(title_size)
 
 
-def _draw_legends(axis, panel: Panel, *, outside: bool) -> None:
+def _legend_columns(axis, entries: int, *, titled: bool, fontsize="medium") -> int:
+    """Columns so that a legend of ``entries`` rows fits the figure height."""
+    from matplotlib.font_manager import FontProperties
+
+    size_pt = FontProperties(size=fontsize).get_size_in_points()
+    row_in = size_pt * 1.5 / 72  # text plus the default label spacing
+    rows = max(1, int(axis.figure.get_figheight() * _LEGEND_HEIGHT_SHARE / row_in) - (1 if titled else 0))
+    return max(1, math.ceil(entries / rows))
+
+
+def _draw_legends(axis, panel: Panel) -> None:
     if panel.legends:
         _draw_hand_built_legends(axis, panel)
         return
 
     labelled = sum(1 for trace in panel.traces if trace.label)
     if panel.legend and labelled:
-        if outside or labelled > _MAX_INSIDE_LEGEND_ENTRIES:
-            axis.legend(title=panel.legend_title, loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False)
-        else:
-            axis.legend(title=panel.legend_title)
+        axis.legend(title=panel.legend_title, loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False,
+                    ncols=_legend_columns(axis, labelled, titled=bool(panel.legend_title)))
 
 
 def _draw_colorbar(axis, colorbar: Colorbar) -> None:
@@ -84,8 +95,12 @@ def _draw_colorbar(axis, colorbar: Colorbar) -> None:
     axis.figure.colorbar(mappable, ax=axis, label=colorbar.title)
 
 
-def draw_panel(axis, panel: Panel, *, legend_outside: bool = False, colorbar: bool = True) -> None:
-    """Draw one panel onto an existing Matplotlib axis."""
+def draw_panel(axis, panel: Panel, *, colorbar: bool = True) -> None:
+    """Draw one panel onto an existing Matplotlib axis.
+
+    Titles are not drawn: publication figures carry their title in the caption
+    (``ax.set_title`` adds one). Legends sit right of the axes.
+    """
 
     if panel.xscale == "log":
         axis.set_xscale("log")
@@ -116,9 +131,11 @@ def draw_panel(axis, panel: Panel, *, legend_outside: bool = False, colorbar: bo
     # One minor tick between major ticks; log axes keep Matplotlib's log minor ticks.
     if panel.xscale == "linear":
         axis.xaxis.set_minor_locator(AutoMinorLocator(2))
+    if panel.yscale == "linear":
+        axis.yaxis.set_minor_locator(AutoMinorLocator(2))
 
-    apply_axes_style(axis, title=panel.title, xlabel=panel.xlabel, ylabel=panel.ylabel)
-    _draw_legends(axis, panel, outside=legend_outside)
+    apply_axes_style(axis, xlabel=panel.xlabel, ylabel=panel.ylabel)
+    _draw_legends(axis, panel)
     if colorbar and panel.colorbar is not None:
         _draw_colorbar(axis, panel.colorbar)
 
@@ -146,6 +163,12 @@ def _add_colorbars_keeping_axes_width(fig, data_axes, panels) -> None:
     target = _axes_width_in(fig, data_axes)
     for legend in legends:
         legend.set_visible(True)
+    # Make room for the widest legend first: a legend of several columns can be wider than
+    # the axes, and constrained layout gives up (axes collapse) instead of narrowing them.
+    if legends:
+        renderer = fig.canvas.get_renderer()
+        widest = max(legend.get_window_extent(renderer).width for legend in legends) / fig.dpi
+        fig.set_figwidth(fig.get_figwidth() + widest)
 
     for axis, panel in zip(data_axes, panels):
         if panel.colorbar is not None:
@@ -180,9 +203,7 @@ def render(spec: PlotSpec, ax=None) -> Tuple[Any, Any]:
                 layout="constrained",
             )
             for axis, panel in zip(axes.ravel(), spec.panels):
-                draw_panel(axis, panel, legend_outside=True, colorbar=False)
-            if spec.title:
-                fig.suptitle(spec.title)
+                draw_panel(axis, panel, colorbar=False)
             data_axes, result = list(axes.ravel()), (fig, axes)
         else:
             # Constrained layout so that widening the figure below keeps the axes size.

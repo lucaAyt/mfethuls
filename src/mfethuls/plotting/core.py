@@ -1,3 +1,5 @@
+"""Plot one dataset: choose its plot family, build the :class:`PlotSpec` and render it."""
+
 from __future__ import annotations
 
 import logging
@@ -18,6 +20,10 @@ LOGGER = logging.getLogger(__name__)
 # More groups than this get a gradient: a colour bar for numeric groups (e.g. time_s),
 # otherwise a viridis-shaded legend.
 _MAX_LEGEND_GROUPS = 10
+
+# Plot families with a built-in builder; an instrument type names its family, except:
+_PLOT_FAMILIES = {"dma", "rheology", "uv_vis", "fluorescence", "ftir", "dsc", "tga", "saxs", "ms", "sec", "nmr"}
+_FAMILY_OF_TYPE = {"rheometer": "rheology"}
 
 # Columns that, in a series, label the same files as time_s does.
 _SERIES_LABELS = {"timestamp", "source_file"}
@@ -259,28 +265,9 @@ def _resolve_plot_kind(dataset: Dataset, kind: Optional[str]) -> Optional[str]:
     instrument_type = str(metadata.get("instrument_type") or "").strip().casefold()
     measurement_profile = str(metadata.get("measurement_profile") or "").strip()
 
-    if instrument_type == "dma":
-        return "dma"
-    if instrument_type == "rheometer":
-        return "rheology"
-    if instrument_type == "uv_vis":
-        return "uv_vis"
-    if instrument_type == "fluorescence":
-        return "fluorescence"
-    if instrument_type == "ftir":
-        return "ftir"
-    if instrument_type == "dsc":
-        return "dsc"
-    if instrument_type == "tga":
-        return "tga"
-    if instrument_type == "saxs":
-        return "saxs"
-    if instrument_type == "ms":
-        return "ms"
-    if instrument_type == "sec":
-        return "sec"
-    if instrument_type == "nmr":
-        return "nmr"
+    instrument_type = _FAMILY_OF_TYPE.get(instrument_type, instrument_type)
+    if instrument_type in _PLOT_FAMILIES:
+        return instrument_type
 
     if is_supported_dma_profile(measurement_profile):
         return "dma"
@@ -299,7 +286,7 @@ def _resolve_plot_kind(dataset: Dataset, kind: Optional[str]) -> Optional[str]:
         return "dma"
     if {"strain_pct", "storage_modulus_mpa", "loss_modulus_mpa"}.issubset(columns):
         return "dma"
-    if {"temperature_C", "heat_flow_mW"}.issubset(columns):
+    if "temperature_C" in columns and columns & {"heat_flow_mW", "heat_flow_W_g"}:
         return "dsc"
     if {"temperature_C", "mass_pct"}.issubset(columns):
         return "tga"
@@ -312,7 +299,47 @@ def _resolve_plot_kind(dataset: Dataset, kind: Optional[str]) -> Optional[str]:
     if {"chemical_shift_ppm", "intensity_a_u"}.issubset(columns):
         return "nmr"
 
+    definition = _definition_with_plot(dataset)
+    if definition is not None:
+        return f"definition:{definition.name}"
+
     return None
+
+
+def _definition_with_plot(dataset: Dataset):
+    """The instrument definition that read ``dataset``, when it names a plot."""
+    from mfethuls.instruments.configured import definition_for
+
+    metadata = dataset.metadata if isinstance(dataset.metadata, dict) else {}
+    name = metadata.get("instrument_definition") or metadata.get("instrument_name")
+    definition = definition_for(name) if name else None
+    return definition if definition is not None and definition.plot else None
+
+
+def build_definition_spec(
+    dataset: Dataset,
+    *,
+    group_by: Optional[str] = None,
+    max_groups: int = 50,
+    title: Optional[str] = None,
+    strict: bool = True,
+) -> PlotSpec:
+    """Plot named by the ``plot`` of the instrument definition that read ``dataset``."""
+    definition = _definition_with_plot(dataset)
+    if definition is None:
+        raise PlotError("The dataset's instrument definition names no plot.")
+    x_column, y_column = definition.plot["x"], definition.plot["y"]
+    if strict:
+        _require_columns(dataset, [x_column, y_column], f"plot for {definition.name}")
+    return _single_signal_spec(
+        dataset,
+        x_column=x_column,
+        y_column=y_column,
+        group_by=group_by or definition.plot.get("group_by"),
+        max_groups=max_groups,
+        color="#1f77b4",
+        title=title or _default_title(dataset, definition.name),
+    )
 
 
 def build_dataset_spec(
@@ -361,6 +388,8 @@ def build_dataset_spec(
     if resolved_kind in builders:
         builder, takes_kwargs = builders[resolved_kind]
         return builder(dataset, **common, **(kwargs if takes_kwargs else {}))
+    if resolved_kind and resolved_kind.startswith("definition:"):
+        return build_definition_spec(dataset, **common)
 
     raise PlotError(
         "Could not infer a plot kind from the normalized dataset. "

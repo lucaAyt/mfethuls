@@ -63,7 +63,7 @@ def test_dma_temperature_sweep_keeps_linear_x():
 
     panel = build_dataset_spec(dataset).panel
     assert (panel.xscale, panel.yscale) == ("linear", "log")
-    assert [trace.label for trace in panel.traces] == [r"Storage modulus $E'$", r"Loss modulus $E''$"]
+    assert [trace.label for trace in panel.traces] == ["Storage modulus", "Loss modulus"]
 
 
 def test_overlay_prefixes_labels_with_experiment():
@@ -115,3 +115,76 @@ def test_facet_has_one_untitled_panel_per_dataset():
     assert spec.title == "Mixed"
     assert [panel.xlabel for panel in spec.panels] == ["Wavelength (nm)", "Temperature (°C)"]
     assert all(panel.title is None for panel in spec.panels)
+
+
+def test_matplotlib_figure_has_no_title_minor_y_ticks_and_columns_for_a_long_legend():
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from matplotlib.ticker import AutoMinorLocator
+
+    from mfethuls.plotting.render_mpl import render as render_mpl
+    from mfethuls.plotting.spec import Panel, PlotSpec, Trace
+
+    x = np.linspace(0, 1, 5)
+    panel = Panel(traces=[Trace(x, x * i, label=f"test {i}") for i in range(40)], title="Title",
+                  xlabel="x", ylabel="y", legend=True, legend_title="name")
+    fig, ax = render_mpl(PlotSpec([panel]))
+    fig.draw_without_rendering()
+    assert ax.get_title() == ""
+    assert isinstance(ax.yaxis.get_minor_locator(), AutoMinorLocator)
+    legend = ax.get_legend()
+    assert legend._ncols > 1
+    # The axes keep a usable size: the legend widens the figure instead of squashing them.
+    assert ax.get_position().height * fig.get_figheight() > 3
+    assert legend.get_window_extent().x0 >= ax.get_window_extent().x1  # outside, right of the axes
+    plt.close(fig)
+
+
+def _nmr(name, nuclei):
+    rows = [{"chemical_shift_ppm": ppm, "intensity_a_u": 1.0, "nucleus": nucleus,
+             "source_file": f"{i + 1}/pdata/1"}
+            for i, nucleus in enumerate(nuclei) for ppm in (10.0, 5.0, 0.0)]
+    return Dataset(data=pd.DataFrame(rows), metadata={"instrument_type": "nmr", "experiment_name": name})
+
+
+def test_nmr_gets_one_panel_per_nucleus_named_on_its_axis():
+    from mfethuls.plotting.nmr import build_nmr_spec
+
+    single = build_nmr_spec(_nmr("A", ["1H"]))
+    assert single.layout == "single" and single.panel.xlabel == "$^{1}$H chemical shift (ppm)"
+    both = build_nmr_spec(_nmr("A", ["1H", "13C"]))
+    assert both.layout == "facet"
+    assert [p.xlabel for p in both.panels] == ["$^{1}$H chemical shift (ppm)", "$^{13}$C chemical shift (ppm)"]
+    assert all(p.x_reversed for p in both.panels)
+
+
+def test_nmr_comparison_overlays_each_nucleus_in_its_own_panel():
+    spec = build_experiments_spec([_nmr("A", ["1H", "13C"]), _nmr("B", ["1H"])])
+    assert spec.layout == "facet"
+    assert [[t.label for t in p.traces] for p in spec.panels] == [["A", "B"], ["A"]]
+    assert spec.panels[1].xlabel == "$^{13}$C chemical shift (ppm)"
+    same = build_experiments_spec([_nmr("A", ["13C"]), _nmr("B", ["13C"])])
+    assert same.layout == "single" and same.panel.xlabel == "$^{13}$C chemical shift (ppm)"
+    facet = build_experiments_spec([_nmr("A", ["1H", "13C"]), _nmr("B", ["1H"])], mode="facet")
+    assert len(facet.panels) == 3  # A's two nuclei, then B
+
+
+def test_overlay_gives_each_experiment_its_own_colour():
+    spec = build_experiments_spec([_nmr("A", ["1H"]), _nmr("B", ["1H"])])
+    assert len({t.color for t in spec.panel.traces}) == 2
+    alone = build_experiments_spec([_nmr("A", ["1H"])])
+    assert alone.panel.traces[0].color == "#8c564b"  # a single experiment keeps the family colour
+
+
+def test_nmr_panels_go_lightest_nucleus_first_and_experiments_keep_their_colour():
+    from mfethuls.plotting.nmr import build_nmr_spec
+
+    # Expno 1 holds the 13C spectrum here (as in a real dataset): 1H still comes first.
+    assert [p.xlabel for p in build_nmr_spec(_nmr("A", ["13C", "1H"])).panels] == [
+        "$^{1}$H chemical shift (ppm)", "$^{13}$C chemical shift (ppm)"]
+    spec = build_experiments_spec([_nmr("A", ["1H"]), _nmr("B", ["13C", "1H"])])
+    colours = [{t.label: t.color for t in p.traces} for p in spec.panels]
+    assert colours[0]["B"] == colours[1]["B"] != colours[0]["A"]

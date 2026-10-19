@@ -18,14 +18,16 @@ from typing import Optional, Sequence
 class ColumnLabel:
     quantity: str
     unit: Optional[str] = None
+    # The usual symbol (E', sigma, ...). Not shown: axis titles and legends use the name,
+    # which reads without knowing the convention of the field.
     symbol: Optional[str] = None
     # Shared axis name when several columns of the same kind are plotted together.
     group: Optional[str] = None
 
     @property
     def name(self) -> str:
-        """Quantity and symbol, without the unit (for legend entries)."""
-        return f"{self.quantity} {self.symbol}" if self.symbol else self.quantity
+        """Quantity without the unit (for legend entries)."""
+        return self.quantity
 
 
 COLUMN_LABELS: dict[str, ColumnLabel] = {
@@ -34,8 +36,10 @@ COLUMN_LABELS: dict[str, ColumnLabel] = {
     "temperature_sample_C": ColumnLabel("Sample temperature", "°C"),
     "time_s": ColumnLabel("Time", "s"),
     "heat_flow_mW": ColumnLabel("Heat flow", "mW"),
+    "heat_flow_W_g": ColumnLabel("Heat flow", r"W g$^{-1}$"),
     "mass_pct": ColumnLabel("Mass", "%"),
     "mass_mg": ColumnLabel("Mass", "mg"),
+    "sample_mass_mg": ColumnLabel("Sample mass", "mg"),
     "mass_loss_pct": ColumnLabel("Mass loss", "%"),
     "d_mass_dt_pct_min": ColumnLabel("Mass change rate", r"% min$^{-1}$", symbol=r"$\mathrm{d}m/\mathrm{d}t$"),
     # Spectroscopy
@@ -47,6 +51,8 @@ COLUMN_LABELS: dict[str, ColumnLabel] = {
     "intensity_a_u": ColumnLabel("Intensity", "a.u."),
     "intensity_error_a_u": ColumnLabel("Intensity error", "a.u."),
     "chemical_shift_ppm": ColumnLabel("Chemical shift", "ppm", symbol=r"$\delta$"),
+    "nucleus": ColumnLabel("Nucleus"),
+    "solvent": ColumnLabel("Solvent"),
     "mz": ColumnLabel(r"$m/z$"),
     "q_inv_nm": ColumnLabel("Scattering vector", r"nm$^{-1}$", symbol=r"$q$"),
     # Chromatography
@@ -65,6 +71,12 @@ COLUMN_LABELS: dict[str, ColumnLabel] = {
     "shear_rate_s_inv": ColumnLabel("Shear rate", r"s$^{-1}$", symbol=r"$\dot{\gamma}$"),
     "shear_stress_pa": ColumnLabel("Shear stress", "Pa", symbol=r"$\tau$"),
     "viscosity_pa_s": ColumnLabel("Viscosity", r"Pa$\cdot$s", symbol=r"$\eta$"),
+    "strain_mm": ColumnLabel("Strain", "mm"),
+    "shear_stress_mpa": ColumnLabel("Shear stress", "MPa", symbol=r"$\tau$"),
+    "stress_mpa": ColumnLabel("Stress", "MPa", symbol=r"$\sigma$"),
+    "stress_pa": ColumnLabel("Stress", "Pa", symbol=r"$\sigma$"),
+    "displacement_mm": ColumnLabel("Displacement", "mm"),
+    "force_N": ColumnLabel("Force", "N", symbol=r"$F$"),
     # Grouping columns
     "profile": ColumnLabel("Segment"),
     "source_file": ColumnLabel("File"),
@@ -85,7 +97,7 @@ def axis_label(column: Optional[str]) -> Optional[str]:
 
 
 def legend_name(column: Optional[str]) -> Optional[str]:
-    """Legend entry or title without the unit, such as ``"Storage modulus $E'$"``."""
+    """Legend entry or title without the unit, such as ``"Storage modulus"``."""
 
     if column is None:
         return None
