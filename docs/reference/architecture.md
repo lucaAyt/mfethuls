@@ -123,7 +123,7 @@ Catalogs created before this layout get the new columns automatically. Rows with
 | Interface | Purpose |
 |-----------|---------|
 | Notebooks / Python API | Load, compare and plot experiments (`load_experiments`, `load_samples`, `plot_experiments`) |
-| CLI | `mfethuls` (load and plot), `python -m mfethuls.reconcile` (clean up) |
+| CLI (`mfethuls`) | Settings, validate, ingest, list, discover, clean up, export, plot, instruments; also starts the app and the tutorial (see [command_line.md](../guides/command_line.md)) |
 | App (`mfethuls-app`) | Landing page (Get started, Try the example, Use it from Python); setup of the data folder and registry; getting-started checklist and sidebar tracker; ingest; register new data; dataset browser; interactive plots (colour by, style by, axis limits) with SVG/HTML export; ⚙ Settings: data folder and registry, clean up, data loading, example data |
 | Tutorial (`mfethuls-tutorial`) | The marimo notebook in `tutorials/`, opened on its own copy of the example data |
 
@@ -146,7 +146,7 @@ src/mfethuls/
   schema_normalization.py # Column aliasing + dtype coercion
   dataset.py              # Dataset dataclass
   comparison.py           # ComparisonSet for multi-experiment analysis
-  main.py                 # The mfethuls command
+  cli.py                  # The mfethuls command: one subcommand per task, over the same calls the app uses
   examples/               # Example instrument data + registry; create_workspace() copies them for trying the app
   tutorials/              # The marimo tutorial (local_tutorial.py); open_tutorial() / mfethuls-tutorial
   _files.py               # replace_with_retry: atomic file swaps that survive Windows file locks
@@ -155,9 +155,17 @@ src/mfethuls/
     tga.py                # TGA mass_pct computation from mass_mg
   config/
     loader.py             # Ingest orchestration — ingest_experiment_dataset, load_experiment_dataset
-    instrument_params.json
+    instrument_params.json  # Instruments read by code parsers (NMR)
+    instruments/          # Built-in instrument definitions (FTIR, TGA, MS, ...); labs add theirs in PATH_TO_DATA/.mfethuls/instruments
     schemas/              # Per-instrument JSON schema files
-  parsers/                # Instrument-specific file readers; registry.py maps (type, model) to a parser
+  instruments/
+    definition.py         # InstrumentDefinition: parse/validate the JSON format
+    units.py              # Quantities, standard columns and unit conversions
+    configured.py         # All instruments: params + built-in + lab definitions; save_definition, sample checks
+    detect.py             # Guess a definition from a sample file (no AI)
+    spec.py               # JSON Schema and the chatbot prompt (spec_card)
+    workbook.py           # Excel workbooks as text: each sheet's rows as tab-separated lines
+  parsers/                # File readers; registry.py maps (type, model) to a parser; tabular.py reads every definition
   storage/
     types.py              # DataStorageBackend, MetadataBackend, DatasetMetadata
     backends.py           # LocalParquetStorage
@@ -170,6 +178,7 @@ src/mfethuls/
     page.py               # The Streamlit page: run(backend)
     backend.py            # LocalBackend: where the app's data comes from
     register.py           # "Register new data" dialog
+    instruments.py        # ⚙ Settings → Instruments and the "Add instrument" dialog
     welcome.py            # Landing page, setup (data folder + registry), getting-started checklist and sidebar tracker, example workspace
     streamlit_app.py, launch.py  # mfethuls-app entry point
   plotting/               # Optional viz (viz extra)

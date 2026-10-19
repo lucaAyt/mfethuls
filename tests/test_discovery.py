@@ -8,7 +8,7 @@ from mfethuls import Registry
 from mfethuls.discovery import REGISTRY_COLUMNS, discover_unregistered, proposed_rows
 from mfethuls.examples import DATA_DIR
 
-DSC_MODELS = ["dsc", "dsc_perkin_elmer", "dsc_mettler_toledo", "dsc_default"]
+DSC_MODELS = ["dsc_mettler_toledo_v0", "dsc_perkin_elmer", "dsc_mettler_toledo_v1", "dsc_default"]
 
 
 def _touch(path: Path, text: str = "data") -> Path:
@@ -29,7 +29,7 @@ def test_top_level_files_are_found_unless_registered_for_that_instrument(tmp_pat
     _touch(tmp_path / "DSC" / "poly1.txt")
     _touch(tmp_path / "DSC" / "poly2.txt")
     _touch(tmp_path / "TGA" / "poly1.txt")
-    registry = _registry({"name": "LB_dsc_001", "instrument_name": "dsc_mettler_toledo", "raw_data_filename": "poly1"})
+    registry = _registry({"name": "LB_dsc_001", "instrument_name": "dsc_mettler_toledo_v1", "raw_data_filename": "poly1"})
 
     # poly1 is registered for DSC only; the TGA file of the same name is still new.
     assert set(_items(tmp_path, registry)) == {"DSC/poly2", "TGA/poly1"}
@@ -42,7 +42,7 @@ def test_shared_folder_offers_every_instrument_and_single_instrument_is_prefille
 
     rows = proposed_rows(items.values(), _registry()).set_index("_folder")
 
-    assert items["DSC/poly1"].instruments == DSC_MODELS
+    assert sorted(items["DSC/poly1"].instruments) == sorted(DSC_MODELS)
     assert pd.isna(rows.loc["DSC", "instrument_name"])
     assert rows.loc["TGA", "instrument_name"] == "tga"
 
@@ -158,7 +158,7 @@ def test_run_named_like_its_folder_is_registered_by_file_name(tmp_path):
     assert list(whole["raw_data_filename"]) == ["LUB055"]
 
     # Once registered by file name, that run is not proposed again.
-    registry = _registry({"name": "LUB055", "instrument_name": "dsc", "raw_data_filename": "LUB055.txt"})
+    registry = _registry({"name": "LUB055", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "LUB055.txt"})
     assert list(_items(tmp_path, registry)["DSC/LUB055"].runs) == ["LUB055_b"]
 
 
@@ -188,7 +188,7 @@ def test_registered_folders_and_runs_are_skipped(tmp_path):
     _touch(tmp_path / "DSC" / "poly1" / "poly1_run2.txt")
     registry = _registry(
         {"name": "fl", "instrument_name": "fluorescence_insitu", "raw_data_filename": "poly3"},
-        {"name": "run1", "instrument_name": "dsc", "raw_data_filename": "poly1_run1"},
+        {"name": "run1", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "poly1_run1"},
     )
     items = _items(tmp_path, registry)
 
@@ -213,7 +213,7 @@ def test_proposed_names_are_unique_and_columns_follow_the_registry(tmp_path):
     _touch(tmp_path / "TGA" / "poly1.txt")
     _touch(tmp_path / "FTIR" / "poly1.csv")
     registry = Registry.from_frame(
-        pd.DataFrame([{"name": "poly1", "instrument_name": "dsc", "raw_data_filename": "other", "operator": "LB"}])
+        pd.DataFrame([{"name": "poly1", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "other", "operator": "LB"}])
     )
 
     rows = proposed_rows(discover_unregistered(registry, str(tmp_path)), registry)
@@ -239,7 +239,7 @@ def test_validate_proposed_requires_instrument_and_found_data(tmp_path):
     assert not missing_instrument["valid"]
     assert any(e["message"] == "Choose the instrument." for e in missing_instrument["errors"])
 
-    rows.loc[0, "instrument_name"] = "dsc_mettler_toledo"
+    rows.loc[0, "instrument_name"] = "dsc_mettler_toledo_v1"
     (ready,) = validate_proposed(registry, rows, str(tmp_path))
     assert ready["valid"], ready["errors"]
 
@@ -252,7 +252,7 @@ def test_validate_proposed_checks_against_existing_rows_and_bad_ids(tmp_path):
     from mfethuls.discovery import validate_proposed
 
     _touch(tmp_path / "TGA" / "poly2.txt")
-    registry = _registry({"name": "poly2", "instrument_name": "dsc", "raw_data_filename": "other"})
+    registry = _registry({"name": "poly2", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "other"})
     rows = _proposals_for(tmp_path, registry)
     rows.loc[0, "name"] = "poly2"  # clashes with the existing row
     rows.loc[0, "sample_id"] = "S1"  # malformed
@@ -268,8 +268,8 @@ def test_folder_whose_runs_are_all_registered_is_not_new(tmp_path):
     _touch(tmp_path / "DSC" / "polyX" / "polyX_run1.txt")
     _touch(tmp_path / "DSC" / "polyX" / "polyX_run2.txt")
     registry = _registry(
-        {"name": "r1", "instrument_name": "dsc", "raw_data_filename": "polyX_run1"},
-        {"name": "r2", "instrument_name": "dsc", "raw_data_filename": "polyX_run2"},
+        {"name": "r1", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "polyX_run1"},
+        {"name": "r2", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "polyX_run2"},
     )
 
     assert _items(tmp_path, registry) == {}
@@ -314,3 +314,28 @@ def test_filter_new_data_by_age_folder_and_text(tmp_path):
     assert [i.key for i in filter_new_data(items, text="CHITOSAN")] == ["DSC/projectA"]
     assert [i.key for i in filter_new_data(items, text="run")] == ["DSC/projectA", "DSC/old_run"]
     assert filter_new_data(items, folders={"DSC"}, modified_since=month_ago, text="old") == []
+
+
+def test_the_storage_folder_is_not_an_instrument_folder(tmp_path):
+    from mfethuls.discovery import instrument_folders, unclaimed_folders
+
+    for folder in ("_storage", "Mystery", ".mfethuls"):
+        (tmp_path / folder).mkdir()
+        (tmp_path / folder / "a.txt").write_text("1 2\n", encoding="utf-8")
+    assert [entry.name for entry in instrument_folders(str(tmp_path))] == ["Mystery"]
+    assert [folder.folder_name for folder in unclaimed_folders(str(tmp_path))] == ["Mystery"]
+
+
+def test_counting_an_unclaimed_folder_stops_at_max_count(tmp_path, monkeypatch):
+    from mfethuls.discovery import unclaimed_folders
+
+    monkeypatch.setenv("PATH_TO_DATA", str(tmp_path))
+    archive = tmp_path / "Archive"
+    for sub in ("a", "b"):
+        (archive / sub).mkdir(parents=True)
+        for i in range(6):
+            (archive / sub / f"f{i}.txt").write_text("x")
+    (folder,) = unclaimed_folders(str(tmp_path), limit=3, max_count=5)
+    assert (folder.file_count, folder.more, folder.count_label, len(folder.files)) == (5, True, "5+", 3)
+    (folder,) = unclaimed_folders(str(tmp_path))
+    assert (folder.file_count, folder.more, folder.count_label) == (12, False, "12")

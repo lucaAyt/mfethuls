@@ -1,3 +1,4 @@
+import os
 import shutil
 
 import pytest
@@ -6,13 +7,12 @@ import pandas as pd
 from mfethuls.examples import DATA_DIR as EXAMPLE_DATA
 from mfethuls.dataset import Dataset
 from mfethuls.parsers.registry import get_parser
-from mfethuls.parsers.sec import AgilentSec
 
 
 ALL_PARSER_KEYS = [
-    ("dsc", "prior"),
+    ("dsc", "mettler_toledo_v0"),
     ("dsc", "perkin_elmer"),
-    ("dsc", "mettler_toledo"),
+    ("dsc", "mettler_toledo_v1"),
     ("tga", "tgaX"),
     ("ftir", "bruker"),
     ("nmr", "bruker_nmr"),
@@ -60,7 +60,7 @@ def test_registered_parsers_are_resolvable(instrument_type, instrument_model):
 
 PARSER_BEHAVIOR_CASES = [
     {
-        "key": ("dsc", "prior"),
+        "key": ("dsc", "mettler_toledo_v0"),
         "raw": {"Tr [°C]": [25.0, 26.0], "Value [mW]": [0.10, 0.11]},
         "expect": {"temperature_C", "heat_flow_mW"},
     },
@@ -70,14 +70,14 @@ PARSER_BEHAVIOR_CASES = [
         "expect": {"temperature_C", "heat_flow_mW"},
     },
     {
-        "key": ("dsc", "mettler_toledo"),
+        "key": ("dsc", "mettler_toledo_v1"),
         "raw": {"Tr [°C]": [25.0, 26.0], "Value [mW]": [0.10, 0.11]},
         "expect": {"temperature_C", "heat_flow_mW"},
     },
     {
         "key": ("tga", "tgaX"),
-        "raw": {"Temperature [°C]": [25.0, 30.0], "Mass [%]": [100.0, 99.5]},
-        "expect": {"temperature_C", "mass_pct"},
+        "raw": {"Tr [°C]": [25.0, 30.0], "Weight [mg]": [10.0, 9.95]},  # the text export (dummy.txt)
+        "expect": {"temperature_C", "mass_mg", "mass_pct"},
     },
     {
         "key": ("ftir", "bruker"),
@@ -86,7 +86,7 @@ PARSER_BEHAVIOR_CASES = [
     },
     {
         "key": ("nmr", "bruker_nmr"),
-        "raw": {"ppm": [1.0, 0.9], "intensity": [100.0, 110.0]},
+        "raw": {"chemical_shift_ppm": [1.0, 0.9], "intensity_a_u": [100.0, 110.0]},  # what parse_raw_data gives
         "expect": {"chemical_shift_ppm", "intensity_a_u"},
     },
     {
@@ -101,8 +101,8 @@ PARSER_BEHAVIOR_CASES = [
     },
     {
         "key": ("sec", "agilent"),
-        "raw": {"time (min)": [5.0, 5.1], "value": [0.20, 0.25], "detector_name": ["ri", "ri"]},
-        "expect": {"retention_time_min", "detector_response_a_u", "detector_name"},
+        "raw": {"column_1": [5.0, 5.1], "column_2": [0.20, 0.25]},  # SEC exports have no header
+        "expect": {"retention_time_min", "detector_response_a_u"},
     },
     {
         "key": ("rheometer", "anton_paar"),
@@ -118,12 +118,12 @@ PARSER_BEHAVIOR_CASES = [
     },
     {
         "key": ("uv_vis", "flame"),
-        "raw": {"wavelength (nm)": [400.0, 450.0], "intensity": [0.8, 0.75]},
+        "raw": {"column_1": [400.0, 450.0], "column_2": [0.8, 0.75]},  # Flame spectra have no header
         "expect": {"wavelength_nm", "transmittance_pct"},
     },
     {
         "key": ("fluorescence", "flame"),
-        "raw": {"wavelength (nm)": [400.0, 450.0], "intensity": [11.9, -4.1]},
+        "raw": {"column_1": [400.0, 450.0], "column_2": [11.9, -4.1]},
         "expect": {"wavelength_nm", "emission_counts"},
     },
     {
@@ -140,7 +140,7 @@ def test_each_parser_normalizes_expected_columns(case, monkeypatch):
     parser = get_parser(instrument_type, instrument_model)
 
     raw_df = pd.DataFrame(case["raw"])
-    monkeypatch.setattr(parser, "parse_raw_data", lambda _path, _df=raw_df: _df.copy())
+    monkeypatch.setattr(parser, "parse_raw_data", lambda _path, _df=raw_df, **_: _df.copy())
 
     parse_kwargs = case.get("parse_kwargs", {})
     dataset = parser.parse(
@@ -162,18 +162,6 @@ def test_each_parser_normalizes_expected_columns(case, monkeypatch):
     assert dataset.sample_id == "S001"
 
 
-def test_sec_infer_detector_name_from_filename_tokens():
-    parser = AgilentSec()
-
-    assert parser._infer_detector_name("EXP005.dx_RID1A.CSV") == "ri"
-    assert parser._infer_detector_name("EXP005.dx_VWD1A.CSV") == "uv"
-    assert parser._infer_detector_name("sample_ri_trace.csv") == "ri"
-    assert parser._infer_detector_name("sample_uv254_signal.csv") == "uv"
-    assert parser._infer_detector_name("sample_mals_channel.csv") == "ls"
-    assert parser._infer_detector_name("sample_visc_dp.csv") == "viscometer"
-    assert parser._infer_detector_name("sample_unknown_detector.csv") == "unknown"
-
-
 def test_dma_parser_explicit_measurement_profile_trumps_metadata(monkeypatch):
     parser = get_parser("dma", "ta_q800")
     raw_df = pd.DataFrame(
@@ -183,7 +171,7 @@ def test_dma_parser_explicit_measurement_profile_trumps_metadata(monkeypatch):
             "Loss Modulus [MPa]": [0.2, 0.25],
         }
     )
-    monkeypatch.setattr(parser, "parse_raw_data", lambda _path, _df=raw_df: _df.copy())
+    monkeypatch.setattr(parser, "parse_raw_data", lambda _path, _df=raw_df, **_: _df.copy())
 
     dataset = parser.parse(
         {"dummy": ["dummy.txt"]},
@@ -212,7 +200,7 @@ def test_dma_parser_subset_measurement_profile_maps_to_canonical(monkeypatch):
             "Loss Modulus [MPa]": [0.2, 0.25],
         }
     )
-    monkeypatch.setattr(parser, "parse_raw_data", lambda _path, _df=raw_df: _df.copy())
+    monkeypatch.setattr(parser, "parse_raw_data", lambda _path, _df=raw_df, **_: _df.copy())
 
     dataset = parser.parse(
         {"dummy": ["dummy.txt"]},
@@ -237,7 +225,7 @@ def test_dma_parser_subset_measurement_profile_maps_to_canonical(monkeypatch):
 @pytest.mark.parametrize(
     "key,example,renamed",
     [
-        (("dsc", "mettler_toledo"), "DSC/poly1.txt", "test.txt"),
+        (("dsc", "mettler_toledo_v1"), "DSC/poly1.txt", "test.txt"),
         (("tga", "tgaX"), "TGA/poly1.txt", "test.txt"),
         (("ftir", "bruker"), "FTIR/poly1.csv", "spec.csv"),
     ],
@@ -255,3 +243,55 @@ def test_parser_name_keeps_full_file_stem(tmp_path, key, example, renamed):
 
     assert set(df["name"]) == {path.stem}
 
+
+
+def test_nmr_reads_each_processed_spectrum_once(tmp_path, monkeypatch):
+    """Every <expno>/pdata/<procno> holding a 1r is read once, named by its place in the dataset."""
+    files = []
+    for relative in ["EXP/1/acqus", "EXP/1/fid", "EXP/1/pdata/1/1r", "EXP/1/pdata/1/procs",
+                     "EXP/2/acqus", "EXP/2/pdata/1/1r", "EXP/2/pdata/1/title"]:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("13C spectrum\n" if relative.endswith("title") else "x", encoding="utf-8")
+        files.append(str(path))
+    parser = get_parser("nmr", "bruker_nmr")
+    read = []
+
+    def parse_raw_data(folder, **_):
+        read.append(os.path.relpath(folder, tmp_path).replace(os.sep, "/"))
+        return pd.DataFrame({"chemical_shift_ppm": [2.0, 1.0], "intensity_a_u": [5.0, 6.0]})
+
+    monkeypatch.setattr(parser, "parse_raw_data", parse_raw_data)
+    data = parser.parse({"EXP": files}, experiment_id="e", instrument_type="nmr").data
+    assert read == ["EXP/1/pdata/1", "EXP/2/pdata/1"]
+    assert data["source_file"].tolist() == ["1/pdata/1"] * 2 + ["2/pdata/1"] * 2
+
+
+def test_nmr_keeps_the_spectrum_title(tmp_path):
+    from mfethuls.parsers.nmr import _spectrum_label, _title_lines
+
+    (tmp_path / "title").write_text("PROTON DMSO\n\nLUB 9\n", encoding="utf-8")
+    assert _title_lines(str(tmp_path)) == ["PROTON DMSO", "LUB 9"]
+    assert _spectrum_label(os.path.join("data", "EXP014", "1", "pdata", "1")) == "1/pdata/1"
+
+
+def test_nmr_nucleus_and_solvent_come_from_the_parameters():
+    from mfethuls.parsers.nmr import _parameter
+
+    dic = {"acqus": {"NUC1": "<13C>", "SOLVENT": "CDCl3"}, "procs": {"AXNUC": "1H"}}
+    assert _parameter(dic, ("acqus", "NUC1"), ("procs", "AXNUC")) == "13C"
+    assert _parameter({"acqus": {"NUC1": "off"}, "procs": {"AXNUC": "19F"}},
+                      ("acqus", "NUC1"), ("procs", "AXNUC")) == "19F"
+    assert _parameter(dic, ("acqus", "SOLVENT")) == "CDCl3"
+    assert _parameter({}, ("acqus", "SOLVENT")) is None
+
+
+def test_nmr_says_why_a_processed_spectrum_cannot_be_read(tmp_path):
+    from mfethuls.parsers.ingestion import ParseError
+    from mfethuls.parsers.nmr import BrukerNMRParser
+
+    spectrum = tmp_path / "EXP099" / "1" / "pdata" / "1"
+    spectrum.mkdir(parents=True)
+    (spectrum / "1r").write_bytes(b"not a spectrum")
+    with pytest.raises(ParseError, match=r"1/pdata/1: no processed spectrum \("):
+        BrukerNMRParser().parse({"EXP099": [str(spectrum / "1r")]}, instrument_type="nmr")

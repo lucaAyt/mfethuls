@@ -21,7 +21,8 @@ from mfethuls.plotting import (
     plot_uv_vis,
 )
 from mfethuls.plotting.comparison import ComparisonSet
-from mfethuls.plotting.core import PlotError
+from mfethuls.plotting.core import PlotError, build_dataset_spec
+from mfethuls.plotting.comparison import build_experiments_spec
 
 
 def _close(result):
@@ -62,7 +63,8 @@ def test_plot_dataset_dispatches_fluorescence_by_metadata_or_columns(metadata):
 
     fig, ax = _close(plot_dataset(dataset))
     assert ax.get_ylabel() == "Emission intensity (counts)"
-    assert "Fluorescence" in ax.get_title()
+    assert "Fluorescence" in build_dataset_spec(dataset).panel.title
+    assert ax.get_title() == ""  # publication figures carry no title
 
 
 def test_plot_uv_vis_rejects_fluorescence_data():
@@ -296,7 +298,7 @@ def test_plot_rheology_uses_profile_requirements():
     )
 
     fig, ax = _close(plot_rheology(dataset))
-    assert ax.get_xlabel() == r"Angular frequency $\omega$ (rad s$^{-1}$)"
+    assert ax.get_xlabel() == r"Angular frequency (rad s$^{-1}$)"
     assert len(ax.lines) == 2
 
 
@@ -523,7 +525,7 @@ def test_plot_uv_vis_logs_when_inferred_grouping_ties(caplog):
 def _dsc_registry(*names):
     from mfethuls import Registry
 
-    return Registry.from_frame(pd.DataFrame([{"name": name, "instrument_name": "dsc"} for name in names]))
+    return Registry.from_frame(pd.DataFrame([{"name": name, "instrument_name": "dsc_mettler_toledo_v0"} for name in names]))
 
 
 def test_load_experiments_preserves_order_and_options(monkeypatch):
@@ -585,7 +587,8 @@ def test_plot_experiments_auto_overlay_when_shared_x():
 
     fig, ax = _close(plot_experiments([ds1, ds2], mode="auto", kind="uv_vis"))
     assert len(ax.lines) == 2
-    assert ax.get_title() == "Comparison Overlay"
+    assert ax.get_title() == ""  # the title is the Plotly figure's only
+    assert build_experiments_spec([ds1, ds2], kind="uv_vis").panel.title == "Comparison Overlay"
 
 
 def test_plot_experiments_auto_facet_when_x_not_compatible():

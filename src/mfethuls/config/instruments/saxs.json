@@ -1,0 +1,17 @@
+{
+  "spec_version": 1,
+  "name": "saxs",
+  "type": "saxs",
+  "model": "anton_paar",
+  "folder_name": "SAXS",
+  "data_layout": "file",
+  "description": "Anton Paar SAXS curve: a CSV with one header line (q, intensity, error). Curves are named after their folder.",
+  "file": { "extensions": [".csv"], "encoding": "auto", "delimiter": "comma", "header": { "rows": 1 },
+            "data_ends": "first_non_numeric_row" },
+  "columns": [
+    { "source": ["Q [1/nm]", "q [1/nm]", "q (1/nm)", "q", "Q"], "quantity": "q", "unit": "nm-1" },
+    { "source": ["Intensity Relative [Absolute Intensity x SampleThickness]", "I", "Intensity", "I(q)", "intensity"], "quantity": "intensity", "unit": "a.u." },
+    { "source": ["Intensity Relative [Error]", "dI", "Error", "sigma"], "quantity": "intensity_error", "unit": "a.u." }
+  ],
+  "name_from": "folder"
+}

@@ -1,16 +1,16 @@
 """Every configured instrument can be ingested: parser, schema and data folder are all present."""
 
-import json
 from pathlib import Path
 
 import pytest
 
 import mfethuls.config
 import mfethuls.parsers  # noqa: F401  (registers the parsers)
+from mfethuls.instruments.configured import instrument_entries
 from mfethuls.parsers.registry import _PARSER_REGISTRY
 
 CONFIG_DIR = Path(mfethuls.config.__file__).parent
-INSTRUMENTS = json.loads((CONFIG_DIR / "instrument_params.json").read_text(encoding="utf8"))
+INSTRUMENTS = instrument_entries(data_root="")  # built-in only, never the developer's data folder
 
 
 @pytest.mark.parametrize("instrument", INSTRUMENTS, ids=[entry["name"] for entry in INSTRUMENTS])

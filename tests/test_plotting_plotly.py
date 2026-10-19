@@ -85,7 +85,7 @@ def test_plotly_dma_uses_log_axes():
 
     fig = plot_dma(dataset, backend="plotly")
     assert (fig.layout.xaxis.type, fig.layout.yaxis.type) == ("log", "log")
-    assert [trace.name for trace in fig.data] == ["Storage modulus E′", "Loss modulus E″"]
+    assert [trace.name for trace in fig.data] == ["Storage modulus", "Loss modulus"]
 
 
 def test_plotly_dsc_overlay_has_segment_and_experiment_legends():

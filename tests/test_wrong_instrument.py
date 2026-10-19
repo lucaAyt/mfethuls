@@ -28,7 +28,7 @@ def lab(tmp_path, monkeypatch):
 
 
 def test_shimadzu_files_do_not_read_as_flame_data(lab):
-    assert "Flame" in probe_raw_data("uv_insitu", "LUB621")
+    assert ">>>>>Begin Spectral Data<<<<<" in probe_raw_data("uv_insitu", "LUB621")
     assert probe_raw_data("uv_vis", "LUB621") is None
 
 
@@ -51,7 +51,7 @@ def test_ingest_fails_instead_of_storing_wrong_data(lab):
         {"name": "LUB621", "instrument_name": "uv_insitu", "raw_data_filename": "LUB621"},
     ]))
     with open_local_stores() as stores:
-        with pytest.raises(ParseError, match="Flame"):
+        with pytest.raises(ParseError, match="Begin Spectral Data"):
             ingest_experiment_dataset("LUB621", refresh=True, registry=registry, stores=stores)
         assert stores.catalog.list_registered() == []
 

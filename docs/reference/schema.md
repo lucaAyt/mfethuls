@@ -47,19 +47,28 @@ This document defines the canonical data contract after parser normalization.
 27. shear_rate_s_inv: shear rate in 1/s.
 28. shear_stress_pa: shear stress in Pa.
 29. viscosity_pa_s: viscosity in Pa*s.
+30. heat_flow_W_g: heat flow per sample mass in W/g (= mW/mg). Exported by some DSCs, or computed from heat_flow_mW and sample_mass_mg.
+31. sample_mass_mg: sample mass in mg as stated in the file (one value per file).
+32. strain_mm: strain written as a length, in mm (tensile testers' "Strain"). Never converted to or mixed with strain_pct.
+33. stress_pa / stress_mpa: normal (tensile, compressive) stress, in Pa; in MPa for the tensile contract.
+34. shear_stress_mpa: shear stress in MPa (tensile contract, e.g. lap shear).
+35. displacement_mm: displacement or extension in mm.
+36. force_N: force in N.
+37. test_date: date and time of a test, UTC.
 
 ## Instrument Contracts
 
-1. DSC (schema 1.1): required columns temperature_C, heat_flow_mW.
-2. TGA (schema 1.0): required columns temperature_C, mass_mg. The characterizer computes mass_pct via min-max normalization of mass_mg.
+1. DSC (schema 1.1): required columns temperature_C and one of heat_flow_mW, heat_flow_W_g. When the file states the sample mass, both are stored.
+2. TGA (schema 1.0): required columns temperature_C, mass_mg. mass_pct is mass as percent of each curve's initial mass (the curve starts at 100 %); the definition derives it, and the characterizer computes it the same way when it is missing.
 3. FTIR (schema 1.0): required column wavenumber_cm_inv. Signal can be absorbance_a_u or transmittance_pct.
 4. UV/Vis (schema 1.0): required column wavelength_nm. Signal can be absorbance_a_u or transmittance_pct.
 5. SAXS (schema 1.0): required columns q_inv_nm, intensity_a_u.
 6. MS (schema 1.0): required columns mz, intensity_a_u.
 7. SEC (schema 1.0): required columns retention_time_min, detector_response_a_u, detector_name.
-8. NMR (schema 1.0): required columns chemical_shift_ppm, intensity_a_u.
+8. NMR (schema 1.0): required columns chemical_shift_ppm, intensity_a_u. Every row also has `nucleus` (`1H`, `13C`, …, from the acquisition parameters) and `solvent`; `source_file` names the spectrum within the Bruker dataset (`1/pdata/1`).
 9. Rheometer (schema 1.0): no global required columns. Requirements are profile-driven.
 10. DMA (schema 1.0): no global required columns. Requirements are profile-driven.
+11. Tensile (schema 1.0): one of strain_mm, strain_pct and one of stress_mpa, shear_stress_mpa. Stresses in MPa.
 
 ## Profile-Driven Requirements
 

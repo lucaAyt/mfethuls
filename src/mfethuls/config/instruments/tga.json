@@ -1,0 +1,49 @@
+{
+  "spec_version": 1,
+  "name": "tga",
+  "type": "tga",
+  "model": "tgaX",
+  "folder_name": "TGA",
+  "data_layout": "file",
+  "description": "TGA text export (header line 'Index ...' followed by a units line, a footer after the data) or a CSV export with one header line.",
+  "formats": [
+    {
+      "label": "text export",
+      "file": {
+        "extensions": [".txt"],
+        "encoding": "cp1252",
+        "delimiter": "whitespace",
+        "header": { "starts_at": "Index", "rows": 2 },
+        "data_ends": "first_non_numeric_row"
+      },
+      "columns": [
+        { "source": ["Tr [°C]", "Tr [C]"], "quantity": "temperature", "unit": "°C" },
+        { "source": ["Ts [°C]", "Ts [C]"], "quantity": "sample_temperature", "unit": "°C" },
+        { "source": "t [s]", "quantity": "time", "unit": "s" },
+        { "source": "Weight [mg]", "quantity": "mass", "unit": "mg" },
+        { "source": "HF [mW]", "quantity": "heat_flow", "unit": "mW" }
+      ]
+    },
+    {
+      "label": "CSV export",
+      "file": {
+        "extensions": [".csv"],
+        "encoding": "utf-8",
+        "delimiter": "comma"
+      },
+      "columns": [
+        { "source": ["temperature_C", "Temperature [°C]", "Temperature [C]", "Temperature", "Program Temperature"], "quantity": "temperature", "unit": "°C" },
+        { "source": ["time_s", "Time [s]", "t [s]"], "quantity": "time", "unit": "s" },
+        { "source": ["mass_mg", "Mass [mg]", "Weight [mg]", "Unsubtracted Weight"], "quantity": "mass", "unit": "mg" },
+        { "source": ["mass_pct", "Mass [%]", "Weight [%]", "Weight Percent [%]"], "quantity": "mass_pct", "unit": "%" },
+        { "source": ["mass_loss_pct", "Mass Loss [%]", "Weight Loss [%]"], "quantity": "mass_loss", "unit": "%" },
+        { "source": ["d_mass_dt_pct_min", "DTG [%/min]", "dW/dt", "Derivative Weight [%/min]"], "quantity": "mass_loss_rate", "unit": "%/min" },
+        { "source": ["heat_flow_mW", "Heat Flow [mW]", "HF [mW]"], "quantity": "heat_flow", "unit": "mW" }
+      ]
+    }
+  ],
+  "derived": [
+    { "op": "pct_of_initial", "column": "mass_mg", "into": "mass_pct" }
+  ],
+  "characterizer": { "type": "tga" }
+}

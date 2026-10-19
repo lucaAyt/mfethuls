@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,9 @@ def run_streamlit(script: Path, argv: list[str] | None = None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if importlib.util.find_spec("streamlit") is None:
+        print('The app needs Streamlit, which is not installed. Install it with: pip install "mfethuls[viz]"')
+        return 1
     return run_streamlit(Path(__file__).with_name("streamlit_app.py"), argv)
 
 

@@ -11,7 +11,7 @@ from ..experiments import Experiment
 class DataStorageBackend:
     """Abstract base class for data storage backends."""
 
-    # Recorded in provenance and the metadata mirror, e.g. "local_filesystem", "s3".
+    # Recorded in provenance and the metadata sink, e.g. "local_filesystem", "s3".
     label: str = "local_filesystem"
     is_cloud: bool = False
 
@@ -53,7 +53,7 @@ class MetadataBackend:
 
 
 class DatasetMetadata(TypedDict, total=False):
-    """Unified metadata schema for both local and Postgres storage."""
+    """The record a metadata sink (:class:`MetadataBackend`) receives for each stored dataset."""
 
     experiment_id: str
     sample_id: Optional[str]

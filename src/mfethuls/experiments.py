@@ -1,3 +1,5 @@
+"""The experiment registry (CSV/XLSX): one :class:`Experiment` per row, loading, validation and appending rows."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

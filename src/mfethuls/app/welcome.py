@@ -317,6 +317,10 @@ def _create_registry(path: str) -> None:
 def render_setup_form(backend, *, key: str) -> None:
     """Data folder and registry inputs, checked as they are typed, and Save."""
     settings = get_settings()
+    if not getattr(backend, "edits_settings", False):
+        st.caption("The data folder and registry are set by whoever runs this app.")
+        st.markdown(f"Registry: `{os.path.basename(settings.registry_path or '') or 'not set'}`")
+        return
     data_root = st.text_input("Data folder", value=settings.data_root or "", key=f"{key}_data_root",
                               placeholder=r"e.g. C:\Users\you\OneDrive\lab-data",
                               help="The folder that holds one subfolder per instrument.")

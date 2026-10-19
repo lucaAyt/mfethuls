@@ -1,3 +1,5 @@
+"""Load several experiments at once as a :class:`ComparisonSet` (datasets and their labels)."""
+
 from __future__ import annotations
 
 import logging

@@ -24,7 +24,7 @@ def test_known_instrument_valid():
         [
             {
                 "name": "ok",
-                "instrument_name": "dsc_mettler_toledo",
+                "instrument_name": "dsc_mettler_toledo_v1",
                 "raw_data_filename": "my_sample_run",
                 "sample_id": "S001",
             }

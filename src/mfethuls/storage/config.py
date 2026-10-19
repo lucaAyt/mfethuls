@@ -32,8 +32,6 @@ def _get_storage_root() -> str:
     return root
 
 
-# Need to check that file exists to decide 
-# whether to initialise or connect
 def catalog_path() -> str:
     """Where the DuckDB catalog is (``MFETHULS_DUCKDB_PATH``, else ``mfethuls.duckdb`` in the storage folder).
 

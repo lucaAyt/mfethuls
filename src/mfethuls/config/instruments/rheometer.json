@@ -1,0 +1,29 @@
+{
+  "spec_version": 1,
+  "name": "rheometer",
+  "type": "rheometer",
+  "model": "anton_paar",
+  "folder_name": "Rheology",
+  "data_layout": "file",
+  "description": "Anton Paar RheoCompass export (tab separated): Project/Test/Result lines, then one table per interval. Each interval starts with 'Interval and data points:<tab>1<tab>60', then a line of column names ('Interval data:<tab>Point No.<tab>Time ...'), a line of tabs and a line of units ([min], [°C], ...). The interval number fills the 'interval' column.",
+  "file": {
+    "extensions": [".csv"],
+    "encoding": "auto",
+    "delimiter": "tab",
+    "header": { "starts_at": "Interval data:", "rows": 2 },
+    "data_ends": "first_non_numeric_row",
+    "blocks": { "starts_at": "Interval and data points:", "label": "^Interval and data points:\\s*(\\d+)", "column": "interval" }
+  },
+  "columns": [
+    { "source": ["Time [s]", "t [s]"], "quantity": "time", "unit": "s" },
+    { "source": ["Temperature [°C]", "T [°C]"], "quantity": "temperature", "unit": "°C" },
+    { "source": ["Storage Modulus [Pa]", "G' [Pa]"], "quantity": "storage_modulus", "unit": "Pa" },
+    { "source": ["Loss Modulus [Pa]", "G'' [Pa]"], "quantity": "loss_modulus", "unit": "Pa" },
+    { "source": "Loss Factor [1]", "quantity": "tan_delta", "unit": "1" },
+    { "source": ["Shear Strain [%]", "Strain [%]", "γ [%]", "gamma [%]"], "quantity": "strain", "unit": "%" },
+    { "source": ["Shear Stress [Pa]", "τ [Pa]"], "quantity": "shear_stress", "unit": "Pa" },
+    { "source": ["Angular Frequency [rad/s]", "ω [rad/s]", "w [rad/s]"], "quantity": "angular_frequency", "unit": "rad/s" },
+    { "source": ["Shear Rate [1/s]", "γ̇ [1/s]"], "quantity": "shear_rate", "unit": "1/s" },
+    { "source": ["Viscosity [Pa·s]", "η [Pa s]", "Viscosity [Pa s]"], "quantity": "viscosity", "unit": "Pa·s" }
+  ]
+}

@@ -6,7 +6,6 @@ coherent before attempting to parse, reducing runtime surprises.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -16,6 +15,7 @@ import pandas as pd
 
 from mfethuls.parsers.registry import _PARSER_REGISTRY
 from mfethuls.schema_normalization import _load_instrument_schema
+from mfethuls.naming import stem_key, view_key, view_name
 from mfethuls.settings import get_settings
 
 if TYPE_CHECKING:
@@ -29,16 +29,16 @@ _S_RE = re.compile(r"^S[0-9]{3,6}$")
 _R_RE = re.compile(r"^R[0-9]{3,6}$")
 _SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9_\-\.]+$")
 
+# Built-in instruments that were renamed: old name -> new name. Only to say so when a
+# registry row still uses the old name; the old name is not accepted.
+_RENAMED_INSTRUMENTS = {"dsc": "dsc_mettler_toledo_v0", "dsc_mettler_toledo": "dsc_mettler_toledo_v1"}
+
 
 def _load_instrument_config() -> List[Dict[str, Any]]:
-    """Load the instrument configuration file."""
-    config_path = os.path.join(
-        os.path.dirname(__file__), "config", "instrument_params.json"
-    )
-    if not os.path.exists(config_path):
-        return []
-    with open(config_path, encoding="utf8") as f:
-        return json.load(f)
+    """Every instrument: ``instrument_params.json`` plus instrument definitions."""
+    from mfethuls.instruments.configured import instrument_entries
+
+    return instrument_entries()
 
 
 def _get_instrument_entry(name: str) -> Optional[Dict[str, Any]]:
@@ -58,13 +58,7 @@ def _load_canonical_profiles_from_schema(
     """Collect canonical profile keys from global and model-specific schema layers."""
 
     global_profiles = schema.get("profiles", {}) if isinstance(schema.get("profiles", {}), dict) else {}
-    model_profiles: Dict[str, Any] = {}
-
-    if instrument_model and isinstance(schema.get("models", {}), dict):
-        model_layer = schema.get("models", {}).get(instrument_model, {})
-        model_profiles = model_layer.get("profiles", {}) if isinstance(model_layer.get("profiles", {}), dict) else {}
-
-    return set(global_profiles) | set(model_profiles)
+    return set(global_profiles)
 
 
 def _profile_tokens(profile: str) -> set[str]:
@@ -131,11 +125,6 @@ def infer_canonical_profile_from_registry_profile(
     4. Token subset match (all registry tokens are in canonical)
 
     Returns canonical profile name, or None if no match found.
-    TODO: Stress test this algorithm for edge cases and consider:
-      - Typo tolerance (edit distance)
-      - Fuzzy/approximate matching
-      - Domain-specific alias dictionaries
-      - Partial word matching
     """
 
     if not registry_profile:
@@ -171,10 +160,17 @@ class RegistryValidator:
         # 1. Check instrument exists in config
         instr_entry = _get_instrument_entry(experiment.instrument_name)
         if instr_entry is None:
-            errors.append(
-                f"Instrument '{experiment.instrument_name}' not found in instrument_params.json. "
-                f"Available instruments: {self._list_instrument_names()}"
-            )
+            renamed = _RENAMED_INSTRUMENTS.get(str(experiment.instrument_name or "").casefold())
+            if renamed:
+                errors.append(
+                    f"Instrument '{experiment.instrument_name}' was renamed to '{renamed}' in mfethuls 0.4.0. "
+                    f"Change instrument_name in the registry, then run Clean up."
+                )
+            else:
+                errors.append(
+                    f"Instrument '{experiment.instrument_name}' is not a known instrument. "
+                    f"Available instruments: {self._list_instrument_names()}"
+                )
             return False, errors
 
         # 2. Extract type and model from config
@@ -196,9 +192,9 @@ class RegistryValidator:
             )
             return False, errors
 
-        # 4. Check schema exists
+        # 4. Check schema exists (an instrument definition may bring a new measurement type)
         schema = _load_instrument_schema(instr_type)
-        if not schema:
+        if not schema and instr_entry.get("definition") is None:
             errors.append(
                 f"No schema file found for instrument type '{instr_type}'. "
                 f"Expected: schemas/{instr_type}.json"
@@ -320,8 +316,6 @@ class RegistryValidator:
         # Check if registry profile can be canonicalized
         matched_profile = _match_canonical_profile(registry_profile, canonical_profiles)
         if matched_profile is None:
-            # TODO: Stress test infer_canonical_profile_from_registry_profile() matching algorithm
-            # Consider: typo tolerance, fuzzy matching, domain-specific aliases, etc.
             available = sorted(canonical_profiles)
             logger.warning(
                 "Could not canonicalize registry_measurement_profile '%s' for %s experiment %s. "
@@ -335,12 +329,6 @@ class RegistryValidator:
 
         # Check that profile has required columns defined
         profile_def = schema.get("profiles", {}).get(matched_profile, {}) if isinstance(schema.get("profiles", {}), dict) else {}
-        if not profile_def and isinstance(schema.get("models", {}), dict) and instr_model:
-            model_layer = schema.get("models", {}).get(instr_model, {})
-            if isinstance(model_layer, dict):
-                model_profiles = model_layer.get("profiles", {})
-                if isinstance(model_profiles, dict):
-                    profile_def = model_profiles.get(matched_profile, {})
         required_cols = profile_def.get("required_columns", [])
         if not required_cols:
             logger.warning(
@@ -369,6 +357,12 @@ def _text(value: Any) -> Optional[str]:
     return text or None
 
 
+def _view_of(rec: Dict[str, Any], name: str) -> str:
+    """The catalog view basename of a registry row (as ``storage.config._view_basename``)."""
+    parts = [name, _text(rec.get("sample_id")), _text(rec.get("run_id")) or "R001"]
+    return "_".join(part for part in parts if part)
+
+
 def _table_errors(df: pd.DataFrame) -> List[List[Dict[str, str]]]:
     """Errors that need the whole table: duplicate names and files, unsafe file names.
 
@@ -386,10 +380,18 @@ def _table_errors(df: pd.DataFrame) -> List[List[Dict[str, str]]]:
     for name in names:
         if name:
             name_count[name] = name_count.get(name, 0) + 1
+    # Raw data names are compared ignoring case, as when their files are found.
     file_count: Dict[Tuple[str, str], int] = {}
     for file, instrument in zip(files, instruments):
         if file and instrument:
-            file_count[(file, instrument)] = file_count.get((file, instrument), 0) + 1
+            key = (stem_key(file), instrument)
+            file_count[key] = file_count.get(key, 0) + 1
+    # Each row's catalog view (name_sample_run): DuckDB names ignore case and punctuation becomes "_".
+    views = [_view_of(rec, name) if name else None for rec, name in zip(records, names)]
+    view_rows: Dict[str, List[int]] = {}
+    for idx, view in enumerate(views):
+        if view:
+            view_rows.setdefault(view_key(view), []).append(idx)
 
     for idx, rec in enumerate(records):
         if names[idx] and name_count[names[idx]] > 1:
@@ -397,7 +399,17 @@ def _table_errors(df: pd.DataFrame) -> List[List[Dict[str, str]]]:
                 "field": "name",
                 "message": f"Name {names[idx]!r} is used by more than one row. Each name must be unique.",
             })
-        if files[idx] and instruments[idx] and file_count[(files[idx], instruments[idx])] > 1:
+        others = [names[i] for i in view_rows.get(view_key(views[idx]), []) if i != idx] if views[idx] else []
+        if others and names[idx] not in others:
+            errors[idx].append({
+                "field": "name",
+                "message": (
+                    f"Name {names[idx]!r} and {', '.join(map(repr, sorted(set(others))))} would share the table "
+                    f"name {view_name(views[idx])!r} (table names ignore case and turn other characters "
+                    "into '_'). Rename one."
+                ),
+            })
+        if files[idx] and instruments[idx] and file_count[(stem_key(files[idx]), instruments[idx])] > 1:
             errors[idx].append({
                 "field": "raw_data_filename",
                 "message": (

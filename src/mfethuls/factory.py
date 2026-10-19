@@ -1,6 +1,10 @@
+"""Build an experiment's instrument (parser + characterizer) and parse its raw files into a Dataset."""
+
 import os
 
 from mfethuls.parsers import get_parser
+from mfethuls.parsers.registry import reader_fingerprint
+from mfethuls.instruments.definition import CHARACTERIZERS
 from mfethuls.instruments.generic import GenericInstrument
 from mfethuls.characterizers.dsc import DSCProfiling
 from mfethuls.characterizers.tga import TGACharacterizer
@@ -15,36 +19,15 @@ def get_data_root_path(folder_name: str) -> str:
     return os.path.join(get_settings().data_root, folder_name)
 
 
-def instrument_data_path_constructor(path, *args):
-    """Build a dict mapping raw_data_filename → list of file paths.
+def instrument_data_path_constructor(path, raw_filenames):
+    """``{raw_data_filename: [sorted file paths]}`` for each name in ``raw_filenames``.
 
-    Walks ``path`` (the instrument root folder) and locates files whose stem
-    matches each entry in ``args``, or a folder named after it.  Only files
-    with that stem are collected; for multi-file experiments, put the files in
-    a folder named after the experiment (see ``manifest.find_data_files``).
-
-    Returns ``{raw_data_filename: [sorted_file_paths], ...}``.
+    Looks in ``path`` (the instrument folder) for the files with that stem, or a
+    folder named after it (see ``manifest.find_data_files``).
     """
     from mfethuls.manifest import find_data_files
 
-    args = args[0] if len(args) == 1 and isinstance(args[0], list) else [*args]
-
-    if not args:
-        if not os.path.exists(path):
-            raise KeyError(f'path: {path} does not exist')
-        files = sorted(
-            os.path.join(path, f) for f in os.listdir(path)
-            if os.path.isfile(os.path.join(path, f)) and not f.endswith(".parquet")
-        )
-        key = os.path.basename(os.path.normpath(path))
-        return {key: files}
-
-    dict_paths: dict[str, list[str]] = {}
-    for raw_filename in args:
-        _parent_dir, files = find_data_files(path, raw_filename)
-        dict_paths[raw_filename] = files
-
-    return dict_paths
+    return {raw_filename: find_data_files(path, raw_filename)[1] for raw_filename in raw_filenames}
 
 
 def create_instrument(type_, name, model, characterizer=None, data_root_path=None):
@@ -52,11 +35,20 @@ def create_instrument(type_, name, model, characterizer=None, data_root_path=Non
     return GenericInstrument(type_, name, model, parser, characterizer, data_root_path)
 
 
+# How to build each characterizer in ``definition.CHARACTERIZERS`` (which says the type it works on).
+_BUILDERS = {
+    "dsc_profiling": lambda config: DSCProfiling(config.get("sensitivity", 0.1)),
+    "tga": lambda config: TGACharacterizer(),
+}
+
+
 def create_characterizer(type_, config):
-    if type_ == 'dsc' and config.get('type') == 'dsc_profiling':
-        return DSCProfiling(config.get('sensitivity', 0.1))
-    if type_ == 'tga':
-        return TGACharacterizer()
+    """The characterizer ``config`` names (``{"type": "dsc_profiling", "sensitivity": 0.1}``) for data of
+    instrument type ``type_``, or None when there is none for that type."""
+    name = (config or {}).get("type")
+    if name not in _BUILDERS or CHARACTERIZERS[name][0] != type_:
+        return None
+    return _BUILDERS[name](config)
 
 
 def _apply_characterizer(dataset: Dataset, instrument) -> Dataset:
@@ -91,15 +83,12 @@ def parse_experiment(
     dict_data_paths,
     instrument,
 ):
-    """High-level helper to parse data for a given Experiment.
-
-    This function is an initial glue layer between the new Experiment / Dataset
-    abstractions and the existing instrument + parser machinery. It does not
-    alter existing code paths but provides a single-place entry point for the
-    new flow.
+    """Parse the raw data of ``experiment`` with its instrument's parser and characterizer.
 
     Runs registry validation first to fail fast if instrument/model/profile
-    expectations are not coherent.
+    expectations are not coherent. The registry row's metadata (including its
+    measurement profile) is passed to the parser, and the reader's fingerprint is
+    stored with the dataset.
     """
 
     # Validate registry before attempting parse
@@ -115,7 +104,7 @@ def parse_experiment(
     sample_id = RegistryValidator.validate_sample_id(experiment.sample_id)
     run_id = RegistryValidator.validate_run_id(experiment.run_id)
 
-    parser = instrument.parser if hasattr(instrument, "parser") else get_parser(instrument.type_, instrument.model)
+    parser = instrument.parser
 
     parse_kwargs = dict(
         experiment_id=experiment_id,
@@ -127,8 +116,6 @@ def parse_experiment(
         experiment_name=experiment.name,
         metadata=experiment.metadata,
     )
-    if instrument.type_ in {"rheometer", "dma"}:
-        parse_kwargs["measurement_profile"] = experiment.metadata.get("registry_measurement_profile")
-
     parsed = parser.parse(dict_data_paths, **parse_kwargs)
+    parsed.metadata["reader_fingerprint"] = reader_fingerprint(parser)
     return _apply_characterizer(parsed, instrument)
