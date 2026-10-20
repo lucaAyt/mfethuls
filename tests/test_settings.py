@@ -51,7 +51,7 @@ def test_using_restores_previous_settings():
     with using(Settings(data_root="/inner")):
         assert get_settings().data_root == "/inner"
 
-    assert get_settings() is outer
+    assert get_settings() == outer.with_defaults()
 
 
 def test_with_test_paths_reports_missing_variables():
@@ -134,3 +134,19 @@ def test_use_folders_wins_over_saved_settings_for_this_session(monkeypatch, tmp_
 
     assert get_settings().data_root == "/notebook"
     assert get_settings().registry_path == "/saved.csv"  # not given: unchanged
+
+
+def test_registry_defaults_to_a_file_in_the_data_folder(tmp_path):
+    from mfethuls.settings import DEFAULT_REGISTRY_NAME, use_folders
+
+    with using(Settings(data_root=str(tmp_path))):
+        assert get_settings().registry_path == os.path.join(str(tmp_path), DEFAULT_REGISTRY_NAME)
+    with using(Settings(data_root=str(tmp_path), registry_path="/elsewhere/list.csv")):
+        assert get_settings().registry_path == "/elsewhere/list.csv"
+    with using(Settings()):
+        assert get_settings().registry_path is None
+        # Another data folder brings its own default registry, not the previous folder's.
+        with using(Settings(data_root="/first")):
+            settings = use_folders(data_root="/second")
+            assert settings.registry_path == os.path.join("/second", DEFAULT_REGISTRY_NAME)
+            assert get_settings().registry_path == os.path.join("/second", DEFAULT_REGISTRY_NAME)

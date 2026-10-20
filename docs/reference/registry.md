@@ -58,6 +58,8 @@ Instruments added by the lab (**⚙ Settings → Instruments**) are listed there
 
 ## Measurement profiles (rheometer and DMA)
 
+**Your folder has another name?** The folders above are where each instrument looks by default. If yours is called differently (`DMA data`, `Rheometer 2024`), the app lists it under **Ingest** as a folder no instrument reads yet: open **Review & register** and choose the instrument (mfethuls suggests one when the folder's name says it), or change it later under **⚙ Settings → Instruments → Change an instrument's folder**. The choice is saved in the data folder (`.mfethuls/folders.json`), so everyone using it gets the same folders. A folder holds one kind of measurement: a folder another type of instrument reads can't be chosen.
+
 Rheometer and DMA experiments can contain data from several different measurement types in the same folder. The `measurement_profile` column tells mfethuls which schema to apply. Without it, the parser will attempt inference but may choose the wrong profile.
 
 ### Rheometer profiles
@@ -121,6 +123,7 @@ PATH_TO_DATA/
 ```
 
 **Rules:**
+- Name files and folders as you like: spaces, brackets and accents are fine (`poly 1 (repeat).txt`). Only the characters `/ \ : * ? " < > |` and spaces at the start or end are not allowed in `raw_data_filename`, since they can't be part of a file name everywhere.
 - The filename stem must match `raw_data_filename`, ignoring case: `lub446` finds `LUB446.txt`. Every file with that stem is collected, e.g. both `poly1.txt` and `poly1.csv`. Two files whose names differ only in case (`LUB446.txt` and `lub446.txt`, possible on Linux) are an error: rename one.
 - If the same filename stem exists in more than one subfolder, ingest raises an error — rename one of the files to remove the ambiguity.
 - A name must match **either** a file **or** a folder, not both. If `poly1.txt` and a folder `poly1/` both exist in different places under the instrument folder, ingest raises an error — rename one of them. A file inside a folder of the same name (`LUB055/LUB055.txt`) is not a conflict: `LUB055` means the folder. To mean only that file (one run of a folder registered per file), give its file name with the extension: `LUB055.txt`.
@@ -140,16 +143,13 @@ A folder per experiment is collected with its subfolders (Bruker NMR keeps the s
 
 Instead of typing rows by hand, let the Streamlit app find raw data that is not in the registry yet. In the sidebar, the **Ingest** section shows "**N new data items found in the data folder**". Click **Review & register**.
 
-**Narrowing the list:** the dialog starts with data **modified in the last 30 days**, newest first (or with everything, if nothing is that recent). Above the table you can change the period (7 days, 30 days, 3 months, All), pick **Instruments** to show only some instrument folders, and **Search** by file or folder name. Searching also looks at the files inside a subfolder, so a project folder is found by the name of a file in it. Changing a filter clears ticks and edits in the table.
+**Narrowing the list:** the dialog starts with data **modified in the last 30 days** (or with everything, if nothing is that recent). Above the table you can change the period (7 days, 30 days, 3 months, All), pick **Instruments** to show only some instrument folders, and **Search** by file or folder name. Searching also looks at the files inside a subfolder, so a project folder is found by the name of a file in it. Changing a filter clears ticks and edits in the table.
 
-**What is proposed:**
+**What is proposed:** the new data, laid out like the data folder (in path order), each subfolder followed by the files in it.
 - **A file directly in an instrument folder** (`DSC/poly2.txt`) is one experiment; its `raw_data_filename` is the stem.
 - **A subfolder holding a single file** (`DSC/LUB055/LUB055.txt`) is proposed as that file.
-- **A subfolder** (`UV_Vis/titration_A/`, `DSC/poly1/`) is proposed once, and you decide whether it is:
-  - **one experiment**: the whole folder, e.g. a titration or a time series (`raw_data_filename` = the folder name), or
-  - **one experiment per file**: each file is a run of the same sample, numbered R001, R002, … in file-name order.
-
-  Pick the folders to split in **Folders to register as one experiment per file**. The default depends on the instrument: folders of series instruments (Flame UV-Vis/fluorescence, NMR) stay whole, folders of single-file instruments (DSC, TGA, FTIR, …) are split.
+- **A subfolder of files of a single-file instrument** (`DSC/poly1/`: DSC, TGA, FTIR, …): ticking the **📁 folder** ticks all the files under it, each **one experiment**: a run of the same sample, numbered R001, R002, … in file-name order. Untick the files you don't want; unticking the folder unticks them all.
+- **A subfolder of a series instrument** (`UV_Vis/titration_A/`, Flame UV-Vis/fluorescence, NMR) is marked **one experiment**: ticking it registers all its files together, e.g. a titration or a time series (`raw_data_filename` = the folder name). Where another instrument reads its files one by one, they are listed under it too; ticking the folder and its files at once is flagged, so the data is not registered twice.
 - **Pre-filled:** `raw_data_filename`, `run_id`, the instrument when only one fits the folder, and the `name` (the file or folder name, made unique). When a folder is split and one of its files is named like the folder, that row's `raw_data_filename` is the file name with its extension (`LUB055.txt`), since the bare name means the whole folder.
 - **You choose** which rows to register by ticking **Register**; nothing is ticked at first.
 - **You fill in:** `sample_id`, the instrument where several share a folder (e.g. the DSC models in `DSC/`), `measurement_profile` for DMA and rheometer data, and any other columns your registry has.
@@ -168,7 +168,7 @@ Which instruments share a folder, and whether they record series, is set per ins
 
 The registry is the source of truth. Ingesting builds everything else from it: the manifest (each experiment's internal ID), the catalog the app lists and the stored Parquet files. When you remove, rename or correct rows, those can fall out of step. **Clean up** brings them back in line. Your raw data is never touched.
 
-In the app, open **⚙ Settings** (top of the sidebar) → **Clean up** and press **Check**. It lists what it would do, and nothing changes until you press **Apply**:
+In the app, a note under **Datasets** says when ingested data no longer matches the registry; **Review** opens Clean up with its plan. Clean up is also under **⚙ Settings** (top of the sidebar) → **Clean up** → **Check**. It lists what it would do, and nothing changes until you press **Apply**:
 
 | Action | When | What happens |
 |---|---|---|

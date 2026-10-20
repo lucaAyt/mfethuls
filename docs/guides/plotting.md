@@ -139,9 +139,9 @@ The toolbar above the chart:
 | Control | What it does |
 |---|---|
 | **Axis limits** | A toggle that opens a row of min/max fields for each axis *above* the chart, so it never covers the axes you are adjusting. Empty fields stay automatic, and each shows the automatic value as a hint. Limits apply to the chart and the SVG and stay applied when the row is closed (a note under the toolbar lists them); **Reset** clears them. Not available for histograms, box plots or multi-panel figures. |
-| **SVG** | Vector figure drawn with Matplotlib in the publication style, using the axis limits. Generated when clicked. |
-| **HTML** | Standalone interactive Plotly page. Generated when clicked. |
-| **CSV** | The data of the selected experiments after filters, every column, with an `experiment` column first, for plotting in other software. Generated when clicked. |
+| **Download ▾ → SVG figure** | Vector figure drawn with Matplotlib in the publication style, using the axis limits. Generated when clicked. |
+| **Download ▾ → HTML figure** | Standalone interactive Plotly page. Generated when clicked. |
+| **Download ▾ → CSV data** | The data of the selected experiments after the plot's **Filter**, every column, with an `experiment` column first, for plotting in other software. Generated when clicked. |
 
 **Colours:** categorical colour columns use a discrete palette. A numeric colour column with more than 10 values (e.g. `time_s` on a spectra series) switches to a **Colour scale** picker (viridis, plasma, cividis, coolwarm, …) with a **Reverse** toggle. A column with a different value on almost every row (more than 300 values, e.g. `time_s` in DSC data) is drawn without colour groups.
 

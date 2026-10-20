@@ -38,8 +38,12 @@ def _print_table(frame: pd.DataFrame) -> None:
 def _registry():
     from .experiments import Registry
 
-    if not _settings.get_settings().registry_path:
-        raise CommandError("No registry set. Run `mfethuls settings --registry PATH` or pass --registry.")
+    registry_path = _settings.get_settings().registry_path
+    if not registry_path:
+        raise CommandError("No registry set. Run `mfethuls settings --data-folder PATH` or pass --registry.")
+    if not os.path.isfile(registry_path):
+        raise CommandError(f"No registry at {registry_path} yet. Register data in the app (it makes this file), "
+                           "or point to another one with `mfethuls settings --registry PATH`.")
     return Registry.load()
 
 

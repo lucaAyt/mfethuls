@@ -25,7 +25,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 **macOS / Linux** (run in a terminal):
 ```bash
-curl -LsSf https://astral.sh/uv | sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 Close and reopen your terminal, then verify:
@@ -92,11 +92,11 @@ The app opens in your browser at `http://localhost:8501`. On the welcome page, p
 
 | Field | Example | What it is |
 |--------|---------|------------|
-| Data folder | `C:\Lab\RawData` | Root folder with instrument sub-folders (`DSC/`, `TGA/`, etc.) |
-| Registry (spreadsheet) | `C:\Lab\registry.xlsx` | Your experiment registry. If it does not exist yet, the app can create an empty one. |
+| Data folder | `C:\Lab\RawData` | Root folder with instrument sub-folders (`DSC/`, `TGA/`, etc.). Paste it from File Explorer: click the address bar and copy, or right-click the folder → **Copy as path**. |
+| Registry *(optional, under **Use a different registry**)* | `C:\Lab\shared\experiments.xlsx` | Your experiment registry. Left empty, it is `registry.xlsx` in the data folder, made for you. |
 | Storage folder | *(optional)* | Where processed data is written; by default a `_storage` folder inside the data folder |
 
-The app checks both as you type (which instrument folders it recognises, whether the registry can be read) and shows how to organise the data folder. Press **Save**. The folders are saved in `~/.mfethuls/settings.json`, so notebooks use the same ones.
+The app checks them as you type (which instrument folders it recognises, whether a registry can be read) and shows how to organise the data folder. Press **Save**. The folders are saved in `~/.mfethuls/settings.json`, so notebooks use the same ones.
 
 The repo includes `experiments_template.csv` — open it in Excel to see all supported instruments and columns. Replace the placeholder rows with your own experiments, or use it as a starting point for a new registry file.
 

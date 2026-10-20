@@ -20,7 +20,7 @@ import hashlib
 import json
 import os
 import re
-import tempfile
+from collections import Counter
 from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -34,6 +34,7 @@ from mfethuls.instruments.configured import (
     definition_text,
     instrument_entries,
     lab_dir,
+    link_folder,
     prepare_definition,
     remove_definition,
     save_definition,
@@ -60,6 +61,8 @@ from mfethuls.settings import get_settings
 OPEN_REQUEST = "add_instrument_request"
 _MESSAGE = "add_instrument_message"
 _REMOVING = "remove_instrument"
+# What the last folder link did, shown where it was made: (key, message, ok).
+LINKED = "link_folder_result"
 
 CHATBOT = "Ask a chatbot"
 MANUAL = "Fill in myself"
@@ -361,17 +364,6 @@ def usage(name: str, registry_frame: Optional[pd.DataFrame], datasets: List[Dict
     return rows, ingested
 
 
-def upload_path(name: str, content: bytes) -> Path:
-    """Where an uploaded sample file is kept while the dialog is open (its name is kept)."""
-    digest = hashlib.sha256(content).hexdigest()[:16]
-    folder = Path(tempfile.gettempdir()) / "mfethuls-uploads" / digest
-    folder.mkdir(parents=True, exist_ok=True)
-    path = folder / Path(name).name
-    if not path.exists():
-        path.write_bytes(content)
-    return path
-
-
 def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode("utf8")).hexdigest()[:10]
 
@@ -411,7 +403,7 @@ def render_instruments_section(backend, registry_path: str = "") -> None:
                "saved in the data folder (`.mfethuls/instruments`), so everyone using it gets them.")
     entries = sorted(instrument_entries(), key=lambda e: e["name"])
     st.dataframe(pd.DataFrame([{"instrument": e["name"], "type": e["type"], "model": e["model"],
-                                "folder": e["folder_name"], "read by": _read_by(e)} for e in entries]),
+                                "folder": _folder_text(e), "read by": _read_by(e)} for e in entries]),
                  hide_index=True, width="stretch")
     statuses = definition_statuses()
     for status in statuses:
@@ -426,10 +418,108 @@ def render_instruments_section(backend, registry_path: str = "") -> None:
                  disabled=not data_root, help=None if data_root else "Choose the data folder first."):
         request_dialog()
 
+    if data_root:
+        st.markdown("**Change an instrument's folder**")
+        change_folder_controls(backend, registry_path)
+
     if statuses:
         st.markdown("**The lab's instruments**")
         for status in statuses:
             _remove_row(backend, status, registry_path)
+
+
+def _folder_text(entry: Dict[str, Any]) -> str:
+    default = entry.get("default_folder")
+    return f"{entry['folder_name']} (instead of {default})" if default else entry["folder_name"]
+
+
+def group_label(folder: str, entries: List[Dict[str, Any]]) -> str:
+    """``DSC (dsc_default, dsc_mettler_toledo_v0, +2)``: an instrument folder and who reads it."""
+    names = [e["name"] for e in entries]
+    shown = ", ".join(names[:2]) + (f", +{len(names) - 2}" if len(names) > 2 else "")
+    return f"{folder} ({shown})"
+
+
+def _link(names: List[str], folder: str, key: str) -> None:
+    """Button callback: link the instruments to ``folder`` and say how it went."""
+    from mfethuls.app.register import clear_registry_caches
+
+    try:
+        link_folder(names, folder)
+    except Exception as exc:  # noqa: BLE001 - shown to the user
+        st.session_state[LINKED] = (key, _plain(exc), False)
+        return
+    clear_registry_caches()
+    st.session_state[LINKED] = (key, f"{_plain(', '.join(names))} now read{'s' if len(names) == 1 else ''} the "
+                                     f"folder **{_plain(folder)}**.", True)
+
+
+def _link_result(key: str) -> None:
+    """The message of a folder link made by the controls with ``key`` (Markdown, already escaped)."""
+    result = st.session_state.get(LINKED)
+    if result and result[0] == key:
+        st.session_state.pop(LINKED)
+        (st.success if result[2] else st.error)(result[1])
+
+
+UNCLAIMED = "unclaimed"
+
+
+def link_folder_controls(folder: str, suggested: Optional[str], key: str, *, writes: bool) -> None:
+    """For a folder no instrument reads: choose the known instrument whose data it holds.
+
+    The outcome is shown by ``_link_result(UNCLAIMED)``: once linked, the folder is no longer listed.
+    """
+    from mfethuls.discovery import instrument_groups
+
+    groups = instrument_groups()
+    options = list(groups)
+    left, right = st.columns([3, 1], vertical_alignment="bottom")
+    chosen = left.selectbox(
+        f"Instrument for **{_plain(folder)}**", options, key=f"{key}-group",
+        index=options.index(suggested) if suggested in options else None,
+        placeholder="Choose the instrument whose files these are", format_func=lambda f: group_label(f, groups[f]),
+        help="mfethuls then reads this folder for that instrument, instead of its usual folder.")
+    right.button("Use this folder", key=f"{key}-link", width="stretch", disabled=chosen is None or not writes,
+                 help=None if writes else "This app does not change the data folder.",
+                 on_click=_link, args=([e["name"] for e in groups.get(chosen, [])], folder, UNCLAIMED))
+
+
+def change_folder_controls(backend, registry_path: str = "") -> None:
+    """⚙ Settings → Instruments: point an instrument (and the others sharing its folder) at another folder."""
+    from mfethuls.discovery import instrument_folders, instrument_groups
+
+    key = "change-folder"
+    _link_result(key)
+    groups = instrument_groups()
+    c1, c2 = st.columns(2)
+    current = c1.selectbox("Instrument", list(groups), key=f"{key}-group", format_func=lambda f: group_label(f, groups[f]))
+    names = [e["name"] for e in groups[current]]
+    folders = [entry.name for entry in instrument_folders()]
+    options = folders + [_NEW_FOLDER]
+    target = c2.selectbox("Reads the folder", options, key=f"{key}-{current}",
+                          index=options.index(current) if current in options else len(options) - 1)
+    if target == _NEW_FOLDER:
+        target = c2.text_input("New folder name", value=current, key=f"{key}-{current}-new")
+    target = (target or "").strip()
+    if target and target != current and target not in folders:
+        st.caption(f"There is no folder **{_plain(target)}** in the data folder yet: create it and put the "
+                   "instrument's files in it.")
+    if registry_path and os.path.exists(registry_path) and target != current:
+        from mfethuls.app.register import registry_frame
+
+        try:
+            frame = registry_frame(registry_path)
+            rows = sum(usage(name, frame, [])[0] for name in names)
+        except Exception:  # noqa: BLE001 - the count is a courtesy
+            rows = 0
+        if rows:
+            st.caption(f"{rows} registry row(s) use {'these instruments' if len(names) > 1 else names[0]}: "
+                       f"their raw data is then looked for in **{_plain(target)}**.")
+    st.button("Change folder", key=f"{key}-apply", width="stretch",
+              disabled=not target or target == current or not backend.writes_definitions,
+              help=None if backend.writes_definitions else "This app does not change the data folder.",
+              on_click=_link, args=(names, target, key))
 
 
 def _set_removing(source: Optional[str]) -> None:
@@ -492,63 +582,95 @@ def _remove_row(backend, status, registry_path: str) -> None:
 
 # -- Streamlit: the dialog --------------------------------------------------------
 
-def default_others(folder: Path, files: List[str], chosen: str, count: int = 2) -> List[str]:
-    """Other files worth checking: the largest and the most recently changed (not ``chosen``)."""
+def _stats(folder: Path, files: List[str]) -> List[Tuple[str, int, float]]:
     stats = []
     for name in files:
-        if name == chosen:
-            continue
         try:
             stat = (folder / name).stat()
         except OSError:
             continue
         stats.append((name, stat.st_size, stat.st_mtime))
+    return stats
+
+
+def _ending(name: str) -> str:
+    return Path(name).suffix.casefold()
+
+
+def build_file(folder: Path, files: List[str]) -> Optional[str]:
+    """The file to build the definition from: the largest of the folder's most common file type
+    (so a plot or a note next to the data is not picked)."""
+    stats = _stats(folder, files)
+    if not stats:
+        return None
+    counts = Counter(_ending(name) for name, *_ in stats)
+    common = max(counts, key=lambda ending: (counts[ending], ending))
+    return max((s for s in stats if _ending(s[0]) == common), key=lambda s: (s[1], s[0]))[0]
+
+
+def files_to_check(folder: Path, files: List[str], chosen: str, count: int = 6) -> List[str]:
+    """Other files of ``chosen``'s type to check the definition against: the largest, the newest,
+    then others spread over the folder in name order."""
+    stats = _stats(folder, [f for f in files if f != chosen and _ending(f) == _ending(chosen)])
     picks: List[str] = []
     for key in (lambda s: s[1], lambda s: s[2]):
-        for name, *_ in sorted(stats, key=key, reverse=True):
+        if stats:
+            name = max(stats, key=key)[0]
             if name not in picks:
                 picks.append(name)
-                break
+    rest = sorted(name for name, *_ in stats if name not in picks)
+    wanted = max(count - len(picks), 0)
+    if rest and wanted:
+        step = len(rest) / min(wanted, len(rest))
+        picks.extend(rest[int(i * step)] for i in range(min(wanted, len(rest))))
     return picks[:count]
 
 
 def _sample_picker(folder: Optional[str], key: str) -> Tuple[Optional[Path], List[Path]]:
-    """The file to build the definition from, and other files of the instrument to check it against."""
+    """The file to build the definition from, and other files of its type to check it against.
+
+    The files come from a folder in the data folder: the instrument needs one anyway, and
+    its other files show whether the definition reads them all.
+    """
     from mfethuls.app.register import unclaimed
+    from mfethuls.discovery import folder_files, instrument_folders
 
     data_root = get_settings().data_root
-    st.markdown("**1. A file from the instrument**")
-    upload = st.file_uploader("A file exported by the instrument", key=f"{key}-upload",
-                              label_visibility="collapsed",
-                              help="Any text export: .txt, .csv, .dat, ... It is read here; nothing is sent anywhere.")
-    if upload is not None:
-        extra = st.file_uploader("Other files of the instrument to check against (optional)", key=f"{key}-uploads",
-                                 accept_multiple_files=True,
-                                 help="Files from other runs or methods: the definition must read them too.")
-        return upload_path(upload.name, upload.getvalue()), [upload_path(f.name, f.getvalue()) for f in extra or []]
-    folders = unclaimed(data_root)
-    if not folders:
+    st.markdown("**1. The folder with the instrument's files**")
+    entries = instrument_folders(data_root)
+    if not entries:
+        st.info("Put a few files exported by the instrument in a folder in your data folder (e.g. `TGA`), "
+                "then come back here.", icon=":material/create_new_folder:")
         return None, []
-    names = [f.folder_name for f in folders]
-    index = names.index(folder) if folder in names else 0
+    new = [f.folder_name for f in unclaimed(data_root)]
+    names = new + [e.name for e in entries if e.name not in new]
     left, right = st.columns([1, 2])
-    chosen = left.selectbox("…or from a folder no instrument reads yet", names, index=index, key=f"{key}-folder")
-    item = folders[names.index(chosen)]
-    file = right.selectbox(f"File ({item.count_label} in the folder)", item.files, key=f"{key}-file-{chosen}")
-    if not file:
-        return None, []
+    chosen = left.selectbox("Folder", names, index=names.index(folder) if folder in names else 0,
+                            key=f"{key}-folder",
+                            format_func=lambda n: f"{n} (no instrument reads it yet)" if n in new else n,
+                            help="The folder in your data folder that holds this instrument's files.")
     base = Path(data_root) / chosen
-    others = st.multiselect(
-        "Also check against", [f for f in item.files if f != file], key=f"{key}-others-{chosen}-{file}",
-        default=default_others(base, item.files, file),
-        help="Other files of this instrument (longer runs, other methods): the definition must read them too. "
-             "The largest and the newest are picked to start with.")
+    files, _, _ = folder_files(str(base))
+    if not files:
+        right.info("This folder is empty: put a few files from the instrument in it.", icon=":material/folder:")
+        return None, []
+    default = build_file(base, files)
+    file = right.selectbox("Build from", files, index=files.index(default) if default in files else 0,
+                           key=f"{key}-file-{chosen}",
+                           help="To start with, the largest file of the type the folder holds most of.")
+    others = files_to_check(base, files, file)
+    if others:
+        st.caption(f"mfethuls also checks that it reads {len(others)} other `{_ending(file) or 'no ending'}` "
+                   f"file{'s' if len(others) != 1 else ''} in this folder.")
+    else:
+        st.caption("Put a few more files from the instrument in this folder: mfethuls then checks that it "
+                   "reads them all.")
     return base / file, [base / name for name in others]
 
 
 def _show(slot, problems: List[str]) -> None:
     for problem in problems:
-        slot.error(_plain(problem), icon=":material/error:")
+        slot.warning(_plain(problem), icon=":material/edit_note:")
 
 
 # Characters Streamlit's Markdown gives a meaning (links, images, formatting, LaTeX).
@@ -564,7 +686,8 @@ def _plain(text: Any) -> str:
     return _MARKDOWN.sub(r"\\\1", str(text))
 
 
-def _identity_section(seed: Dict[str, Any], key: str, sample: Path, folder: Optional[str]) -> Dict[str, Any]:
+def _identity_section(seed: Dict[str, Any], key: str, sample: Path, folder: Optional[str], name: str
+                      ) -> Dict[str, Any]:
     from mfethuls.discovery import instrument_folders
 
     data_root = get_settings().data_root
@@ -573,14 +696,18 @@ def _identity_section(seed: Dict[str, Any], key: str, sample: Path, folder: Opti
     default_folder = str(seed.get("folder_name") or folder or (sample.parent.name if in_data else ""))
 
     c1, c2 = st.columns(2)
-    name = c1.text_input("Name", value=str(seed.get("name") or ""), key=f"{key}-name", placeholder="e.g. tga_netzsch",
-                         help="Used in the registry's instrument_name column: lower case letters, digits, _ and -.")
     options = folders + [_NEW_FOLDER]
-    chosen = c2.selectbox("Its data folder", options, key=f"{key}-folder-choice",
+    chosen = c1.selectbox("Its data folder", options, key=f"{key}-folder-choice",
                           index=options.index(default_folder) if default_folder in folders else len(options) - 1,
                           help="The folder in the data folder where this instrument's files are kept.")
     if chosen == _NEW_FOLDER:
-        chosen = c2.text_input("New folder name", value=default_folder, key=f"{key}-folder-new")
+        chosen = c1.text_input("New folder name", value=default_folder, key=f"{key}-folder-new")
+    if not (chosen or "").strip():
+        st.warning("Choose the folder that holds this instrument's files, so mfethuls finds them. "
+                   "It can be changed later under ⚙ Settings → Instruments.", icon=":material/folder:")
+    elif chosen.strip() not in folders:
+        st.info(f"There is no folder **{_plain(chosen.strip())}** in the data folder yet: create it and put "
+                "the instrument's files in it.", icon=":material/folder:")
 
     c1, c2, c3 = st.columns(3)
     types = known_types() + [_NEW_TYPE]
@@ -626,85 +753,84 @@ def _reading_section(seed_file: Dict[str, Any], key: str, sample: Path) -> Dict[
     extensions = seed_file.get("extensions") or [sample.suffix.casefold() or ".txt"]
     extensions = [extensions] if isinstance(extensions, str) else list(extensions)
     book = sample.suffix.casefold() in WORKBOOK_EXTENSIONS
-    with st.expander("How the file is read", icon=":material/tune:"):
+    c1, c2, c3 = st.columns(3)
+    endings = c1.text_input("File endings", ", ".join(map(str, extensions)), key=f"{key}-ext",
+                            help="Separate several with commas, e.g. .txt, .csv")
+    if book:
+        # A workbook holds cells, not text: no encoding, separator or decimal mark to choose.
+        sheet_seed = seed_file.get("sheet")
+        sheet = c2.text_input("Sheet with the table (optional)", "" if sheet_seed is None else str(sheet_seed),
+                              key=f"{key}-sheet",
+                              help="Its name or number (1 = first, -1 = last). Empty: the first sheet with "
+                                   "the header text below. Use a number when sheets are named after the sample.")
+        encoding = delimiter = decimal = None
         c1, c2, c3 = st.columns(3)
-        endings = c1.text_input("File endings", ", ".join(map(str, extensions)), key=f"{key}-ext",
-                                help="Separate several with commas, e.g. .txt, .csv")
-        if book:
-            # A workbook holds cells, not text: no encoding, separator or decimal mark to choose.
-            sheet_seed = seed_file.get("sheet")
-            sheet = c2.text_input("Sheet with the table (optional)", "" if sheet_seed is None else str(sheet_seed),
-                                  key=f"{key}-sheet",
-                                  help="Its name or number (1 = first, -1 = last). Empty: the first sheet with "
-                                       "the header text below. Use a number when sheets are named after the sample.")
-            encoding = delimiter = decimal = None
-            c1, c2, c3 = st.columns(3)
-        else:
-            sheet = ""
-            options, index = _choice(["auto"] + [e for e in ENCODINGS if e != "utf-8-sig"],
-                                     seed_file.get("encoding"), "utf-8")
-            encoding = c2.selectbox("Text encoding", options, index=index, key=f"{key}-enc",
-                                    help="auto: UTF-8, else Windows cp1252 (a safe choice); utf-8 for most files; "
-                                         "cp1252 for many Windows instrument programs (°, µ).")
-            options, index = _choice(list(DELIMITERS), seed_file.get("delimiter"), "comma")
-            delimiter = c3.selectbox("Columns separated by", options, index=index, key=f"{key}-delim",
-                                     format_func=lambda v: {"whitespace": "spaces / tabs"}.get(v, v))
-            c1, c2, c3 = st.columns(3)
-            options, index = _choice([".", ","], seed_file.get("decimal"), ".")
-            decimal = c1.selectbox("Decimal mark", options, index=index, key=f"{key}-dec",
-                                   format_func=lambda v: {".": "point (1.5)", ",": "comma (1,5)"}.get(v, v))
-        rows_seed = header.get("rows", 1) if header.get("rows", 1) in (0, 1, 2) else 1
-        rows = c2.selectbox("Header lines", [0, 1, 2], index=rows_seed, key=f"{key}-rows",
-                            format_func=lambda n: {0: "none", 1: "column names", 2: "names, then units"}[n])
-        skip_seed = header.get("skip_lines", 0)
-        skip = c3.number_input("Lines to skip first", min_value=0, step=1, key=f"{key}-skip",
-                               value=int(skip_seed) if isinstance(skip_seed, int) and skip_seed >= 0 else 0,
-                               help="Counted from the top, or from the line below when that is set.")
-        c1, c2 = st.columns(2)
-        starts_at = c1.text_input("The table starts at the line containing", str(header.get("starts_at") or ""),
-                                  key=f"{key}-starts",
-                                  help="Text on the line with the column names. Leave empty to count lines from the top.")
-        contains = c2.text_input("Only files containing (optional)", str(seed_file.get("contains") or ""),
-                                 key=f"{key}-contains",
-                                 help="Text near the top that tells this layout apart from others with the same ending.")
-        seed_end = seed_file.get("data_ends") or "end_of_file"
-        ends_options = list(DATA_ENDS) + ["text marker"]
-        c1, c2 = st.columns(2)
-        ends = c1.selectbox("The data ends at", ends_options, key=f"{key}-ends",
-                            index=ends_options.index(seed_end if seed_end in DATA_ENDS else "text marker"),
-                            format_func=lambda v: {"end_of_file": "the end of the file",
-                                                   "first_non_numeric_row": "the first line that is not numbers",
-                                                   "text marker": "a line containing…"}[v])
-        marker = c2.text_input("End text", "" if seed_end in DATA_ENDS else str(seed_end), key=f"{key}-marker",
-                               disabled=ends != "text marker")
-        c1, c2 = st.columns(2)
-        comment = c1.text_input("Comment lines start with (optional)", str(seed_file.get("comment") or ""),
-                                key=f"{key}-comment")
-        names_from = c2.text_input(
-            "Column names are listed above the table, in lines like (optional)",
-            str(header.get("names_from") or ""), key=f"{key}-names-from", disabled=rows != 0,
-            help="For files that list their columns one per line above the table, e.g. 'Sig1<tab>Time (min)': "
-                 "a regular expression whose group (…) is the name, e.g. ^Sig\\d+\\t(.+)$. "
-                 "Needs Header lines: none.")
-        blocks_seed = seed_file.get("blocks") if isinstance(seed_file.get("blocks"), dict) else {}
+    else:
+        sheet = ""
+        options, index = _choice(["auto"] + [e for e in ENCODINGS if e != "utf-8-sig"],
+                                 seed_file.get("encoding"), "utf-8")
+        encoding = c2.selectbox("Text encoding", options, index=index, key=f"{key}-enc",
+                                help="auto: UTF-8, else Windows cp1252 (a safe choice); utf-8 for most files; "
+                                     "cp1252 for many Windows instrument programs (°, µ).")
+        options, index = _choice(list(DELIMITERS), seed_file.get("delimiter"), "comma")
+        delimiter = c3.selectbox("Columns separated by", options, index=index, key=f"{key}-delim",
+                                 format_func=lambda v: {"whitespace": "spaces / tabs"}.get(v, v))
         c1, c2, c3 = st.columns(3)
-        blocks_at = c1.text_input(
-            "Several tables, each starting at a line containing (optional)", str(blocks_seed.get("starts_at") or ""),
-            key=f"{key}-blocks-at",
-            help="For files with one table per interval or step, each with its own header lines, e.g. "
-                 "'Interval and data points:'. The settings above then apply to each table.")
-        blocks_column = c2.text_input("Each row's table goes in the column", str(blocks_seed.get("column") or "block"),
-                                      key=f"{key}-blocks-column", disabled=not blocks_at.strip())
-        blocks_label = c3.text_input(
-            "Table label (optional)", str(blocks_seed.get("label") or ""), key=f"{key}-blocks-label",
-            disabled=not blocks_at.strip(),
-            help="A regular expression whose group (…) on the table's first line is its label, e.g. "
-                 "^Interval and data points:\\s*(\\d+). Empty: the tables are numbered 1, 2, …")
-        segment_lines = st.checkbox(
-            "Text lines inside the table label the rows below them (segments)", key=f"{key}-segments",
-            value=seed_file.get("segment_lines") is True,
-            help="E.g. '2) DSC 8500 Temperature Scan' between rows of numbers: each row gets its segment "
-                 "in a 'segment' column, instead of the table ending there.")
+        options, index = _choice([".", ","], seed_file.get("decimal"), ".")
+        decimal = c1.selectbox("Decimal mark", options, index=index, key=f"{key}-dec",
+                               format_func=lambda v: {".": "point (1.5)", ",": "comma (1,5)"}.get(v, v))
+    rows_seed = header.get("rows", 1) if header.get("rows", 1) in (0, 1, 2) else 1
+    rows = c2.selectbox("Header lines", [0, 1, 2], index=rows_seed, key=f"{key}-rows",
+                        format_func=lambda n: {0: "none", 1: "column names", 2: "names, then units"}[n])
+    skip_seed = header.get("skip_lines", 0)
+    skip = c3.number_input("Lines to skip first", min_value=0, step=1, key=f"{key}-skip",
+                           value=int(skip_seed) if isinstance(skip_seed, int) and skip_seed >= 0 else 0,
+                           help="Counted from the top, or from the line below when that is set.")
+    c1, c2 = st.columns(2)
+    starts_at = c1.text_input("The table starts at the line containing", str(header.get("starts_at") or ""),
+                              key=f"{key}-starts",
+                              help="Text on the line with the column names. Leave empty to count lines from the top.")
+    contains = c2.text_input("Only files containing (optional)", str(seed_file.get("contains") or ""),
+                             key=f"{key}-contains",
+                             help="Text near the top that tells this layout apart from others with the same ending.")
+    seed_end = seed_file.get("data_ends") or "end_of_file"
+    ends_options = list(DATA_ENDS) + ["text marker"]
+    c1, c2 = st.columns(2)
+    ends = c1.selectbox("The data ends at", ends_options, key=f"{key}-ends",
+                        index=ends_options.index(seed_end if seed_end in DATA_ENDS else "text marker"),
+                        format_func=lambda v: {"end_of_file": "the end of the file",
+                                               "first_non_numeric_row": "the first line that is not numbers",
+                                               "text marker": "a line containing…"}[v])
+    marker = c2.text_input("End text", "" if seed_end in DATA_ENDS else str(seed_end), key=f"{key}-marker",
+                           disabled=ends != "text marker")
+    c1, c2 = st.columns(2)
+    comment = c1.text_input("Comment lines start with (optional)", str(seed_file.get("comment") or ""),
+                            key=f"{key}-comment")
+    names_from = c2.text_input(
+        "Column names are listed above the table, in lines like (optional)",
+        str(header.get("names_from") or ""), key=f"{key}-names-from", disabled=rows != 0,
+        help="For files that list their columns one per line above the table, e.g. 'Sig1<tab>Time (min)': "
+             "a regular expression whose group (…) is the name, e.g. ^Sig\\d+\\t(.+)$. "
+             "Needs Header lines: none.")
+    blocks_seed = seed_file.get("blocks") if isinstance(seed_file.get("blocks"), dict) else {}
+    c1, c2, c3 = st.columns(3)
+    blocks_at = c1.text_input(
+        "Several tables, each starting at a line containing (optional)", str(blocks_seed.get("starts_at") or ""),
+        key=f"{key}-blocks-at",
+        help="For files with one table per interval or step, each with its own header lines, e.g. "
+             "'Interval and data points:'. The settings above then apply to each table.")
+    blocks_column = c2.text_input("Each row's table goes in the column", str(blocks_seed.get("column") or "block"),
+                                  key=f"{key}-blocks-column", disabled=not blocks_at.strip())
+    blocks_label = c3.text_input(
+        "Table label (optional)", str(blocks_seed.get("label") or ""), key=f"{key}-blocks-label",
+        disabled=not blocks_at.strip(),
+        help="A regular expression whose group (…) on the table's first line is its label, e.g. "
+             "^Interval and data points:\\s*(\\d+). Empty: the tables are numbered 1, 2, …")
+    segment_lines = st.checkbox(
+        "Text lines inside the table label the rows below them (segments)", key=f"{key}-segments",
+        value=seed_file.get("segment_lines") is True,
+        help="E.g. '2) DSC 8500 Temperature Scan' between rows of numbers: each row gets its segment "
+             "in a 'segment' column, instead of the table ending there.")
     settings: Dict[str, Any] = {"extensions": [e.strip() for e in endings.split(",") if e.strip()]}
     if not book:
         settings.update(encoding=encoding, delimiter=delimiter, decimal=decimal)
@@ -773,62 +899,60 @@ def _extras_section(seed: Dict[str, Any], stored: List[str], new_type: bool, key
     out: Dict[str, Any] = {}
     seed_derived = derived_rows(seed)
     seed_values = captured_rows(seed)
-    with st.expander("Values from the file name and header", icon=":material/label:",
-                     expanded=not seed_values.empty):
-        st.caption("Fill a column from the file name or from a line above the table: the part of the text in "
-                   "brackets (…) of the pattern. **values** turns codes into words, e.g. `ri=^RID; uv=^VWD`. "
-                   "**datetime**: give the time zone of local times (e.g. Europe/Zurich); stored in UTC.")
-        edited_values = st.data_editor(
-            seed_values, key=f"{key}-values", hide_index=True, width="stretch", num_rows="dynamic",
-            column_config={
-                "from": st.column_config.SelectboxColumn("taken from", options=list(_VALUE_SOURCES.values()),
-                                                         required=True, default="file name"),
-                "column": st.column_config.TextColumn("new column"),
-                "pattern": st.column_config.TextColumn("pattern", help="Regular expression; its (…) group is kept."),
-                "type": st.column_config.SelectboxColumn("stored as", options=list(VALUE_TYPES), default="text"),
-                "timezone": st.column_config.TextColumn("time zone", help="datetime only, e.g. Europe/Zurich."),
-                "values": st.column_config.TextColumn("values (optional)",
-                                                      help="word=pattern; word=pattern, e.g. ri=^RID; uv=^VWD"),
-            },
-        )
-        out.update(captured_from_rows(edited_values))
-    with st.expander("Extra columns and plot", icon=":material/calculate:",
-                     expanded=not seed_derived.empty or new_type):
-        st.caption("Columns computed from stored ones, always into a new column (the data itself never changes): "
-                   "**normalize_pct** scales to 0–100 %, **pct_of_initial** gives % of the first value (TGA: "
-                   "100 % = initial mass), **scale** multiplies by the number, **offset** adds it, **multiply** / "
-                   "**divide** by another column (e.g. heat flow ÷ sample mass), **add_time** adds the time in "
-                   "another column (e.g. milliseconds from the file name) to a date-time.")
-        edited = st.data_editor(
-            seed_derived, key=f"{key}-derived", hide_index=True, width="stretch", num_rows="dynamic",
-            column_config={
-                "op": st.column_config.SelectboxColumn("operation", options=list(DERIVED_OPS)),
-                "column": st.column_config.SelectboxColumn(
-                    "of the column", options=sorted(set(stored) | set(seed_derived["column"].dropna().astype(str)))),
-                "into": st.column_config.TextColumn("new column"),
-                "number": st.column_config.NumberColumn("number", help="scale: the factor; offset: what is added."),
-                "amount": st.column_config.TextColumn(
-                    "other column", help="add_time: the column with the time to add; multiply / divide: the column "
-                                         "to multiply or divide by (e.g. sample_mass_mg)."),
-                "unit": st.column_config.SelectboxColumn("its unit", options=list(TIME_UNITS),
-                                                         help="add_time only."),
-            },
-        )
-        derived = derived_from_rows(edited)
-        if derived:
-            out["derived"] = derived
-        plot = seed.get("plot") if isinstance(seed.get("plot"), dict) else {}
-        candidates = stored + [d["into"] for d in derived if d.get("into")]
-        if new_type and len(candidates) >= 2:
-            c1, c2 = st.columns(2)
-            x = c1.selectbox("Plot: x axis", candidates, key=f"{key}-plot-x",
-                             index=candidates.index(plot["x"]) if plot.get("x") in candidates else 0)
-            ys = [c for c in candidates if c != x]
-            y = c2.selectbox("Plot: y axis", ys, key=f"{key}-plot-y",
-                             index=ys.index(plot["y"]) if plot.get("y") in ys else 0)
-            out["plot"] = {"x": x, "y": y}
-        elif new_type:
-            st.caption("Say what at least two columns measure to choose what to plot.")
+    st.markdown("**Values from the file name and header**")
+    st.caption("Fill a column from the file name or from a line above the table: the part of the text in "
+               "brackets (…) of the pattern. **values** turns codes into words, e.g. `ri=^RID; uv=^VWD`. "
+               "**datetime**: give the time zone of local times (e.g. Europe/Zurich); stored in UTC.")
+    edited_values = st.data_editor(
+        seed_values, key=f"{key}-values", hide_index=True, width="stretch", num_rows="dynamic",
+        column_config={
+            "from": st.column_config.SelectboxColumn("taken from", options=list(_VALUE_SOURCES.values()),
+                                                     required=True, default="file name"),
+            "column": st.column_config.TextColumn("new column"),
+            "pattern": st.column_config.TextColumn("pattern", help="Regular expression; its (…) group is kept."),
+            "type": st.column_config.SelectboxColumn("stored as", options=list(VALUE_TYPES), default="text"),
+            "timezone": st.column_config.TextColumn("time zone", help="datetime only, e.g. Europe/Zurich."),
+            "values": st.column_config.TextColumn("values (optional)",
+                                                  help="word=pattern; word=pattern, e.g. ri=^RID; uv=^VWD"),
+        },
+    )
+    out.update(captured_from_rows(edited_values))
+    st.markdown("**Extra columns and plot**")
+    st.caption("Columns computed from stored ones, always into a new column (the data itself never changes): "
+               "**normalize_pct** scales to 0–100 %, **pct_of_initial** gives % of the first value (TGA: "
+               "100 % = initial mass), **scale** multiplies by the number, **offset** adds it, **multiply** / "
+               "**divide** by another column (e.g. heat flow ÷ sample mass), **add_time** adds the time in "
+               "another column (e.g. milliseconds from the file name) to a date-time.")
+    edited = st.data_editor(
+        seed_derived, key=f"{key}-derived", hide_index=True, width="stretch", num_rows="dynamic",
+        column_config={
+            "op": st.column_config.SelectboxColumn("operation", options=list(DERIVED_OPS)),
+            "column": st.column_config.SelectboxColumn(
+                "of the column", options=sorted(set(stored) | set(seed_derived["column"].dropna().astype(str)))),
+            "into": st.column_config.TextColumn("new column"),
+            "number": st.column_config.NumberColumn("number", help="scale: the factor; offset: what is added."),
+            "amount": st.column_config.TextColumn(
+                "other column", help="add_time: the column with the time to add; multiply / divide: the column "
+                                     "to multiply or divide by (e.g. sample_mass_mg)."),
+            "unit": st.column_config.SelectboxColumn("its unit", options=list(TIME_UNITS),
+                                                     help="add_time only."),
+        },
+    )
+    derived = derived_from_rows(edited)
+    if derived:
+        out["derived"] = derived
+    plot = seed.get("plot") if isinstance(seed.get("plot"), dict) else {}
+    candidates = stored + [d["into"] for d in derived if d.get("into")]
+    if new_type and len(candidates) >= 2:
+        c1, c2 = st.columns(2)
+        x = c1.selectbox("Plot: x axis", candidates, key=f"{key}-plot-x",
+                         index=candidates.index(plot["x"]) if plot.get("x") in candidates else 0)
+        ys = [c for c in candidates if c != x]
+        y = c2.selectbox("Plot: y axis", ys, key=f"{key}-plot-y",
+                         index=ys.index(plot["y"]) if plot.get("y") in ys else 0)
+        out["plot"] = {"x": x, "y": y}
+    elif new_type:
+        st.caption("Say what at least two columns measure to choose what to plot.")
     return out
 
 
@@ -857,11 +981,15 @@ def check_file(definition, path: Path) -> Dict[str, Any]:
 
 
 def _check_others(definition, others: List[Path]) -> Tuple[List[str], List[str]]:
-    """Table of the other files checked; returns (problems, warnings)."""
+    """The other files checked: one line when all read cleanly, else a table; returns (problems, warnings)."""
     if not others:
         return [], []
     results = [check_file(definition, path) for path in others]
-    st.markdown("**The other files**")
+    if not any(r["error"] or r["warnings"] for r in results):
+        st.caption(f":material/check_circle: Also reads the {len(results)} other file{'s' if len(results) != 1 else ''} "
+                   f"checked cleanly: {', '.join(r['file'] for r in results)}.")
+        return [], []
+    st.markdown("**The other files checked**")
     st.dataframe(pd.DataFrame([{
         "file": r["file"], "rows": r["rows"],
         "result": f"✗ {r['error']}" if r["error"] else (f"⚠ {len(r['warnings'])} warning(s)" if r["warnings"]
@@ -877,9 +1005,10 @@ def _check_others(definition, others: List[Path]) -> Tuple[List[str], List[str]]
 
 
 def _check_section(data: Dict[str, Any], sample: Path, file_columns: List[str], slots: Dict[str, Any],
-                   layout_columns: List[Dict[str, Any]], others: Optional[List[Path]] = None
+                   layout_columns: List[Dict[str, Any]], others: Optional[List[Path]] = None, stored_tab=None
                    ) -> Tuple[bool, List[str]]:
-    """Validate and parse ``sample`` (and ``others``); problems go to their section.
+    """Validate and parse ``sample`` (and ``others``): the outcome here, each problem in its section
+    of **Adjust details**, and the stored table in ``stored_tab``.
 
     Returns (ok, problems or warnings).
     """
@@ -888,17 +1017,26 @@ def _check_section(data: Dict[str, Any], sample: Path, file_columns: List[str], 
     try:
         definition = parse_definition(data)
     except DefinitionError as exc:
-        for section, problems in route_problems(exc.problems).items():
+        routed = route_problems(exc.problems)
+        # A problem with the name is shown under it, at the top.
+        routed["name"] = [p for p in routed["instrument"] if p.startswith("'name'")]
+        routed["instrument"] = [p for p in routed["instrument"] if not p.startswith("'name'")]
+        for section, problems in routed.items():
             _show(slots[section], problems)
-        st.error(f"{len(exc.problems)} problem(s) to fix above.", icon=":material/error:")
+        places = [_TABS[section] for section in _TABS if routed[section]]
+        where = f": see **Adjust details** below ({', '.join(places)})" if places else ""
+        st.warning(f"{len(exc.problems)} problem(s) to fix{where}.", icon=":material/edit_note:")
         return False, list(exc.problems)
     problem = clash(data)
     if problem:
         _show(slots["instrument"], [problem])
+        st.warning("1 problem to fix: see **Adjust details** below (Instrument).", icon=":material/edit_note:")
         return False, [problem]
 
-    st.markdown("**What will be stored**")
-    st.dataframe(mapping_summary(layout_columns, file_columns, definition.type), hide_index=True, width="stretch")
+    with stored_tab if stored_tab is not None else st.container():
+        st.markdown("**What will be stored**")
+        st.dataframe(mapping_summary(layout_columns, file_columns, definition.type), hide_index=True,
+                     width="stretch")
     try:
         dataset = TabularParser(definition).parse({"sample": [str(sample)]}, instrument_type=definition.type)
     except Exception as exc:  # noqa: BLE001 - shown to the user
@@ -916,12 +1054,16 @@ def _check_section(data: Dict[str, Any], sample: Path, file_columns: List[str], 
                         f"{'it' if len(missing) == 1 else 'them'} for mfethuls' {definition.type} plots and checks.")
     for warning in warnings:
         st.warning(_plain(warning), icon=":material/warning:")
-    st.caption(f"Read **{len(frame)}** rows and **{len(frame.columns)}** columns from {sample.name}.")
-    st.dataframe(frame.head(200), hide_index=True, width="stretch", height=200)
-    for parts in dataset.metadata.get("file_text", {}).values():
-        kept = {k: v for k, v in parts.items() if k != "format"}
-        if kept:
-            with st.expander("Text around the table (kept with the data)"):
+    shown = ", ".join(f"`{c}`" for c in frame.columns[:6]) + (f" and {len(frame.columns) - 6} more"
+                                                              if len(frame.columns) > 6 else "")
+    st.caption(f"Read **{len(frame)}** rows and **{len(frame.columns)}** columns from {_plain(sample.name)} "
+               f"as **{_plain(definition.type)}**: {shown}.")
+    with stored_tab if stored_tab is not None else st.container():
+        st.dataframe(frame.head(200), hide_index=True, width="stretch", height=200)
+        for parts in dataset.metadata.get("file_text", {}).values():
+            kept = {k: v for k, v in parts.items() if k != "format"}
+            if kept:
+                st.markdown("**Text around the table** (kept with the data)")
                 for part, lines in kept.items():
                     st.caption(f"**{part}**")
                     if isinstance(lines, dict):  # values taken from the text, e.g. the sample mass
@@ -986,9 +1128,25 @@ def _save_controls(backend, data: Dict[str, Any], sample: Path, key: str) -> Non
         st.rerun()
 
 
+# The tabs of "Adjust details", by the section problems are routed to (see route_problems).
+_TABS = {"instrument": "Instrument", "file": "Reading the file", "columns": "Columns", "extras": "Values and plot"}
+
+
+def needs_fixing(seed: Dict[str, Any]) -> bool:
+    """Whether ``seed`` has problems besides its name: then **Adjust details** opens by itself."""
+    try:
+        parse_definition(seed)
+    except DefinitionError as exc:
+        return any(not p.startswith("'name'") for p in exc.problems)
+    except Exception:  # noqa: BLE001
+        return True
+    return clash(seed) is not None
+
+
 def definition_form(backend, seed: Dict[str, Any], sample: Path, key: str, *, folder: Optional[str] = None,
                     origin: str = "", guess_columns: bool = False, others: Optional[List[Path]] = None) -> None:
-    """The plain form every route ends in: edit, check against ``sample`` (and ``others``), save.
+    """The form every route ends in: the outcome, the name and Save, with everything else that was
+    filled in under **Adjust details**; checked against ``sample`` (and ``others``).
 
     ``seed`` is a definition (possibly incomplete or wrong) that fills the form.
     With ``guess_columns``, columns the seed leaves empty get mfethuls' guesses.
@@ -997,32 +1155,45 @@ def definition_form(backend, seed: Dict[str, Any], sample: Path, key: str, *, fo
     index = layout_for(seed_layouts, sample)
     layout = seed_layouts[index]
 
-    st.markdown("**The instrument**")
-    identity = _identity_section(seed, key, sample, folder)
-    slots = {"instrument": st.container()}
+    name = st.text_input("Name", value=str(seed.get("name") or ""), key=f"{key}-name", placeholder="e.g. tga_netzsch",
+                         help="What the registry's instrument_name column says for this instrument: lower case "
+                              "letters, digits, _ and -.")
+    slots = {"name": st.container()}
+    result = st.container()
 
-    if len(seed_layouts) > 1:
-        others = ", ".join(lay["label"] for i, lay in enumerate(seed_layouts) if i != index)
-        st.caption(f"This instrument has several file layouts. Editing **{layout['label']}** (it matches "
-                   f"{sample.name}); the others are kept unchanged: {others}.")
-    settings = _reading_section(layout["file"], key, sample)
-    slots["file"] = st.container()
-    file_columns, reason = _file_columns(settings, sample)
-    if file_columns is None:
-        slots["file"].error(f"The file cannot be read with these settings: {reason}", icon=":material/error:")
-        return
+    with st.expander(":material/tune: Adjust details", expanded=needs_fixing(seed)):
+        st.caption("Everything the chatbot or mfethuls filled in. Most files need nothing here: change only "
+                   "what is wrong.")
+        tabs = st.tabs([*_TABS.values(), "Stored data", "Definition (JSON)"])
+        with tabs[0]:
+            identity = _identity_section(seed, key, sample, folder, name)
+            slots["instrument"] = st.container()
+        with tabs[1]:
+            if len(seed_layouts) > 1:
+                rest = ", ".join(lay["label"] for i, lay in enumerate(seed_layouts) if i != index)
+                st.caption(f"This instrument has several file layouts. Editing **{layout['label']}** (it matches "
+                           f"{sample.name}); the others are kept unchanged: {rest}.")
+            settings = _reading_section(layout["file"], key, sample)
+            slots["file"] = st.container()
+        file_columns, reason = _file_columns(settings, sample)
+        if file_columns is None:
+            slots["file"].error(f"The file cannot be read with these settings: {reason}", icon=":material/error:")
+            result.warning("The file cannot be read this way: see **Adjust details** below (Reading the file).",
+                           icon=":material/edit_note:")
+            return
+        with tabs[2]:
+            columns = _columns_section(None if guess_columns else layout["columns"], file_columns, key)
+            slots["columns"] = st.container()
 
-    st.markdown("**What is in each column?**")
-    columns = _columns_section(None if guess_columns else layout["columns"], file_columns, key)
-    slots["columns"] = st.container()
-
-    type_ = identity["type"]
-    stored = [QUANTITIES[c["quantity"]].target(type_, c.get("unit"))[0] if c.get("quantity") in QUANTITIES
-              else c.get("column")
-              for c in columns]
-    stored = [c for c in dict.fromkeys(stored) if isinstance(c, str) and c]
-    extras = _extras_section(seed, stored, bool(type_) and type_ not in known_types(), key)
-    slots["extras"] = st.container()
+        type_ = identity["type"]
+        stored = [QUANTITIES[c["quantity"]].target(type_, c.get("unit"))[0] if c.get("quantity") in QUANTITIES
+                  else c.get("column")
+                  for c in columns]
+        stored = [c for c in dict.fromkeys(stored) if isinstance(c, str) and c]
+        with tabs[3]:
+            extras = _extras_section(seed, stored, bool(type_) and type_ not in known_types(), key)
+            slots["extras"] = st.container()
+        stored_tab, json_tab = tabs[4], tabs[5]
 
     data: Dict[str, Any] = dict(identity)
     if origin and not data.get("description"):
@@ -1039,24 +1210,25 @@ def definition_form(backend, seed: Dict[str, Any], sample: Path, key: str, *, fo
     data.update(extras)
     if isinstance(seed.get("characterizer"), dict):
         data["characterizer"] = seed["characterizer"]
-
-    st.markdown("**Check**")
-    slots["other"] = st.container()
-    if not columns:
-        st.info("Say what at least one column measures.")
-        return
-    ok, problems = _check_section(data, sample, file_columns, slots, columns, others)
-    with st.expander("Show definition (JSON)", icon=":material/data_object:"):
+    with json_tab:
         st.code(definition_text(data), language="json")
-    if problems:
-        from mfethuls.instruments.spec import problems_prompt
 
-        title = "Copy the problems for the chatbot" if not ok else "Copy the warnings for the chatbot"
-        with st.expander(title, icon=":material/chat:", expanded=bool(origin) and not ok):
-            st.caption("Paste this into the chatbot, then paste its corrected answer in step 3; or fix the form above.")
-            st.code(problems_prompt(problems, data), language="markdown", height=200)
-    if ok:
-        _save_controls(backend, data, sample, key)
+    with result:
+        slots["other"] = st.container()
+        if not columns:
+            st.info("Say what at least one column measures: see **Adjust details** below (Columns).")
+            return
+        ok, problems = _check_section(data, sample, file_columns, slots, columns, others, stored_tab)
+        if problems:
+            from mfethuls.instruments.spec import problems_prompt
+
+            title = "Copy the problems for the chatbot" if not ok else "Copy the warnings for the chatbot"
+            with st.expander(f":material/chat: {title}", expanded=bool(origin) and not ok):
+                st.caption("Paste this into the chatbot, then paste its corrected answer in step 3; or fix "
+                           "the details below.")
+                st.code(problems_prompt(problems, data), language="markdown", height=200)
+        if ok:
+            _save_controls(backend, data, sample, key)
 
 
 def _chatbot_flow(backend, sample: Path, others: List[Path], folder: Optional[str], key: str) -> None:
@@ -1081,7 +1253,7 @@ def _chatbot_flow(backend, sample: Path, others: List[Path], folder: Optional[st
     except Exception:  # noqa: BLE001 - the chatbot reads the file itself
         pass
     other_files = {}
-    for path in others:
+    for path in others[:2]:
         try:
             other_files[path.name] = file_outline(path)
         except Exception:  # noqa: BLE001 - checked again below
@@ -1096,9 +1268,11 @@ def _chatbot_flow(backend, sample: Path, others: List[Path], folder: Optional[st
     st.code(prompt, language="markdown", height=200)
     st.caption("Copy it with the button at the top right of the box.")
 
-    st.markdown("**3. Paste the chatbot's answer**")
+    st.markdown("**3. Paste the chatbot's answer here, then press Read the answer**")
     text = st.text_area("The chatbot's answer", key=f"{key}-answer", height=150, label_visibility="collapsed",
                         placeholder="Paste the JSON the chatbot wrote (or a definition a colleague sent you).")
+    # The box takes its text when it loses focus, so pressing the button is enough.
+    st.button("Read the answer", type="primary", icon=":material/arrow_downward:", key=f"{key}-read")
     if not text.strip():
         return
     start, end = text.find("{"), text.rfind("}")
@@ -1111,8 +1285,8 @@ def _chatbot_flow(backend, sample: Path, others: List[Path], folder: Optional[st
     if not isinstance(seed, dict):
         st.error("The answer must be one JSON object { ... }.")
         return
-    st.success("Filled in below. Check every part and change what is wrong; pasting another answer starts the "
-               "form again.", icon=":material/arrow_downward:")
+    st.success("Read below. If the plot looks right, press **Save instrument**; if not, change it under "
+               "**Adjust details**, or paste another answer.", icon=":material/arrow_downward:")
     definition_form(backend, seed, sample, f"{key}-{_digest(seed)}", folder=folder, others=others,
                     origin="Drafted with a chatbot and checked in mfethuls")
 

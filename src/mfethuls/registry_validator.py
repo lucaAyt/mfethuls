@@ -15,7 +15,7 @@ import pandas as pd
 
 from mfethuls.parsers.registry import _PARSER_REGISTRY
 from mfethuls.schema_normalization import _load_instrument_schema
-from mfethuls.naming import stem_key, view_key, view_name
+from mfethuls.naming import file_name_problem, stem_key, view_key, view_name
 from mfethuls.settings import get_settings
 
 if TYPE_CHECKING:
@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 
 _S_RE = re.compile(r"^S[0-9]{3,6}$")
 _R_RE = re.compile(r"^R[0-9]{3,6}$")
-_SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9_\-\.]+$")
 
 # Built-in instruments that were renamed: old name -> new name. Only to say so when a
 # registry row still uses the old name; the old name is not accepted.
@@ -418,13 +417,10 @@ def _table_errors(df: pd.DataFrame) -> List[List[Dict[str, str]]]:
                 ),
             })
         declared = _text(rec.get("raw_data_filename"))
-        if declared and not _SAFE_FILENAME_RE.fullmatch(declared):
+        if declared and (issue := file_name_problem(declared)):
             errors[idx].append({
                 "field": "raw_data_filename",
-                "message": (
-                    f"raw_data_filename {declared!r} contains characters outside [A-Za-z0-9_\\-.]. "
-                    "Use only alphanumeric characters, underscores, hyphens, and dots."
-                ),
+                "message": f"raw_data_filename {declared!r} {issue}: it names a file or folder in the data folder.",
             })
     return errors
 

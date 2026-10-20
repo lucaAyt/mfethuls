@@ -151,55 +151,13 @@ def test_plot_dsc_defaults_to_profile_grouping_when_available():
     assert legend.get_title().get_text() == "Segment"
 
 
-def test_plot_dsc_omits_cycle_boundary_labels_from_legend():
-    dataset = Dataset(
-        data=pd.DataFrame(
-            {
-                "temperature_C": [25, 50, 75, 25, 50, 75, 25, 50, 75],
-                "heat_flow_mW": [0.0, 1.2, 0.8, 0.1, 1.1, 0.9, 0.2, 1.0, 0.7],
-                "profile": [
-                    "Heating start",
-                    "Heating start",
-                    "Heating start",
-                    "Heating",
-                    "Heating",
-                    "Heating",
-                    "Cooling end",
-                    "Cooling end",
-                    "Cooling end",
-                ],
-            }
-        ),
-        metadata={"experiment_id": "EXP_DSC_003"},
-    )
-
-    fig, ax = _close(plot_dsc(dataset))
-    assert len(ax.lines) == 1  # boundary segments are not drawn
-    legend = ax.get_legend()
-    assert legend is not None
-    legend_labels = [text.get_text() for text in legend.get_texts()]
-    assert legend.get_title().get_text() == "Segment"
-    assert legend_labels == ["Heating"]
-
-
-def test_plot_dsc_omits_boundary_profiles_in_comparison_overlay():
-    """Verify DSC boundary profiles are neither drawn nor listed in comparison overlays."""
+def test_plot_dsc_comparison_overlay_colours_segments_and_styles_experiments():
     ds1 = Dataset(
         data=pd.DataFrame(
             {
-                "temperature_C": [25, 50, 75, 25, 50, 75, 25, 50, 75],
-                "heat_flow_mW": [0.0, 1.2, 0.8, 0.1, 1.1, 0.9, 0.2, 1.0, 0.7],
-                "profile": [
-                    "Heating start",
-                    "Heating start",
-                    "Heating start",
-                    "Heating",
-                    "Heating",
-                    "Heating",
-                    "Cooling end",
-                    "Cooling end",
-                    "Cooling end",
-                ],
+                "temperature_C": [25, 50, 75, 75, 50, 25],
+                "heat_flow_mW": [0.0, 1.2, 0.8, 0.1, 1.1, 0.9],
+                "profile": ["Heating_1"] * 3 + ["Cooling_1"] * 3,
             }
         ),
         metadata={"experiment_id": "EXP_DSC_A"},
@@ -207,36 +165,25 @@ def test_plot_dsc_omits_boundary_profiles_in_comparison_overlay():
     ds2 = Dataset(
         data=pd.DataFrame(
             {
-                "temperature_C": [25, 50, 75, 25, 50, 75, 25, 50, 75],
-                "heat_flow_mW": [0.1, 1.3, 0.9, 0.2, 1.2, 1.0, 0.3, 1.1, 0.8],
-                "profile": [
-                    "Heating start",
-                    "Heating start",
-                    "Heating start",
-                    "Heating",
-                    "Heating",
-                    "Heating",
-                    "Cooling end",
-                    "Cooling end",
-                    "Cooling end",
-                ],
+                "temperature_C": [25, 50, 75, 75, 50, 25],
+                "heat_flow_mW": [0.1, 1.3, 0.9, 0.2, 1.2, 1.0],
+                "profile": ["Heating_1"] * 3 + ["Cooling_1"] * 3,
             }
         ),
         metadata={"experiment_id": "EXP_DSC_B"},
     )
 
     fig, ax = _close(plot_experiments([ds1, ds2], mode="overlay", kind="dsc"))
-    # Only the "Heating" segment of each dataset is drawn; "start"/"end" boundaries are skipped
-    assert len(ax.lines) == 2
+    assert len(ax.lines) == 4
     # One legend in two sections: segments (colour), then experiments (line style).
     legend = ax.get_legend()
     assert legend.get_title().get_text() == "Segment"
-    assert [t.get_text() for t in legend.get_texts()] == ["Heating", "", "Experiment", "EXP_DSC_A", "EXP_DSC_B"]
+    assert [t.get_text() for t in legend.get_texts()] == ["Heating_1", "Cooling_1", "", "Experiment", "EXP_DSC_A", "EXP_DSC_B"]
     assert not ax.artists  # nothing outside the layout, so nothing is clipped from saved figures
 
     # Same segment colour for both experiments, different line styles
-    assert ax.lines[0].get_color() == ax.lines[1].get_color()
-    assert ax.lines[0].get_linestyle() != ax.lines[1].get_linestyle()
+    assert ax.lines[0].get_color() == ax.lines[2].get_color()
+    assert ax.lines[0].get_linestyle() != ax.lines[2].get_linestyle()
 
 
 def test_plot_dsc_colours_segments_by_type_and_cycle():
@@ -245,8 +192,8 @@ def test_plot_dsc_colours_segments_by_type_and_cycle():
             {
                 "temperature_C": list(range(12)),
                 "heat_flow_mW": [0.1] * 12,
-                "profile": ["Isothermal_0"] * 2 + ["Heating_0"] * 2 + ["Cooling_0"] * 2
-                + ["Heating_start"] * 2 + ["Heating_1"] * 2 + ["Cooling_1"] * 2,
+                "profile": ["Isothermal_1"] * 2 + ["Heating_1"] * 2 + ["Cooling_1"] * 2
+                + ["Isothermal_2"] * 2 + ["Heating_2"] * 2 + ["Cooling_2"] * 2,
             }
         ),
         metadata={"experiment_id": "EXP_DSC_C"},
@@ -255,14 +202,13 @@ def test_plot_dsc_colours_segments_by_type_and_cycle():
     fig, ax = _close(plot_dsc(dataset))
     colors = {line.get_label(): line.get_color() for line in ax.lines}
 
-    assert "Heating_start" not in colors
     # Later cycles get a darker shade of the same colour
-    for early, late in [("Heating_0", "Heating_1"), ("Cooling_0", "Cooling_1")]:
+    for early, late in [("Heating_1", "Heating_2"), ("Cooling_1", "Cooling_2")]:
         assert sum(colors[late][:3]) < sum(colors[early][:3])
     # Heating is red-dominant, cooling blue-dominant, isothermal grey
     assert colors["Heating_1"][0] > colors["Heating_1"][2]
     assert colors["Cooling_1"][2] > colors["Cooling_1"][0]
-    r, g, b, _ = colors["Isothermal_0"]
+    r, g, b, _ = colors["Isothermal_1"]
     assert max(r, g, b) - min(r, g, b) < 0.01
 
 

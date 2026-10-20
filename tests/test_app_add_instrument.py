@@ -143,11 +143,11 @@ def test_the_form_changes_what_the_chatbot_wrote(data_root):
 def test_problems_are_shown_in_their_section_and_offered_to_the_chatbot(data_root):
     wrong = {**ANSWER, "model": "", "columns": [{"source": "A600", "quantity": "absorbanse"}]}
     at = _paste(_run(DIALOG.format(writes=True)), json.dumps(wrong))
-    errors = [_shown(e.value) for e in at.error]
-    assert any("'model' is missing" in e for e in errors)
-    assert any("2 problem(s) to fix above" in e for e in errors)
+    problems = [_shown(e.value) for e in at.warning]  # things to fix, not failures
+    assert any("'model' is missing" in e for e in problems)
+    assert any("2 problem(s) to fix: see **Adjust details** below (Instrument, Columns)" in e for e in problems)
     assert not [b for b in at.button if b.label == "Save instrument"]
-    feedback = at.code[-1].value
+    feedback = next(c.value for c in at.code if c.value.startswith("mfethuls checked"))
     assert feedback.startswith("mfethuls checked your instrument definition")
     assert "'model' is missing" in feedback and '"name": "photometer"' in feedback
 
@@ -155,7 +155,7 @@ def test_problems_are_shown_in_their_section_and_offered_to_the_chatbot(data_roo
 def test_unknown_quantities_from_the_chatbot_are_problems(data_root):
     wrong = {**ANSWER, "columns": [{"source": "A600", "quantity": "absorbanse"}]}
     at = _paste(_run(DIALOG.format(writes=True)), json.dumps(wrong))
-    assert any("unknown quantity 'absorbanse'" in _shown(e.value) for e in at.error)
+    assert any("unknown quantity 'absorbanse'" in _shown(e.value) for e in at.warning)
 
 
 def test_implausible_values_are_warned_about(data_root):
@@ -301,12 +301,15 @@ def _other_files(root):
     (folder / "notes.csv").write_text("not,the,instrument\n", encoding="utf-8")
 
 
-def test_other_files_are_picked_outlined_for_the_chatbot_and_checked(data_root):
+def test_the_folder_gives_the_file_and_the_others_of_its_type_to_check(data_root):
     _other_files(data_root)
     at = _run(DIALOG.format(writes=True))
-    others = _by_key(at.multiselect, "-others-Photometer-kin1.dat")
-    assert set(others.value) == {"kin2.dat", "notes.csv"}  # the largest and the newest
-    others.set_value(["kin2.dat"]).run()
+    # The largest file of the folder's most common type; the note next to the data is not checked.
+    assert _by_key(at.selectbox, "-file-Photometer").value == "kin2.dat"
+    assert any("also checks that it reads 1 other `.dat` file" in c.value for c in at.caption)
+    assert "Another file of this instrument, `kin1.dat`" in at.code[0].value
+
+    _by_key(at.selectbox, "-file-Photometer").set_value("kin1.dat").run()
     prompt = at.code[0].value
     assert "Another file of this instrument, `kin2.dat`" in prompt
     assert "lines 35–37: text (3 lines)" in prompt and "Max A600" not in prompt  # its shape, not its data
@@ -321,17 +324,32 @@ def test_other_files_are_picked_outlined_for_the_chatbot_and_checked(data_root):
 
     fixed = {**ANSWER, "file": {**ANSWER["file"], "data_ends": "first_non_numeric_row"}}
     at = _paste(at, json.dumps(fixed))
-    table = next(d.value for d in at.dataframe if "result" in d.value.columns)
-    assert table["result"].tolist() == ["✓ reads cleanly"]
+    assert not [d for d in at.dataframe if "result" in d.value.columns]
+    assert any("Also reads the 1 other file checked cleanly: kin2.dat" in c.value for c in at.caption)
 
 
 def test_an_other_file_that_cannot_be_read_blocks_saving(data_root):
-    _other_files(data_root)
-    at = _run(DIALOG.format(writes=True))
-    _by_key(at.multiselect, "-others-Photometer-kin1.dat").set_value(["notes.csv"]).run()
-    at = _paste(at, json.dumps(ANSWER))
-    assert any(_shown(e.value).startswith("notes.csv cannot be read: no format of photometer reads .csv") for e in at.error)
+    (data_root / "Photometer" / "broken.dat").write_text("nothing; to read\n", encoding="utf-8")
+    at = _paste(_run(DIALOG.format(writes=True)), json.dumps(ANSWER))
+    assert any(_shown(e.value).startswith("broken.dat cannot be read") for e in at.error)
     assert not [b for b in at.button if b.label == "Save instrument"]
+
+
+def test_the_answer_is_read_with_a_button_and_details_open_only_when_needed(data_root):
+    at = _run(DIALOG.format(writes=True))
+    assert [b for b in at.button if b.label == "Read the answer"]
+    at = _paste(at, json.dumps(ANSWER))
+    assert not at.expander[0].proto.expanded  # Adjust details: nothing to fix
+    wrong = {**ANSWER, "model": ""}
+    at = _paste(at, json.dumps(wrong))
+    assert next(e for e in at.expander if "Adjust details" in e.label).proto.expanded
+
+
+def test_without_files_in_the_data_folder_the_user_is_told_where_to_put_them(tmp_path, monkeypatch):
+    (tmp_path / "data").mkdir()
+    monkeypatch.setenv("PATH_TO_DATA", str(tmp_path / "data"))
+    at = _run(DIALOG.format(writes=True))
+    assert any("Put a few files exported by the instrument in a folder" in i.value for i in at.info)
 
 
 def test_new_format_keys_survive_the_form(data_root):

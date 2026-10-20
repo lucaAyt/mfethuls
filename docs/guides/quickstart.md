@@ -26,7 +26,7 @@ mfethuls-app
 
 It opens at `http://localhost:8501` with a welcome page:
 
-- **Get started** asks for your **data folder** (one subfolder per instrument: `DSC/`, `TGA/`, …) and your **registry** (a CSV or Excel sheet with one row per experiment; the app can create an empty one, and the setup form offers an example to download). Both are checked as you type, and the page shows how to organise the data folder. They are saved in `~/.mfethuls/settings.json`, so notebooks use the same folders; change them later under **⚙ Settings**.
+- **Get started** asks for your **data folder** (one subfolder per instrument: `DSC/`, `TGA/`, …), checked as you type, and shows how to organise it. The **registry** (an Excel sheet with one row per experiment) is made for you as `registry.xlsx` in the data folder, and rows are added as you register data. Once you know what it is for, **Use a different registry** points mfethuls at another CSV or Excel file (an example is offered to download). The choice is saved in `~/.mfethuls/settings.json`, so notebooks use the same folders; change it later under **⚙ Settings**.
 - **Try the example** switches the app to a copy of the example DSC, TGA, FTIR and fluorescence data (in `~/mfethuls-example`). Your own folders are not touched; **Back to my data** switches back.
 - **Use it from Python** opens the tutorial notebook (see below).
 
@@ -39,9 +39,10 @@ Once set up, a getting-started checklist shows what to do next; a compact versio
 1. **Register new data**: **Ingest** → **Review & register** proposes registry rows for raw files that are not in the registry yet. Rows are checked as you edit them, including a test read of the files with the chosen instrument.
 2. **Ingest**: tick experiments (or **Select all**) and press **Ingest**.
 3. **Select** experiments under **Datasets**, then **plot** them: the built-in plot per instrument, or a line/scatter plot with **Colour by** and **Style by**; set **Axis limits**; export a vector **SVG** or interactive **HTML**.
-4. **Keep it tidy**: after renaming or removing registry rows, **⚙ Settings** → **Clean up**.
 
-The 🏠 button at the top of the sidebar goes back to the welcome page.
+After you rename or remove registry rows, a note under **Datasets** offers to bring the stored data in line (**Clean up**).
+
+The 🏠 button at the top of the sidebar goes back to the welcome page. **⚙ Settings → Appearance** changes the accent colour.
 
 ---
 
