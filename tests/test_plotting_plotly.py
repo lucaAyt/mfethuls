@@ -45,7 +45,7 @@ def _dsc(name):
             {
                 "temperature_C": [25, 50, 75, 75, 50, 25],
                 "heat_flow_mW": [0.0, 1.2, 0.8, 0.1, 1.1, 0.9],
-                "profile": ["Heating_0"] * 3 + ["Cooling_0"] * 3,
+                "profile": ["Heating_1"] * 3 + ["Cooling_1"] * 3,
             }
         ),
         metadata={"experiment_id": name},
@@ -99,7 +99,7 @@ def test_plotly_dsc_overlay_has_segment_and_experiment_legends():
     by_legend = {}
     for entry in entries:
         by_legend.setdefault(entry.legend or "legend", []).append(entry.name)
-    assert by_legend == {"legend": ["Heating_0", "Cooling_0"], "legend2": ["A", "B"]}
+    assert by_legend == {"legend": ["Heating_1", "Cooling_1"], "legend2": ["A", "B"]}
     assert fig.layout.legend.title.text == "Segment"
     assert fig.layout.legend2.title.text == "Experiment"
 

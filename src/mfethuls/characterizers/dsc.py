@@ -3,10 +3,16 @@ import numpy as np
 
 
 class DSCProfiling:
+    """Label each DSC point with its temperature segment: ``Heating_1``, ``Isothermal_2``, ``Cooling_1``...
+
+    Segments are numbered from 1 per type, in measurement order. The kinks where a ramp starts or
+    ends (found with ``sensitivity`` on the second difference) are folded into the ramp, so
+    there are no separate start or end labels.
+    """
+
     def __init__(self, sensitivity=0.1):
         self.sensitivity = sensitivity
 
-    # Characterize vectorized
     def characterize(self, df: pd.DataFrame) -> pd.DataFrame:
         if df.empty:
             return df
@@ -19,60 +25,24 @@ class DSCProfiling:
         def process_group(group: pd.DataFrame) -> pd.DataFrame:
             group = group.copy(deep=False)
 
-            temperature = group[temperature_column]
-            diff = temperature.diff()
+            diff = group[temperature_column].diff()
             diff2 = diff.diff()
 
-            profile = np.full(len(group), 'Isothermal', dtype=object)
+            # The first point of a ramp already steps up or down, so it is in the ramp.
+            segment = np.full(len(group), 'Isothermal', dtype=object)
+            segment[diff > 0] = 'Heating'
+            segment[diff < 0] = 'Cooling'
 
-            # Assign base profile
-            profile[diff > 0] = 'Heating'
-            profile[diff < 0] = 'Cooling'
-            profile[(diff2 < -self.sensitivity) & (profile != 'Isothermal')] = 'Cooling_start'
-            profile[(diff2 < -self.sensitivity) & (profile == 'Isothermal')] = 'Heating_end'
-            profile[(diff2 > self.sensitivity) & (profile != 'Isothermal')] = 'Heating_start'
-            profile[(diff2 > self.sensitivity) & (profile == 'Isothermal')] = 'Cooling_end'
+            # The first flat point after a ramp is where the ramp ends: it belongs to the ramp too.
+            flat = segment == 'Isothermal'
+            segment[flat & (diff2 < -self.sensitivity)] = 'Heating'
+            segment[flat & (diff2 > self.sensitivity)] = 'Cooling'
 
-            group = group.assign(diff=diff, diff2=diff2, profile=profile)
-            profile = profile.astype(str, copy=False)
-
-            # Identify segment ends
-            heating_ends = np.char.find(profile, 'Heating_end') != -1
-            cooling_ends = np.char.find(profile, 'Cooling_end') != -1
-
-            # Segment masks
-            heating_mask = np.char.startswith(profile, 'Heating')
-            cooling_mask = np.char.startswith(profile, 'Cooling')
-            isothermal_mask = profile == 'Isothermal'
-
-            # Vectorized cycle IDs via cumulative sum of ends
-            heating_ids = np.cumsum(heating_ends)
-            cooling_ids = np.cumsum(cooling_ends)
-
-            # For isothermal: start a new block when previous label was not Isothermal.
-            prev_profile = np.insert(profile[:-1], 0, '')
-            isothermal_starts = isothermal_mask & (prev_profile != 'Isothermal')
-            isothermal_ids = np.cumsum(isothermal_starts) - 1
-
-            # Apply cycle numbers
-            profile[heating_mask & ~heating_ends] = [
-                f"{label}_{cycle}" for label, cycle in zip(
-                    profile[heating_mask & ~heating_ends],
-                    heating_ids[heating_mask & ~heating_ends])
-            ]
-
-            profile[cooling_mask & ~cooling_ends] = [
-                f"{label}_{cycle}" for label, cycle in zip(
-                    profile[cooling_mask & ~cooling_ends],
-                    cooling_ids[cooling_mask & ~cooling_ends])
-            ]
-
-            profile[isothermal_mask] = [
-                f"Isothermal_{cycle}" for cycle in isothermal_ids[isothermal_mask]
-            ]
-
-            group['profile'] = profile
-            return group.drop(columns=['diff', 'diff2'])
+            # Number each run of the same segment type, from 1 per type.
+            labels = pd.Series(segment, index=group.index)
+            run_number = (labels != labels.shift()).groupby(labels).cumsum()
+            group['profile'] = labels + '_' + run_number.astype(str)
+            return group
 
         if "name" in df.columns:
             processed = [process_group(group) for _, group in df.groupby("name", sort=False)]

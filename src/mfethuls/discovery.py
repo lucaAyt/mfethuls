@@ -1,7 +1,9 @@
 """Find raw data under PATH_TO_DATA that the registry does not describe yet.
 
-Each instrument has a ``folder_name`` in ``config/instrument_params.json``;
-several can share one (the DSC models share ``DSC/``). In an instrument folder:
+Each instrument reads one ``folder_name`` (its own, or the one the lab linked it to,
+see :func:`mfethuls.instruments.configured.link_folder`); several can share one (the
+DSC models share ``DSC/``). Folders no instrument reads are :func:`unclaimed_folders`,
+with the instrument their name suggests. In an instrument folder:
 
 - each file directly in it is one experiment, named by its stem (``poly1.txt`` and
   ``poly1.csv`` are one experiment);
@@ -22,6 +24,7 @@ default for subfolders; the person registering decides per folder.
 from __future__ import annotations
 
 import os
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -302,6 +305,88 @@ def proposed_rows(
     return pd.DataFrame(rows, columns=REGISTRY_COLUMNS + extra + ["_folder", "_modified"])
 
 
+
+def _files_label(paths: List[str], base: str) -> str:
+    return ", ".join(os.path.relpath(path, base).replace(os.sep, "/") for path in sorted(paths))
+
+
+def tree_rows(items: Iterable[NewData], registry: Registry, data_root: str) -> pd.DataFrame:
+    """Every way to register ``items`` (those without an ``issue``), laid out as a folder tree.
+
+    Each file experiment is a row; each subfolder is a row followed by a row per file in it,
+    which registers that file as its own experiment (run R001, R002, ... in file-name order).
+    Rows are ordered by path.
+
+    Columns are those of :func:`proposed_rows` plus ``_kind`` (``"file"``, ``"folder"`` or
+    ``"run"``), ``_data``, the path shown, and ``_whole``: whether a subfolder's row registers it
+    as one experiment (all its files together, e.g. a titration or time series: the default for
+    series instruments, and for a folder without files to register one by one). Otherwise the
+    subfolder's row only ticks its files (see :func:`sync_folder_ticks`). A subfolder's row and
+    the rows of its files share ``_folder``.
+    """
+
+    items = sorted((item for item in items if not item.issue), key=lambda item: item.key.casefold())
+    whole = proposed_rows(items, registry, split=set())
+    folders = [item for item in items if item.layout == "folder"]
+    per_file = proposed_rows(folders, registry, split={item.key for item in folders})
+    parts = []
+    for position, item in enumerate(items):
+        if item.layout == "file":
+            label = f"{item.folder_name}/{_files_label(item.files, os.path.join(data_root, item.folder_name))}"
+            parts.append(whole.iloc[[position]].assign(_kind="file", _data=label, _whole=False))
+            continue
+        count = len(item.files)
+        runs = [files for stem, files in item.runs.items() if stem not in item.run_issues]
+        one = not (item.split_by_default and runs)
+        label = f"📁 {item.key}/  ·  {count} file{'s' if count != 1 else ''}" + ("  ·  one experiment" if one else "")
+        parts.append(whole.iloc[[position]].assign(_kind="folder", _data=label, _whole=one))
+        if runs:
+            base = os.path.join(data_root, item.folder_name, item.raw_data_filename)
+            labels = [f"\u2003\u2003└ {_files_label(files, base)}" for files in runs]
+            parts.append(per_file[per_file["_folder"] == item.key].assign(_kind="run", _data=labels, _whole=False))
+    columns = list(whole.columns) + ["_kind", "_data", "_whole"]
+    if not parts:
+        return pd.DataFrame(columns=columns)
+    return pd.concat(parts, ignore_index=True)[columns]
+
+
+def _ticks(tree: pd.DataFrame) -> pd.Series:
+    return tree["include"].fillna(False).astype(bool)
+
+
+def sync_folder_ticks(before: pd.DataFrame, after: pd.DataFrame) -> pd.DataFrame:
+    """``after`` (a :func:`tree_rows` table with an ``include`` column, edited from ``before``) with
+    the ticks of subfolders that only tick their files carried over: ticking or unticking such a
+    folder does the same to its files. Its files can then be ticked or unticked one by one."""
+
+    tree = after.copy()
+    tree["include"] = _ticks(tree)
+    changed = tree["include"] != _ticks(before)
+    selectors = (tree["_kind"] == "folder") & ~tree["_whole"].fillna(False).astype(bool)
+    runs = tree["_kind"] == "run"
+    for index in tree.index[selectors & changed]:
+        tree.loc[runs & (tree["_folder"] == tree.at[index, "_folder"]), "include"] = tree.at[index, "include"]
+    return tree
+
+
+def chosen_rows(tree: pd.DataFrame) -> pd.DataFrame:
+    """The ticked rows of a :func:`tree_rows` table that are experiments: files, and subfolders
+    registered whole (a folder that only ticks its files is not one)."""
+
+    whole = tree["_whole"].fillna(False).astype(bool)
+    return tree[_ticks(tree) & ((tree["_kind"] != "folder") | whole)]
+
+
+def overlapping_folders(rows: pd.DataFrame) -> List[str]:
+    """Subfolders among ``rows`` (from :func:`chosen_rows`) chosen both whole and file by file."""
+
+    if rows.empty or "_kind" not in rows:
+        return []
+    whole = set(rows.loc[rows["_kind"] == "folder", "_folder"])
+    split = set(rows.loc[rows["_kind"] == "run", "_folder"])
+    return sorted(whole & split)
+
+
 @lru_cache(maxsize=512)
 def _probe_file(instrument_name: str, path: str, modified: float) -> Optional[str]:
     """Read one raw file with the instrument's parser; the problem, or None. ``modified`` keys the cache."""
@@ -434,6 +519,8 @@ class UnclaimedFolder:
     file_count: int
     # True when counting stopped at ``max_count``: the folder holds more files.
     more: bool = False
+    # The instrument folder its name suggests (``DMA data`` -> ``DMA``), see :func:`suggest_instruments`.
+    suggested: Optional[str] = None
 
     @property
     def count_label(self) -> str:
@@ -481,22 +568,53 @@ def unclaimed_folders(
     for entry in instrument_folders(data_root):
         if entry.name.casefold() in known:
             continue
-        files = []
-        count = 0
-        more = False
-        for root, dirs, names in os.walk(entry.path):
-            dirs[:] = sorted(d for d in dirs if not d.startswith("."))
-            for name in sorted(names):
-                if name in _IGNORED_NAMES or name.startswith("."):
-                    continue
-                if count == max_count:
-                    more = True
-                    break
-                count += 1
-                if len(files) < limit:
-                    files.append(os.path.relpath(os.path.join(root, name), entry.path))
-            if more:
-                break
+        files, count, more = folder_files(entry.path, limit=limit, max_count=max_count)
         if count:
-            found.append(UnclaimedFolder(entry.name, files, count, more))
+            found.append(UnclaimedFolder(entry.name, files, count, more, suggest_instruments(entry.name)))
     return found
+
+
+def folder_files(path: str, *, limit: int = 200, max_count: int = 1000) -> tuple[List[str], int, bool]:
+    """Files under ``path`` (relative to it, up to ``limit``), how many were counted, and whether
+    counting stopped at ``max_count``. Hidden files and mfethuls' own files are left out."""
+    files: List[str] = []
+    count = 0
+    for root, dirs, names in os.walk(path):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        for name in sorted(names):
+            if name in _IGNORED_NAMES or name.startswith("."):
+                continue
+            if count == max_count:
+                return files, count, True
+            count += 1
+            if len(files) < limit:
+                files.append(os.path.relpath(os.path.join(root, name), path))
+    return files, count, False
+
+
+def instrument_groups() -> Dict[str, List[dict]]:
+    """The instruments by the folder they read, e.g. ``{"DSC": [four DSC models], "TGA": [tga]}``."""
+    groups: Dict[str, List[dict]] = defaultdict(list)
+    for entry in sorted(_load_instrument_config(), key=lambda e: e["name"]):
+        groups[entry["folder_name"]].append(entry)
+    return dict(sorted(groups.items(), key=lambda item: item[0].casefold()))
+
+
+def _words(text: str) -> set:
+    return {word for word in re.split(r"[^a-z0-9]+", text.casefold()) if word}
+
+
+def suggest_instruments(folder_name: str) -> Optional[str]:
+    """The instrument folder whose instruments ``folder_name`` names, or None.
+
+    ``DMA data``, ``dma_Q800`` and ``Rheometer 2024`` name the DMA and rheometer
+    folders: every word of the instruments' folder or type is a word of ``folder_name``.
+    Only a single match is suggested.
+    """
+    words = _words(folder_name)
+    matches = [
+        folder for folder, entries in instrument_groups().items()
+        if folder.casefold() != folder_name.casefold()
+        and any(_words(name) and _words(name) <= words for name in [folder, *(e["type"] for e in entries)])
+    ]
+    return matches[0] if len(matches) == 1 else None

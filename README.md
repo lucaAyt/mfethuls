@@ -35,7 +35,7 @@ Each instrument's reader normalises raw exports to a [canonical column schema](h
 
 **Not a Python user?** Follow [docs/guides/local_setup.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/local_setup.md): one small tool (`uv`) installs everything, Python included, and the app then starts with a double-click.
 
-**With Python** (3.11 or newer): install mfethuls in a [virtual environment](https://docs.python.org/3/tutorial/venv.html), so it and its dependencies stay separate from your other Python projects:
+**With pip** (Python 3.11 or newer): install mfethuls in a [virtual environment](https://docs.python.org/3/tutorial/venv.html), so it and its dependencies stay separate from your other Python projects:
 
 ```shell
 python -m venv .venv
@@ -43,7 +43,18 @@ python -m venv .venv
 pip install "mfethuls[viz,notebook]"
 ```
 
-Or with [uv](https://docs.astral.sh/uv/), which creates the environment for you: `uv tool install "mfethuls[viz]"` makes the `mfethuls` and `mfethuls-app` commands available everywhere.
+**With [uv](https://docs.astral.sh/uv/)**, which installs Python and creates the environment for you, and makes the `mfethuls`, `mfethuls-app` and `mfethuls-tutorial` commands available everywhere:
+
+```shell
+# 1. Install uv (once)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"   # Windows
+curl -LsSf https://astral.sh/uv/install.sh | sh                                     # macOS/Linux
+
+# 2. Install mfethuls (open a new terminal first, so the uv command is found)
+uv tool install "mfethuls[viz,notebook]"
+```
+
+Keep both extras: `viz` runs the app, `notebook` opens the tutorial (**Use it from Python** on the app's welcome page).
 
 The latest development version: `pip install "mfethuls[viz,notebook] @ git+https://github.com/lucaAyt/mfethuls.git"`. The extras:
 
@@ -64,11 +75,11 @@ mfethuls-app
 
 The welcome page offers three ways in:
 
-- **Get started**: choose your data folder (one subfolder per instrument) and your registry (CSV or Excel, one row per experiment; the app can create an empty one or give you an example). They are saved in `~/.mfethuls/settings.json`, so notebooks use the same folders; change them any time under **⚙ Settings**.
+- **Get started**: choose your data folder (one subfolder per instrument). The registry (one row per experiment) is made for you as `registry.xlsx` in that folder; to use another one, e.g. shared on OneDrive, open **Use a different registry**. The choice is saved in `~/.mfethuls/settings.json`, so notebooks use the same folders; change it any time under **⚙ Settings**.
 - **Try the example**: explore example DSC, TGA, FTIR and fluorescence data, copied to `~/mfethuls-example`. Your own data is not touched.
 - **Use it from Python**: the tutorial notebook (below).
 
-A getting-started checklist then walks through registering (**Ingest** → **Review & register**), ingesting, selecting and plotting (**Colour by**, **Style by**, axis limits, SVG/HTML export) and cleaning up (**⚙ Settings** → **Clean up**); a compact tracker stays at the top of the sidebar, next to 🏠 (back to the welcome page) and ⚙.
+A getting-started checklist then walks through registering (**Ingest** → **Review & register**), ingesting, selecting and plotting (**Colour by**, **Style by**, axis limits, SVG/HTML export); a compact tracker stays at the top of the sidebar, next to 🏠 (back to the welcome page) and ⚙. A folder named unlike its instrument (`DMA data`) is offered in **Review & register**, where you choose its instrument; file and folder names may contain spaces.
 
 Non-technical users: double-click `launch.bat` (Windows) or run `bash launch.sh`; it needs only [`uv`](https://docs.astral.sh/uv/). See [docs/guides/local_setup.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/local_setup.md). Folders can also come from `.env` (copy `env_example`); folders saved in the app take precedence. `experiments_template.csv` in the repo root has an example row for every supported instrument.
 

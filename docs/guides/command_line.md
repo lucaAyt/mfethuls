@@ -14,7 +14,8 @@ mfethuls --version
 
 The command uses the same folders as the app: those saved under **Settings** (in
 `~/.mfethuls/settings.json`), else `PATH_TO_DATA` / `PATH_TO_REGISTRY` /
-`PATH_TO_LOCAL_STORAGE` from the environment or `.env`.
+`PATH_TO_LOCAL_STORAGE` from the environment or `.env`. Without a registry, it is
+`registry.xlsx` in the data folder.
 
 ```shell
 mfethuls settings                                   # show the folders in use

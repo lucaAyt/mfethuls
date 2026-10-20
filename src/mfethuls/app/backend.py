@@ -104,10 +104,9 @@ class LocalBackend:
         """The Ingest sidebar section; returns the registry path in use."""
         registry_path = get_settings().registry_path or ""
         if not is_set_up():
-            st.caption("Choose your data folder and registry first: **⚙ Settings** → Data folder and registry.")
+            st.caption("Choose your data folder first: **⚙ Settings** → Data folder and registry.")
             return registry_path
         st.caption(f"Registry: `{os.path.basename(registry_path)}`")
-        refresh_ingest = st.checkbox("Re-parse even if cached", value=False)
 
         experiment_names: List[str] = []
         if registry_path:
@@ -123,24 +122,28 @@ class LocalBackend:
             selected = experiment_names if select_all else st.multiselect("Experiments", options=experiment_names)
             st.caption(f"{len(selected)} selected.")
         elif registry_path:
-            st.info("No experiments found.")
+            st.caption("Registered experiments are listed here, ready to ingest.")
+            return registry_path
 
-        if st.button("Ingest", disabled=not selected, width="stretch"):
+        if st.button("Ingest", type="primary", icon=":material/input:", disabled=not selected, width="stretch"):
             progress_bar = st.progress(0)
             results: List[tuple] = []
             for i, name in enumerate(selected):
-                results.extend(self.ingest([name], registry_path, refresh=refresh_ingest))
+                # The files are always read again, so a changed file or instrument is picked up.
+                results.extend(self.ingest([name], registry_path, refresh=True))
                 progress_bar.progress((i + 1) / len(selected))
 
-            counts: Dict[str, int] = {}
-            for name, result in results:
-                status = result.get("status", "unknown")
-                counts[status] = counts.get(status, 0) + 1
-                if status == "error":
-                    st.error(f"{name}: {result.get('error', '')}")
-            st.success("Done — " + ", ".join(f"{k}: {v}" for k, v in counts.items()))
+            failed = [(name, result) for name, result in results if result.get("status") == "error"]
+            for name, result in failed:
+                st.error(f"{name}: {result.get('error', '')}")
+            done = sum(result.get("status") in {"persisted", "registered"} for _, result in results)
+            message = f"Ingested {done} of {len(results)} experiment{'s' if len(results) != 1 else ''}."
             self.clear_caches()
-            st.rerun()
+            if failed:
+                st.warning(message)  # stays with the errors above
+            else:
+                st.session_state["ingest_message"] = message
+                st.rerun()
         return registry_path
 
     # -- data -----------------------------------------------------------------

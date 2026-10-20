@@ -53,7 +53,7 @@ Save the CSV. That's the only file you touch before ingesting.
 bash launch.sh
 ```
 
-Streamlit opens at `http://localhost:8501`. On first launch, press **Get started** to choose your data folder and registry; change them later under **⚙ Settings** → **Data folder and registry**. From then on, a getting-started checklist (and a compact tracker at the top of the sidebar) shows the next step.
+Streamlit opens at `http://localhost:8501`. On first launch, press **Get started** to choose your data folder; the registry is made for you as `registry.xlsx` in it. Change either later under **⚙ Settings** → **Data folder and registry**. From then on, a getting-started checklist (and a compact tracker at the top of the sidebar) shows the next step.
 
 ---
 
@@ -63,7 +63,7 @@ In the Streamlit sidebar, expand **Ingest**. It lists the experiments of the reg
 
 Select `LB_dsc_001` and `LB_dsc_002` from the multiselect (or tick **"Select all"** if these are the only rows), then click **"Ingest"**. A progress bar advances as each experiment is parsed, normalised, and written to Parquet.
 
-If an experiment cannot be ingested (unknown instrument name, file not found, files that do not read as that instrument's data, …), it is listed with the reason and nothing is stored for it. Fix the registry and ingest again; experiments that already succeeded are reused unless you tick **"Re-parse even if cached"**.
+If an experiment cannot be ingested (unknown instrument name, file not found, files that do not read as that instrument's data, …), it is listed with the reason and nothing is stored for it. Fix the registry and ingest again. **Ingest** in the app always reads the files again, so a corrected file or instrument is picked up (in Python, pass `refresh=True`).
 
 When it finishes:
 - Two Parquet files exist under `PATH_TO_LOCAL_STORAGE/dsc_mettler_toledo_v1/<hex_id>/`
@@ -73,13 +73,14 @@ When it finishes:
 
 ## Step 4 — Browse and plot
 
-In the sidebar, expand **Datasets**. Your two experiments appear in the table. Pick `LB_dsc_001` and `LB_dsc_002` in **"Select experiments to plot"**: the main page shows row counts, a preview table and the **Plot** section.
+In the sidebar, expand **Datasets** and pick `LB_dsc_001` and `LB_dsc_002` in **"Select experiments to plot"** (each is listed with its sample and run; with several instruments, the **Instrument** buttons above narrow the list). The main page lists them with their instrument, sample and run, then shows row counts, a preview table and the **Plot** section.
 
 - Choose the **X axis** (`temperature_C`) and **Y axis** (`heat_flow_mW`). Lines are coloured by experiment, and every data point is drawn. **Style by** next to **Colour by** tells a second column apart by line style (or marker shape in a scatter plot), e.g. colour by experiment and style by sample.
 - Or switch on **Built-in instrument plot**: the DSC plot with one colour per heating/cooling segment and one line style per experiment.
+- **Filter**, at the top of **Plot** next to the built-in plot toggle, plots only some rows: choose a column (those worth filtering on, such as the DSC segments `Heating_1`, `Cooling_1`, …, come first, and the button names the first, e.g. **Filter by profile**) and the values to keep. While it is on, the button is coloured and names what is kept (**Filter: Heating_1**), and a line under the chart says how many rows are shown, with **Clear**. **Log X**, **Log Y** and **Invert X** sit next to **Axis limits** above the chart.
 - Zoom by dragging a box, and double-click to reset.
 
-The toolbar above the chart has an **Axis limits** toggle (it opens min/max fields above the chart, so the axes stay visible) and downloads the figure as a vector **SVG** (publication style, editable in Inkscape, using your axis limits) or as interactive **HTML**. See the [plotting guide](plotting.md#streamlit-dashboard) for colour scales and data size.
+The toolbar above the chart has an **Axis limits** toggle (it opens min/max fields above the chart, so the axes stay visible) and a **Download** menu on the right for the figure as a vector **SVG** (publication style, editable in Inkscape, using your axis limits) or as interactive **HTML**. See the [plotting guide](plotting.md#streamlit-dashboard) for colour scales and data size.
 
 ---
 

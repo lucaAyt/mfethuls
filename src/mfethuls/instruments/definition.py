@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from dateutil.tz import gettz
 
+from ..naming import file_name_problem
 from . import patterns
 from .units import QUANTITIES, conversion
 
@@ -304,7 +305,7 @@ def parse_definition(data: Dict[str, Any], source: Optional[str] = None) -> Inst
         problems.append(f"'type' {type_!r} may only contain a-z, 0-9, '_' and '-'")
     model = text("model")
     folder_name = text("folder_name")
-    if folder_name and (issue := _file_name_problem(folder_name)):
+    if folder_name and (issue := file_name_problem(folder_name)):
         problems.append(f"'folder_name' {folder_name!r} {issue}: it is the instrument's folder in the data folder")
     data_layout = text("data_layout", required=False, default="file")
     if data_layout not in LAYOUTS:
@@ -357,7 +358,7 @@ def parse_definition(data: Dict[str, Any], source: Optional[str] = None) -> Inst
     if check is not None:
         if not (isinstance(check, dict) and isinstance(check.get("sample"), str)):
             problems.append("'check' must name a 'sample' file")
-        elif issue := _file_name_problem(check["sample"]):
+        elif issue := file_name_problem(check["sample"]):
             problems.append(f"'check.sample' {check['sample']!r} {issue}: it is a file next to the definition")
 
     name_from = data.get("name_from", "file")
@@ -479,13 +480,6 @@ def _known_zone(name: str) -> bool:
         return gettz(name) is not None
     except (ValueError, OSError):
         return False
-
-
-def _file_name_problem(name: str) -> Optional[str]:
-    """Why ``name`` is not a plain file or folder name (no path), or None."""
-    if name in (".", "..") or name != name.strip() or _NOT_IN_FILE_NAMES.search(name):
-        return 'must be a plain name, without / \\ : * ? " < > |'
-    return None
 
 
 def _parse_format(data: Dict[str, Any], type_: str, where: str,
