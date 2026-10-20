@@ -178,10 +178,18 @@ class TestTableValidations:
         ])
         assert all(any("'poly1' is used by more than one dsc_mettler_toledo_v0 row" in m for m in row) for row in errors)
 
-    def test_unsafe_file_name_is_reported_on_its_row(self):
+    def test_names_as_people_write_them_are_fine(self):
+        # Non-programmers name files with spaces, brackets and accents.
+        errors = _errors_by_row([
+            {"name": "exp_a", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "my file (1)"},
+            {"name": "exp_b", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "Échantillon 2"},
+        ])
+        assert errors == [[], []]
+
+    def test_a_path_as_file_name_is_reported_on_its_row(self):
         errors = _errors_by_row([
             {"name": "exp_a", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "chitosan_jan15"},
-            {"name": "exp_b", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "my file (1)"},
+            {"name": "exp_b", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "../other/run1"},
         ])
         assert errors[0] == []
-        assert any("'my file (1)' contains characters" in m for m in errors[1])
+        assert any("'../other/run1' must be a plain name" in m for m in errors[1])

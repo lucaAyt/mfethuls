@@ -25,13 +25,6 @@ _SEGMENT_CMAPS = {
 DSC_EXPERIMENT_LINESTYLES = ["-", "--", ":", "-."]
 
 
-def _is_boundary_profile_label(label: object) -> bool:
-    """Return True for profile labels that represent cycle boundaries."""
-
-    text = str(label).casefold()
-    return "start" in text or "end" in text
-
-
 def _segment_type(label: str) -> Optional[str]:
     text = label.casefold()
     for segment_type in _SEGMENT_CMAPS:
@@ -43,7 +36,7 @@ def _segment_type(label: str) -> Optional[str]:
 def dsc_segment_colors(labels: Sequence[str]) -> dict:
     """Map profile labels to colours, shading each segment type by cycle order.
 
-    ``labels`` must be in measurement order (``Heating_0`` before ``Heating_1``).
+    ``labels`` must be in measurement order (``Heating_1`` before ``Heating_2``).
     Labels that are not heating, cooling or isothermal get no colour, so
     Matplotlib's default colour cycle applies.
     """
@@ -117,13 +110,10 @@ def build_dsc_spec(
     colorbar = None
     if resolved_group_by:
         df = dataset.data
-        # Start/end groups are single transition points from across the whole run;
-        # drawing them as lines connects distant points, so leave them out.
-        groups = []
-        for group_value, subset in df.groupby(resolved_group_by, dropna=False, sort=False):
-            label = "<missing>" if pd.isna(group_value) else str(group_value)
-            if not _is_boundary_profile_label(label):
-                groups.append((label, subset))
+        groups = [
+            ("<missing>" if pd.isna(group_value) else str(group_value), subset)
+            for group_value, subset in df.groupby(resolved_group_by, dropna=False, sort=False)
+        ]
         colors = dsc_segment_colors([label for label, _ in groups]) if resolved_group_by == "profile" else {}
         traces = [
             Trace(

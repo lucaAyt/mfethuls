@@ -20,7 +20,7 @@ def _dsc(name):
             {
                 "temperature_C": [25, 50, 75, 75, 50, 25],
                 "heat_flow_mW": [0.0, 1.2, 0.8, 0.1, 1.1, 0.9],
-                "profile": ["Heating_0"] * 3 + ["Cooling_0"] * 3,
+                "profile": ["Heating_1"] * 3 + ["Cooling_1"] * 3,
             }
         ),
         metadata={"experiment_id": name},
@@ -92,15 +92,15 @@ def test_dsc_overlay_encodes_segment_by_colour_and_experiment_by_linestyle():
 
     panel = spec.panel
     segments, experiments = panel.legends
-    assert [entry.label for entry in segments.entries] == ["Heating_0", "Cooling_0"]
+    assert [entry.label for entry in segments.entries] == ["Heating_1", "Cooling_1"]
     assert [entry.label for entry in experiments.entries] == ["A", "B"]
 
     by_label = {trace.label: trace for trace in panel.traces}
-    assert by_label["A | Heating_0"].color == by_label["B | Heating_0"].color
-    assert by_label["A | Heating_0"].linestyle == DSC_EXPERIMENT_LINESTYLES[0]
-    assert by_label["B | Heating_0"].linestyle == DSC_EXPERIMENT_LINESTYLES[1]
+    assert by_label["A | Heating_1"].color == by_label["B | Heating_1"].color
+    assert by_label["A | Heating_1"].linestyle == DSC_EXPERIMENT_LINESTYLES[0]
+    assert by_label["B | Heating_1"].linestyle == DSC_EXPERIMENT_LINESTYLES[1]
     # Experiment legend entries toggle that experiment's traces in Plotly.
-    assert by_label["B | Cooling_0"].legend_group == experiments.entries[1].group
+    assert by_label["B | Cooling_1"].legend_group == experiments.entries[1].group
 
 
 def test_facet_has_one_untitled_panel_per_dataset():

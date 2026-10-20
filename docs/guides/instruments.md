@@ -8,23 +8,28 @@ Nothing in your files is thrown away. Every column, every row and the text aroun
 
 ## From the app
 
-1. Put a file the instrument exported in a folder of your data folder, e.g. `PATH_TO_DATA/Photometer/kin1.dat`.
+1. Put a few files the instrument exported in a folder of your data folder, e.g. `PATH_TO_DATA/Photometer/kin1.dat`, `kin2.dat`, … Several files help: runs and methods differ, and the definition must read them all.
 2. Open **⚙ Settings → Instruments → Add instrument**. **Review & register** also offers it when it finds a folder with files no instrument reads.
-3. Pick the file. When it comes from the data folder, mfethuls also picks two other files of the instrument to check against (the largest and the newest; change them under *Also check against*). Files differ between runs and methods, and the definition must read them all.
-4. **Ask a chatbot** (the default): copy the prompt into a chatbot (Gemini, Claude, ...) and paste its answer back. The prompt holds the rules of the format, the list of quantities and units, mfethuls' own reading of the file (including its outline: which lines are text and which are numbers, from start to end), the file's first 40 and last 15 lines (for a workbook: of every sheet, shown as tab-separated rows), and the outline of the other files (their shape only, not their data). A file that is neither text nor a workbook (e.g. a proprietary binary format) gets a message instead of a prompt: export it as text or `.xlsx` first. A definition a colleague sent you can be pasted the same way.
+
+   If mfethuls already knows the instrument and only the folder has another name (`DMA data` instead of `DMA`), don't add it: choose it for that folder in **Review & register**, or under **⚙ Settings → Instruments → Change an instrument's folder**. That also fixes an instrument saved with the wrong folder.
+3. Choose the **folder**. mfethuls builds from its largest file of the type the folder holds most of (change it under **Build from**), and checks the definition against up to six other files of that type in the folder (the largest, the newest and others spread over the folder). Files of other types, such as a plot or a note next to the data, are left out.
+4. **Ask a chatbot** (the default): copy the prompt into a chatbot (Gemini, Claude, ...), paste its answer back and press **Read the answer**. The prompt holds the rules of the format, the list of quantities and units, mfethuls' own reading of the file (including its outline: which lines are text and which are numbers, from start to end), the file's first 40 and last 15 lines (for a workbook: of every sheet, shown as tab-separated rows), and the outline of the other files (their shape only, not their data). A file that is neither text nor a workbook (e.g. a proprietary binary format) gets a message instead of a prompt: export it as text or `.xlsx` first. A definition a colleague sent you can be pasted the same way.
 
    > The prompt contains the start of your file. Only send it if your data may be shared with that service: think of unpublished results and your institution's rules.
 
    Or choose **Fill in myself**: mfethuls fills in its own guesses instead.
-5. Either way you get the same plain form; no JSON to read. Check every part and change what is wrong:
-   - **The instrument**: name, data folder, measurement type, model, whether one experiment is a file or a folder, notes. A known type (TGA, FTIR, UV-Vis, ...) gets mfethuls' plots and checks; for a new type you choose what to plot.
-   - **How the file is read**: file endings, text encoding, separator, decimal mark, header lines, where the table starts and ends. For a workbook, the sheet replaces encoding, separator and decimal mark.
-   - **What is in each column**: what it measures and the unit *in the file*. Leave columns you don't know empty: they are kept under their own name.
-   - **Extra columns and plot**: computed columns (always into a new column) and, for new types, the plot.
-6. **Check**: *What will be stored* lists every column of the file with its stored name and unit change (e.g. `g → mg: × 1000`), then the parsed table and a plot. Values outside the usual range for a quantity (a mass of 300 000 mg, a temperature of 5000 °C) are warned about: usually the unit is wrong. So are rows with text where numbers are expected, with the line they start on: usually a footer or results block read as part of the table, fixed with *The data ends at*. The other files are read too, each with its result; one that cannot be read must be fixed (or taken off the list) before saving. Problems are shown next to the part of the form they concern, and **Copy the problems for the chatbot** gives a message to paste back to it.
-7. Press **Save instrument**.
+5. Either way you see the result first: the **Name**, how many rows and which columns were read, a plot, and whether the other files read cleanly. If it looks right, press **Save instrument**.
+6. Everything else is under **Adjust details**, which opens by itself when something must be fixed. Its tabs:
+   - **Instrument**: data folder, measurement type, model, whether one experiment is a file or a folder, notes. A known type (TGA, FTIR, UV-Vis, ...) gets mfethuls' plots and checks; for a new type you choose what to plot.
+   - **Reading the file**: file endings, text encoding, separator, decimal mark, header lines, where the table starts and ends. For a workbook, the sheet replaces encoding, separator and decimal mark.
+   - **Columns**: what each column measures and the unit *in the file*. Leave columns you don't know empty: they are kept under their own name.
+   - **Values and plot**: values from the file name and header, computed columns (always into a new column) and, for new types, the plot.
+   - **Stored data**: every column of the file with its stored name and unit change (e.g. `g → mg: × 1000`), and the parsed table.
+   - **Definition (JSON)**: the file that is saved.
 
-The definition is saved in the data folder, in `.mfethuls/instruments/<name>.json`, together with a copy of the file you used (`<name>.sample.<ext>`). Everyone who uses that data folder (e.g. on OneDrive) gets the instrument; nothing needs installing. **Show definition (JSON)** in the form shows the file itself.
+   Values outside the usual range for a quantity (a mass of 300 000 mg, a temperature of 5000 °C) are warned about: usually the unit is wrong. So are rows with text where numbers are expected, with the line they start on: usually a footer or results block read as part of the table, fixed with *The data ends at*. Another file that cannot be read must be fixed before saving. Each problem is shown in its tab, the top says which tabs, and **Copy the problems for the chatbot** gives a message to paste back to it.
+
+The definition is saved in the data folder, in `.mfethuls/instruments/<name>.json`, together with a copy of the file you used (`<name>.sample.<ext>`). Everyone who uses that data folder (e.g. on OneDrive) gets the instrument; nothing needs installing. **Adjust details → Definition (JSON)** shows the file itself.
 
 Then register and ingest its data as usual.
 

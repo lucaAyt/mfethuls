@@ -5,7 +5,15 @@ from pathlib import Path
 import pandas as pd
 
 from mfethuls import Registry
-from mfethuls.discovery import REGISTRY_COLUMNS, discover_unregistered, proposed_rows
+from mfethuls.discovery import (
+    REGISTRY_COLUMNS,
+    chosen_rows,
+    discover_unregistered,
+    overlapping_folders,
+    proposed_rows,
+    sync_folder_ticks,
+    tree_rows,
+)
 from mfethuls.examples import DATA_DIR
 
 DSC_MODELS = ["dsc_mettler_toledo_v0", "dsc_perkin_elmer", "dsc_mettler_toledo_v1", "dsc_default"]
@@ -248,6 +256,21 @@ def test_validate_proposed_requires_instrument_and_found_data(tmp_path):
     assert any(e["field"] == "data_path" for e in missing_data["errors"])
 
 
+def test_names_with_spaces_and_brackets_can_be_registered(tmp_path):
+    from mfethuls.discovery import validate_proposed
+
+    sample = (DATA_DIR / "DSC" / "poly2.txt").read_bytes()
+    _touch(tmp_path / "DSC" / "poly 2 (repeat).txt").write_bytes(sample)
+    _touch(tmp_path / "DSC" / "My Sample" / "run A.txt").write_bytes(sample)
+    _touch(tmp_path / "DSC" / "My Sample" / "run B.txt").write_bytes(sample)
+    registry = _registry()
+    rows = _proposals_for(tmp_path, registry)
+    rows["instrument_name"] = "dsc_mettler_toledo_v1"
+
+    assert sorted(rows["raw_data_filename"]) == ["poly 2 (repeat)", "run A", "run B"]
+    assert all(result["valid"] for result in validate_proposed(registry, rows, str(tmp_path)))
+
+
 def test_validate_proposed_checks_against_existing_rows_and_bad_ids(tmp_path):
     from mfethuls.discovery import validate_proposed
 
@@ -339,3 +362,74 @@ def test_counting_an_unclaimed_folder_stops_at_max_count(tmp_path, monkeypatch):
     assert (folder.file_count, folder.more, folder.count_label, len(folder.files)) == (5, True, "5+", 3)
     (folder,) = unclaimed_folders(str(tmp_path))
     assert (folder.file_count, folder.more, folder.count_label) == (12, False, "12")
+
+
+def _tree(tmp_path):
+    rows = tree_rows(discover_unregistered(_registry(), str(tmp_path)), _registry(), str(tmp_path))
+    rows.insert(0, "include", False)
+    return rows
+
+
+def test_tree_rows_show_each_folder_followed_by_its_files(tmp_path):
+    _touch(tmp_path / "DSC" / "poly2.txt")
+    _touch(tmp_path / "DSC" / "batch" / "b_run2.txt")
+    _touch(tmp_path / "DSC" / "batch" / "b_run1.txt")
+    _touch(tmp_path / "DSC" / "aaa.txt")
+    rows = _tree(tmp_path)
+
+    # In path order, each folder followed by its files; a DSC folder is not one experiment.
+    assert rows[["_kind", "raw_data_filename", "run_id", "_folder", "_whole"]].values.tolist() == [
+        ["file", "aaa", "R001", "DSC", False],
+        ["folder", "batch", "R001", "DSC/batch", False],
+        ["run", "b_run1", "R001", "DSC/batch", False],
+        ["run", "b_run2", "R002", "DSC/batch", False],
+        ["file", "poly2", "R001", "DSC", False],
+    ]
+    assert rows["_data"].tolist()[:3] == ["DSC/aaa.txt", "\U0001f4c1 DSC/batch/  \xb7  2 files",
+                                          "\u2003\u2003\u2514 b_run1.txt"]
+
+
+def test_ticking_a_folder_ticks_its_files(tmp_path):
+    _touch(tmp_path / "DSC" / "aaa.txt")
+    _touch(tmp_path / "DSC" / "batch" / "b_run1.txt")
+    _touch(tmp_path / "DSC" / "batch" / "b_run2.txt")
+    before = _tree(tmp_path)
+
+    after = before.copy()
+    after.loc[1, "include"] = True  # the folder
+    ticked = sync_folder_ticks(before, after)
+    assert ticked["include"].tolist() == [False, True, True, True]
+    # The folder itself is not an experiment: its files are.
+    assert chosen_rows(ticked)["raw_data_filename"].tolist() == ["b_run1", "b_run2"]
+
+    # A file can then be unticked on its own; unticking the folder unticks the rest.
+    edited = ticked.copy()
+    edited.loc[3, "include"] = False
+    one_off = sync_folder_ticks(ticked, edited)
+    assert one_off["include"].tolist() == [False, True, True, False]
+    assert chosen_rows(one_off)["raw_data_filename"].tolist() == ["b_run1"]
+    unticked = one_off.copy()
+    unticked.loc[1, "include"] = False
+    assert sync_folder_ticks(one_off, unticked)["include"].tolist() == [False, False, False, False]
+
+
+def test_a_series_folder_is_one_experiment_and_flagged_when_its_files_are_ticked_too(tmp_path):
+    for step in ("step01", "step02"):
+        _touch(tmp_path / "UV_Vis" / "titration_A" / f"{step}.txt")
+    before = _tree(tmp_path)
+    assert before[["_kind", "_whole"]].values.tolist() == [["folder", True], ["run", False], ["run", False]]
+
+    after = before.copy()
+    after.loc[0, "include"] = True
+    ticked = sync_folder_ticks(before, after)
+    assert ticked["include"].tolist() == [True, False, False]  # its files are left alone
+    assert chosen_rows(ticked)["raw_data_filename"].tolist() == ["titration_A"]
+
+    both = ticked.copy()
+    both.loc[1, "include"] = True
+    assert overlapping_folders(chosen_rows(sync_folder_ticks(ticked, both))) == ["UV_Vis/titration_A"]
+
+
+def test_tree_rows_of_nothing_new(tmp_path):
+    (tmp_path / "DSC").mkdir()
+    assert tree_rows(discover_unregistered(_registry(), str(tmp_path)), _registry(), str(tmp_path)).empty

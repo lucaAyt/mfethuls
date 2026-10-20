@@ -105,3 +105,24 @@ def test_csv_export_keeps_every_column_with_the_experiment_first():
 
     data = pd.DataFrame({"x": [1.0, 2.0], "name": ["a", "b"], "_experiment": ["E1", "E1"]})
     assert _csv_bytes(data).decode("utf-8").splitlines() == ["experiment,x,name", "E1,1.0,a", "E1,2.0,b"]
+
+
+def _series():
+    """One wavelength of a spectra series, read in file-name order (0, 10, 11, ..., 1, 2)."""
+    times = sorted(range(12), key=str)
+    return pd.DataFrame({"_experiment": "poly3", "time_s": [float(t) for t in times],
+                         "emission_counts": [100.0 - t for t in times]})
+
+
+def test_lines_along_time_follow_the_time_not_the_file_order():
+    spec = _xy_spec(_series(), x="time_s", y="emission_counts", color="_experiment", mode="lines", palette=PALETTE,
+                    title="t", ylabel="y", log_x=False, log_y=False, invert_x=False)
+    [trace] = spec.panel.traces
+    assert list(trace.x) == sorted(trace.x) and trace.mode == "lines"
+
+
+def test_lines_of_one_point_are_drawn_as_points():
+    # Coloured by time_s, each time is its own line of one point, which Plotly would not draw.
+    spec = _xy_spec(_series(), x="time_s", y="emission_counts", color="time_s", mode="lines", palette=PALETTE,
+                    title="t", ylabel="y", log_x=False, log_y=False, invert_x=False)
+    assert len(spec.panel.traces) == 12 and {trace.mode for trace in spec.panel.traces} == {"markers"}

@@ -18,7 +18,11 @@ def main(argv: list[str] | None = None) -> int:
     if importlib.util.find_spec("streamlit") is None:
         print('The app needs Streamlit, which is not installed. Install it with: pip install "mfethuls[viz]"')
         return 1
-    return run_streamlit(Path(__file__).with_name("streamlit_app.py"), argv)
+    from mfethuls.app.appearance import theme_args
+
+    # The saved accent first, so a --theme option given on the command line wins.
+    args = sys.argv[1:] if argv is None else argv
+    return run_streamlit(Path(__file__).with_name("streamlit_app.py"), theme_args() + list(args))
 
 
 if __name__ == "__main__":

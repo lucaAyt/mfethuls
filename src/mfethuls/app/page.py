@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import io
+import os
 import threading
 
 import matplotlib
@@ -20,8 +21,10 @@ import plotly.io as pio
 import streamlit as st
 from plotly.colors import convert_colors_to_same_type
 
+from mfethuls.app.appearance import ACCENTS, apply_appearance, apply_style, save_accent, saved_accent
 from mfethuls.app.instruments import open_requested_dialog, render_instruments_section
 from mfethuls.app.welcome import (
+    ensure_registry,
     example_folder,
     is_set_up,
     landing_requested,
@@ -110,6 +113,8 @@ _MAX_COLORBAR_GROUPS = 300
 # Style legend entries are drawn in a neutral grey, so they don't read as colour groups.
 _STYLE_LEGEND_COLOUR = "0.35"
 _NO_STYLE = "(none)"
+# Session key of the experiments chosen in the sidebar.
+_PICKED = "picked_experiments"
 
 
 def _column_title(column: str) -> str:
@@ -150,6 +155,8 @@ def _xy_spec(
             title=axis_label(color), vmin=float(df[color].min()), vmax=float(df[color].max()), cmap=cmap
         )
     appearances = LINESTYLES if mode == "lines" else MARKERS
+    # Along a time axis the rows' order is the measurement's, whatever order the files were read in.
+    by_time = mode == "lines" and (x == "time_s" or pd.api.types.is_datetime64_any_dtype(df[x]))
 
     traces: list[Trace] = []
     colour_index: dict[str, int] = {}
@@ -161,6 +168,10 @@ def _xy_spec(
         first = colour_value not in colour_index
         idx = colour_index.setdefault(colour_value, len(colour_index))
         appearance = appearances[style_index.setdefault(str(values[style]), len(style_index)) % len(appearances)] if style else None
+        if by_time:
+            subset = subset.sort_values(x, kind="stable")
+        # A line through one point draws nothing: show it as a point.
+        trace_mode = "markers" if mode == "lines" and len(subset) < 2 else mode
         traces.append(
             Trace(
                 subset[x].to_numpy(),
@@ -170,9 +181,9 @@ def _xy_spec(
                 label=_legend_entry(color, colour_value) if color and first and not style else None,
                 color=palette[idx % len(palette)],
                 color_value=float(values[color]) if colorbar is not None and pd.notna(values[color]) else None,
-                mode=mode,
-                linestyle=appearance if appearance and mode == "lines" else "-",
-                marker=appearance if appearance and mode == "markers" else "o",
+                mode=trace_mode,
+                linestyle=appearance if appearance and trace_mode == "lines" else "-",
+                marker=appearance if appearance and trace_mode == "markers" else "o",
                 legend_group=colour_value,
             )
         )
@@ -236,10 +247,22 @@ def _builtin_datasets(data: pd.DataFrame, datasets_meta: dict) -> list[Dataset]:
     return result
 
 
-def _plot_toolbar():
-    """Row above the chart: axis limits, then the SVG, HTML and CSV downloads."""
-    limits_col, svg_col, html_col, csv_col, _ = st.columns([1, 1, 1, 1, 2], vertical_alignment="bottom")
-    return limits_col, (svg_col, html_col, csv_col)
+def _plot_toolbar(*, axis_options: bool = True):
+    """Row above the chart: axis limits, Log X / Log Y / Invert X, then a Download menu on the right.
+
+    Returns the limits column, the Download menu and the axis options (all off without them).
+    """
+    # One row, each control as wide as its label, so they sit together next to Axis limits.
+    row = st.container(horizontal=True, gap="medium", vertical_alignment="center")
+    limits_col = row.container(width="content")
+    options = {"log_x": False, "log_y": False, "invert_x": False}
+    if axis_options:
+        options = {"log_x": row.checkbox("Log X"), "log_y": row.checkbox("Log Y"),
+                   "invert_x": row.checkbox("Invert X")}
+    row.space("stretch")
+    downloads = row.popover("Download", icon=":material/download:",
+                            help="The figure as SVG or HTML, or its data as CSV.")
+    return limits_col, downloads, options
 
 
 _LIMIT_FIELDS = ("x_min", "x_max", "y_min", "y_max")
@@ -329,11 +352,11 @@ def _csv_bytes(data: pd.DataFrame) -> bytes:
     return frame.to_csv(index=False).encode("utf-8")
 
 
-def _download_buttons(columns, title: str, *, spec: PlotSpec | None, fig, data: pd.DataFrame) -> None:
-    """SVG, HTML and CSV downloads, generated only when clicked (large figures take a moment)."""
-    svg_col, html_col, csv_col = columns
-    svg_col.download_button(
-        "SVG",
+def _download_buttons(menu, title: str, *, spec: PlotSpec | None, fig, data: pd.DataFrame) -> None:
+    """SVG, HTML and CSV downloads in the Download menu, generated only when clicked (large figures
+    take a moment)."""
+    menu.download_button(
+        "SVG figure",
         icon=":material/download:",
         help="Vector figure for publication, drawn with Matplotlib using the axis limits above.",
         data=(lambda: _svg_bytes(spec)) if spec is not None else (lambda: _figure_bytes(fig, "svg")),
@@ -341,8 +364,8 @@ def _download_buttons(columns, title: str, *, spec: PlotSpec | None, fig, data: 
         mime="image/svg+xml",
         width="stretch",
     )
-    html_col.download_button(
-        "HTML",
+    menu.download_button(
+        "HTML figure",
         icon=":material/download:",
         help="Interactive Plotly figure as a standalone web page.",
         data=lambda: _figure_bytes(fig, "html"),
@@ -350,8 +373,8 @@ def _download_buttons(columns, title: str, *, spec: PlotSpec | None, fig, data: 
         mime="text/html",
         width="stretch",
     )
-    csv_col.download_button(
-        "CSV",
+    menu.download_button(
+        "CSV data",
         icon=":material/download:",
         help="The data of the selected experiments (after filters), every column, for plotting elsewhere.",
         data=lambda: _csv_bytes(data),
@@ -377,8 +400,147 @@ def _finite_bounds(values: pd.Series):
     return lo, hi
 
 
-def _storage_label(path: str) -> str:
-    return "☁️ cloud" if path.startswith(("s3://", "az://", "https://")) else "📁 local"
+# Columns with at most this many values are offered first in the filter (see filter_columns).
+_MAX_FILTER_VALUES = 20
+_FILTER_KEY = "plot_filter"
+
+
+def filter_columns(data: pd.DataFrame) -> list[str]:
+    """Columns most worth filtering on, offered first: text (or whole numbers) with 2 to 20 values
+    that vary within an experiment, e.g. DSC's ``profile``, a ``segment``, or the curve ``name`` of a
+    workbook; fewest values first. Columns that only say which experiment a row is from
+    (``sample_id``, ``experiment_id``) are left out: experiments are chosen in the sidebar."""
+    found = []
+    for column in data.columns:
+        if column == "_experiment":
+            continue
+        series = data[column]
+        if pd.api.types.is_float_dtype(series) or pd.api.types.is_datetime64_any_dtype(series):
+            continue
+        count = series.nunique(dropna=True)
+        if not 2 <= count <= _MAX_FILTER_VALUES:
+            continue
+        if "_experiment" in data and series.groupby(data["_experiment"]).nunique(dropna=True).max() < 2:
+            continue
+        found.append((count, column))
+    return [column for _, column in sorted(found, key=lambda item: item[0])]
+
+
+def apply_conditions(data: pd.DataFrame, conditions: dict) -> pd.DataFrame:
+    """Rows whose value in each column is one of those chosen for it."""
+    for column, values in conditions.items():
+        data = data[data[column].astype(str).isin(values)]
+    return data
+
+
+def _clear_filter() -> None:
+    for key in [k for k in st.session_state if str(k).startswith(_FILTER_KEY)]:
+        del st.session_state[key]
+
+
+def _plot_filter(container, data: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """The **Filter** button and its menu: one column and the values to keep; returns the rows kept
+    and the condition, by column."""
+    suggested = filter_columns(data)
+    columns = suggested + [c for c in data.columns if c != "_experiment" and c not in suggested]
+    column = st.session_state.get(f"{_FILTER_KEY}-column", _NO_STYLE)
+    kept = st.session_state.get(f"{_FILTER_KEY}-values-{column}") if column != _NO_STYLE else None
+    with container.popover(_filter_label(kept, suggested), icon=":material/filter_alt:",
+                           type="primary" if kept else "secondary", key="plot-filter-menu",
+                           help="Plot only the rows with some values, e.g. one DSC segment."):
+        column = st.selectbox("Column", [_NO_STYLE, *columns], key=f"{_FILTER_KEY}-column",
+                              format_func=_column_title)
+        if column == _NO_STYLE:
+            return data, {}
+        # In the order they come in the data: a DSC program's segments as they were run.
+        values = list(pd.unique(data[column].dropna().astype(str)))
+        chosen = st.multiselect("Keep rows where it is", values, key=f"{_FILTER_KEY}-values-{column}",
+                                placeholder="Choose values")
+    conditions = {column: chosen} if chosen else {}
+    return apply_conditions(data, conditions), conditions
+
+
+def _filter_label(kept: list | None, suggested: list[str]) -> str:
+    """What the Filter button says: the values kept (``Filter: Heating_1 +1``) when it is on,
+    otherwise the column most worth filtering on (``Filter by profile``)."""
+    if kept:
+        first = kept[0] if len(kept[0]) <= 24 else kept[0][:23] + "…"
+        return f"Filter: {first}" + (f" +{len(kept) - 1}" if len(kept) > 1 else "")
+    return f"Filter by {_column_title(suggested[0])}" if suggested else "Filter"
+
+
+def _filter_note(kept: int, total: int, conditions: dict) -> None:
+    """Under the chart: what the plot leaves out, with a way back to all rows."""
+    if not conditions:
+        return
+    said = "; ".join(f"{_column_title(c)} is {', '.join(v)}" for c, v in conditions.items())
+    text_col, clear_col = st.columns([5, 1], vertical_alignment="center")
+    text_col.caption(f":material/filter_alt: Showing **{kept:,}** of {total:,} rows: {said}.")
+    clear_col.button("Clear", icon=":material/filter_alt_off:", key=f"{_FILTER_KEY}-clear", width="stretch",
+                     on_click=_clear_filter, help="Plot all rows again")
+
+
+def _experiment_label(dataset: dict) -> str:
+    return dataset.get("experiment_name") or dataset["name"]
+
+
+def _instrument(dataset: dict) -> str:
+    return dataset.get("instrument_name") or dataset.get("instrument_type") or ""
+
+
+def _experiment_picker(datasets: list[dict]) -> list[str]:
+    """The experiments to plot: one list (no table under it for the list to cover), narrowed by
+    instrument with one click, each entry with its sample and run."""
+    by_label = {_experiment_label(d): d for d in datasets}
+    instruments = sorted({_instrument(d) for d in datasets} - {""})
+    shown = list(by_label)
+    if len(instruments) > 1:
+        picked = st.pills("Instrument", instruments, selection_mode="multi", key="pick_instruments",
+                          help="Show only these instruments' experiments in the list below.")
+        if picked:
+            shown = [label for label, d in by_label.items() if _instrument(d) in picked]
+    # Experiments already chosen stay chosen while the list shows other instruments.
+    chosen = [label for label in st.session_state.get(_PICKED, []) if label in by_label]
+    options = shown + [label for label in chosen if label not in shown]
+
+    def describe(label: str) -> str:
+        d = by_label[label]
+        return " · ".join(str(part) for part in (label, d.get("sample_id"), d.get("run_id")) if part)
+
+    picked = st.multiselect("Select experiments to plot", options, key=_PICKED, format_func=describe,
+                            placeholder="Choose experiments")
+    count = len(datasets)
+    st.caption(f"{count} experiment{'s' if count != 1 else ''} ingested"
+               + (f", {len(shown)} shown" if len(shown) != count else "") + ".")
+    return picked
+
+
+@st.cache_data(show_spinner=False, ttl=300)
+def _cleanup_count(_backend, registry_path: str, registry_modified: float, datasets: tuple) -> int:
+    """How many changes Clean up would make; cached until the registry or the datasets change."""
+    try:
+        return len(_backend.reconcile_plan(registry_path)["actions"])
+    except Exception:  # noqa: BLE001 - only a hint; Clean up itself reports the problem
+        return 0
+
+
+def _cleanup_hint(registry_path: str, datasets: list[dict]) -> None:
+    """A note when ingested data no longer matches the registry, opening Clean up with its plan."""
+    if not datasets or not registry_path or not os.path.exists(registry_path):
+        return
+    count = _cleanup_count(backend, registry_path, os.path.getmtime(registry_path),
+                           tuple(sorted(d["name"] for d in datasets)))
+    if not count:
+        return
+    st.info(f"The registry changed: **{count}** stored experiment{'s' if count != 1 else ''} "
+            f"{'need' if count != 1 else 'needs'} updating.", icon=":material/mop:")
+    if st.button("Review", icon=":material/fact_check:", width="stretch", key="cleanup-hint"):
+        try:
+            st.session_state["reconcile_plan"] = backend.reconcile_plan(registry_path)
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Could not check: {exc}")
+            return
+        _settings_dialog(registry_path)
 
 
 def _cleanup_section(registry_path: str) -> None:
@@ -388,7 +550,6 @@ def _cleanup_section(registry_path: str) -> None:
         "updates renamed or corrected ones and deletes stored files nothing uses. Raw data is never touched."
     )
     if st.button("Check", icon=":material/fact_check:", disabled=not registry_path, width="stretch"):
-        mark_done("cleanup")
         try:
             st.session_state["reconcile_plan"] = backend.reconcile_plan(registry_path)
         except Exception as exc:
@@ -435,25 +596,43 @@ def _cleanup_section(registry_path: str) -> None:
                     f"{r['name'] or r['experiment_id']} ({r['error']})" for r in failed)
             st.session_state["reconcile_message"] = text
         st.session_state.pop("reconcile_plan", None)
+        _cleanup_count.clear()
         st.rerun()
 
 
 
 @st.dialog("Settings", width="large")
 def _settings_dialog(registry_path: str) -> None:
-    with st.expander("Data folder and registry", icon=":material/folder:", expanded=not is_set_up()):
+    with st.expander(":material/folder: Data folder and registry", expanded=not is_set_up()):
         render_setup_form(backend, key="settings")
         st.markdown("**How to organise the data folder**")
         render_folder_layout()
-    with st.expander("Instruments", icon=":material/biotech:"):
+    with st.expander(":material/biotech: Instruments"):
         render_instruments_section(backend, registry_path)
-    with st.expander("Clean up", icon=":material/mop:"):
+    with st.expander(":material/mop: Clean up", expanded=bool(st.session_state.get("reconcile_plan"))):
         _cleanup_section(registry_path)
-    with st.expander("Data loading", icon=":material/database:"):
+    with st.expander(":material/database: Data loading"):
         render_loading_settings()
     if getattr(backend, "offers_example", False):
-        with st.expander("Example data", icon=":material/science:", expanded=bool(example_folder())):
+        with st.expander(":material/science: Example data", expanded=bool(example_folder())):
             render_example_settings(backend)
+    with st.expander(":material/palette: Appearance"):
+        _appearance_section()
+
+
+def _choose_accent() -> None:
+    save_accent(st.session_state["accent"])
+    apply_appearance()
+    st.session_state["accent_changed"] = True
+
+
+def _appearance_section() -> None:
+    names = list(ACCENTS)
+    st.radio("Accent colour", names, index=names.index(saved_accent()), key="accent", horizontal=True,
+             on_change=_choose_accent, help="Buttons, toggles and the progress bar. Saved for this computer.")
+    if st.session_state.pop("accent_changed", False):
+        # The theme reaches the browser when a run starts: one more run shows it.
+        st.rerun()
 
 
 # The sidebar's getting-started tracker for this run: where it goes and what it shows.
@@ -478,14 +657,21 @@ def run(app_backend) -> None:
 
     global backend
     backend = app_backend
+    apply_appearance()
+    if getattr(backend, "edits_settings", False):
+        ensure_registry()
     # The landing page starts without the sidebar, so it stays uncluttered.
     first_visit = not is_set_up() and not example_folder()
     st.set_page_config(page_title="mfethuls", layout="wide", page_icon="🧪",
                        initial_sidebar_state="collapsed" if first_visit else "expanded")
+    apply_style()
 
     message = st.session_state.pop("reconcile_message", None)
     if message:
         st.toast(message, icon=":material/warning:" if message.startswith("⚠") else ":material/check_circle:")
+    message = st.session_state.pop("ingest_message", None)
+    if message:
+        st.toast(message, icon=":material/check_circle:")
 
     # ===========================================================================
     # SIDEBAR
@@ -497,66 +683,50 @@ def run(app_backend) -> None:
     _guide = {"slot": st.sidebar.container(), "datasets": [], "drawn": False}
     backend.render_status()
 
-    with st.sidebar.expander("Ingest", expanded=False):
+    try:
+        datasets = backend.list_datasets()
+        datasets_error = None
+    except Exception as exc:
+        datasets, datasets_error = [], exc
+
+    # Open while nothing is ingested yet: that is where a new user goes next.
+    with st.sidebar.expander(":material/input: **Ingest**", expanded=not datasets):
         registry_path = backend.render_ingest()
 
     with settings_row:
-        # The two buttons sit side by side, flush with the right edge of the sections below.
-        with st.container(horizontal=True, vertical_alignment="center", gap="small"):
-            st.markdown("**mfethuls**" + ("  \n:material/science: Example data" if example_folder() else ""),
-                        width="stretch")
-            if st.button("", icon=":material/home:", help="Home", width="content"):
-                show_landing()
-                st.rerun()
-            if st.button("", icon=":material/settings:", width="content",
-                         help="Settings: data folder and registry, instruments, clean up, data loading, example data"):
-                _settings_dialog(registry_path)
+        st.header("mfethuls", anchor=False)  # no link icon on hover
+        if example_folder():
+            st.caption(":material/science: Example data")
+        # Labelled buttons: icons alone were not recognised as the way to these pages.
+        home_col, settings_col = st.columns(2, gap="small")
+        if home_col.button("Home", icon=":material/home:", width="stretch",
+                           help="What mfethuls is, and how to get started"):
+            show_landing()
+            st.rerun()
+        if settings_col.button("Settings", icon=":material/settings:", width="stretch",
+                               help="Data folder and registry, instruments, clean up, data loading, example data"):
+            _settings_dialog(registry_path)
     open_requested_dialog(backend)
 
     # ---------------------------------------------------------------------------
     # Datasets expander
     # ---------------------------------------------------------------------------
-    with st.sidebar.expander("Datasets", expanded=True):
-        if st.button("Refresh", width="stretch"):
-            backend.clear_caches()
-            st.rerun()
-
-        try:
-            datasets = backend.list_datasets()
-        except Exception as exc:
-            st.error(f"Could not load datasets: {exc}")
-            datasets = []
+    with st.sidebar.expander(":material/dataset: **Datasets**", expanded=True):
+        if datasets_error is not None:
+            st.error(f"Could not load datasets: {datasets_error}")
+        _cleanup_hint(registry_path, datasets)
 
         if not datasets:
-            st.warning("No datasets registered yet.")
+            st.info("Nothing ingested yet: open **Ingest** above.", icon=":material/arrow_upward:")
             selected_labels: list[str] = []
             label_to_name: dict[str, str] = {}
         else:
-            rows = []
-            for d in datasets:
-                rows.append({
-                    "name": d.get("experiment_name") or d["name"],
-                    "sample_id": d.get("sample_id") or "",
-                    "run_id": d.get("run_id") or "",
-                    "instrument": d.get("instrument_name") or d.get("instrument_type") or "",
-                    "storage": _storage_label(d.get("storage_path", "")),
-                    "_key": d["name"],
-                })
-
-            df_reg = pd.DataFrame(rows)
-            show_paths = st.toggle("Show storage", value=False)
-            display_cols = ["name", "sample_id", "run_id", "instrument"]
-            if show_paths:
-                display_cols.append("storage")
-            st.dataframe(df_reg[display_cols], width="stretch", hide_index=True)
-
-            label_to_name = {
-                (d.get("experiment_name") or d["name"]): d["name"] for d in datasets
-            }
-            selected_labels = st.multiselect(
-                "Select experiments to plot",
-                options=list(label_to_name.keys()),
-            )
+            label_to_name = {_experiment_label(d): d["name"] for d in datasets}
+            selected_labels = _experiment_picker(datasets)
+        if st.button("Reload list", icon=":material/refresh:", width="stretch",
+                     help="Read the stored datasets again, e.g. after ingesting from Python"):
+            backend.clear_caches()
+            st.rerun()
 
     # ===========================================================================
     # MAIN CONTENT
@@ -601,16 +771,21 @@ def run(app_backend) -> None:
     # ---------------------------------------------------------------------------
     # Dataset info
     # ---------------------------------------------------------------------------
-    st.subheader("Dataset info")
+    st.subheader("Dataset info", anchor=False, divider="gray")
     col_a, col_b, col_c = st.columns(3)
     col_a.metric("Rows", f"{len(data):,}")
     col_b.metric("Columns", len(data.columns) - 1)
     col_c.metric("Experiments", len(selected_names))
+    by_name = {d["name"]: d for d in datasets}
+    st.dataframe(pd.DataFrame([{
+        "experiment": label, "instrument": _instrument(by_name.get(name, {})),
+        "sample_id": by_name.get(name, {}).get("sample_id") or "", "run_id": by_name.get(name, {}).get("run_id") or "",
+    } for label, name in zip(selected_labels, selected_names)]), hide_index=True, width="stretch")
 
     # ---------------------------------------------------------------------------
     # Preview
     # ---------------------------------------------------------------------------
-    with st.expander("Preview", expanded=True):
+    with st.expander(":material/table_view: **Preview**", expanded=True):
         # The table is sent to the browser on every rerun, so whole datasets would slow the app.
         st.dataframe(
             data.drop(columns=["_experiment"], errors="ignore").head(_PREVIEW_ROWS),
@@ -620,24 +795,17 @@ def run(app_backend) -> None:
             st.caption(f"Showing the first {_PREVIEW_ROWS:,} of {len(data):,} rows. Plots use all rows.")
 
     # ---------------------------------------------------------------------------
-    # Filters
+    # Plot (its Filter next to what it changes)
     # ---------------------------------------------------------------------------
-    with st.expander("Filters", expanded=False):
-        filter_cols = [c for c in data.columns if c != "_experiment"]
-        filter_col = st.selectbox("Filter column", options=["(none)"] + filter_cols, index=0)
-        if filter_col != "(none)":
-            raw_vals = sorted(data[filter_col].dropna().astype(str).unique().tolist())
-            sel_vals = st.multiselect("Keep values", options=raw_vals)
-            if sel_vals:
-                data = data[data[filter_col].astype(str).isin(sel_vals)]
-
-    # ---------------------------------------------------------------------------
-    # Plot
-    # ---------------------------------------------------------------------------
-    with st.expander("Plot", expanded=True):
+    with st.expander(":material/show_chart: **Plot**", expanded=True):
+        all_rows = len(data)
+        # The toggle, then the Filter button next to it, where the eye starts reading the section.
+        top_row = st.container(horizontal=True, gap="medium", vertical_alignment="center")
+        builtin_col = top_row.container(width="content")
+        data, conditions = _plot_filter(top_row, data)
         numeric_cols = data.select_dtypes(include="number").columns.tolist()
 
-        use_builtin = st.toggle(
+        use_builtin = builtin_col.toggle(
             "Built-in instrument plot",
             value=False,
             help="Use the mfethuls plot for each instrument, e.g. heat flow vs temperature for DSC.",
@@ -652,7 +820,7 @@ def run(app_backend) -> None:
                 st.warning(f"No built-in plot for this selection: {exc}")
             else:
                 title = spec.title or spec.panel.title or "mfethuls"
-                limits_col, downloads = _plot_toolbar()
+                limits_col, downloads, _ = _plot_toolbar(axis_options=False)
                 if spec.layout == "single":
                     key = "|".join(["limits", "builtin", comparison_mode, *selected_names])
                     _axis_limits(limits_col, spec.panel, key)
@@ -683,7 +851,7 @@ def run(app_backend) -> None:
 
             # How to tell lines apart: colour, and line style / marker shape side by side.
             hue_opts = ["_experiment"] + [c for c in data.columns if c != "_experiment"]
-            colour_by_col, style_by_col, axes_col = st.columns([1, 1, 2], vertical_alignment="bottom")
+            colour_by_col, style_by_col, palette_col = st.columns([1, 1, 2], vertical_alignment="bottom")
             color_col = colour_by_col.selectbox("Colour by", hue_opts, index=0, format_func=_column_title)
             # Line styles (line plots) or marker shapes (scatter) by a second column; "Signal" is the Y column.
             style_opts = [_NO_STYLE, *hue_opts, *(["_y_metric"] if len(y_cols) > 1 else [])]
@@ -693,10 +861,6 @@ def run(app_backend) -> None:
                 help="Line plots: one line style per value. Scatter plots: one marker shape per value.",
             )
             style_col = None if style_col == _NO_STYLE or plot_type not in {"line", "scatter"} else style_col
-            log_x_col, log_y_col, invert_col = axes_col.columns(3)
-            use_log_x = log_x_col.checkbox("Log X")
-            use_log_y = log_y_col.checkbox("Log Y")
-            invert_x = invert_col.checkbox("Invert X")
 
             # A numeric colour column with many values (e.g. time_s) is drawn on a colour scale.
             continuous = (
@@ -708,12 +872,12 @@ def run(app_backend) -> None:
             discrete_seq = _DISCRETE_PALETTES["Plotly"]
             cmap = "viridis"
             if continuous:
-                scale_col, reverse_col = st.columns([3, 1], vertical_alignment="bottom")
+                scale_col, reverse_col = palette_col.columns([3, 1], vertical_alignment="bottom")
                 cmap = scale_col.selectbox("Colour scale", _CONTINUOUS_PALETTES, index=0)
                 if reverse_col.toggle("Reverse", help="Flip the colour scale, e.g. dark for late times."):
                     cmap = f"{cmap}_r"
             else:
-                palette_name = st.selectbox("Colour palette", list(_DISCRETE_PALETTES), index=0)
+                palette_name = palette_col.selectbox("Colour palette", list(_DISCRETE_PALETTES), index=0)
                 discrete_seq = _DISCRETE_PALETTES[palette_name]
 
             if not y_cols and plot_type != "histogram":
@@ -742,7 +906,8 @@ def run(app_backend) -> None:
                     y_series = y_cols[0] if y_cols else x_col
                     color = color_col
 
-                limits_col, downloads = _plot_toolbar()
+                limits_col, downloads, axis = _plot_toolbar()
+                use_log_x, use_log_y, invert_x = axis["log_x"], axis["log_y"], axis["invert_x"]
                 if plot_type in {"line", "scatter"}:
                     # WebGL (Plotly) on screen and Matplotlib for the vector SVG: no downsampling.
                     max_groups = _MAX_COLORBAR_GROUPS if _uses_colorbar(long_df, color) else _MAX_COLOUR_GROUPS
@@ -773,6 +938,10 @@ def run(app_backend) -> None:
                         invert_x=invert_x,
                     )
                     _axis_limits(limits_col, spec.panel, "|".join(["limits", x_col, *y_cols]))
+                    if mode == "lines" and any(t.mode == "markers" for t in spec.panel.traces):
+                        hint = (f" There is one line per {_column_title(color)} value; colour by **Experiment** "
+                                "to join them." if color and color != "_experiment" else "")
+                        st.caption(f"Some lines have only one point, so they are drawn as points.{hint}")
                     fig = render(spec, backend="plotly")
                 else:
                     _limits_unavailable(limits_col, "Available for line and scatter plots.")
@@ -796,4 +965,5 @@ def run(app_backend) -> None:
                     width="stretch",
                     config=plotly_config(_figure_download_name(title, "svg")),
                 )
+        _filter_note(len(data), all_rows, conditions)
     _draw_guide()

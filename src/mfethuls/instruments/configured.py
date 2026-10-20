@@ -7,6 +7,11 @@ Three sources, later ones winning for the same instrument ``name``:
 3. The lab's definitions next to the data, ``PATH_TO_DATA/.mfethuls/instruments/*.json``,
    shared with everyone who uses that data folder.
 
+Each instrument reads one folder of the data folder (``folder_name``). The lab can
+give a built-in instrument another folder (``DMA data`` instead of ``DMA``): the
+links are kept in ``PATH_TO_DATA/.mfethuls/folders.json`` (see :func:`link_folder`);
+a lab definition's folder is changed in its own file.
+
 A lab definition is skipped (and reported by :func:`definition_statuses`) when it
 is invalid or when its type and model are already read by another instrument.
 Each lab definition keeps a copy of the file it was made from; whenever the
@@ -34,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 PARAMS_FILE = Path(__file__).resolve().parent.parent / "config" / "instrument_params.json"
 LAB_SUBDIR = Path(".mfethuls") / "instruments"
+FOLDERS_FILE = Path(".mfethuls") / "folders.json"
 SAMPLE_INFIX = ".sample"
 
 # Columns every parser adds; left out of a definition's sample check.
@@ -210,6 +216,10 @@ def _resolve_locked(data_root: Optional[str]) -> Tuple[Dict[str, Dict[str, Any]]
     for definition in _builtin():
         entries[definition.name] = definition.instrument_entry()
         used[definition.name] = definition
+    for name, folder in folder_links(data_root).items():
+        if name in entries:
+            entries[name]["default_folder"] = entries[name]["folder_name"]
+            entries[name]["folder_name"] = folder
 
     lab, statuses = _load_lab(lab_dir(data_root))
     by_source = {status.source: status for status in statuses}
@@ -258,6 +268,101 @@ def definition_statuses(data_root: Optional[str] = None) -> List[DefinitionStatu
 
 def builtin_names() -> set:
     return {d.name for d in _builtin()} | {str(e.get("name", "")).casefold() for e in _listed_instruments()}
+
+
+def folders_file(data_root: Optional[str] = None) -> Optional[Path]:
+    """The lab's folder links, or None without a data folder."""
+    directory = lab_dir(data_root)
+    return directory.parent.parent / FOLDERS_FILE if directory else None
+
+
+_links_cache: Dict[str, Any] = {"key": None, "value": {}}
+
+
+def folder_links(data_root: Optional[str] = None) -> Dict[str, str]:
+    """Built-in instruments the lab gave another folder: instrument name -> folder name.
+
+    Entries that are not a plain folder name are left out (and logged).
+    """
+    from mfethuls.naming import file_name_problem
+
+    path = folders_file(data_root)
+    try:
+        stat = path.stat() if path else None
+    except OSError:
+        stat = None
+    key = (str(path), stat.st_mtime_ns, stat.st_size) if stat else None
+    if key is None:
+        return {}
+    if _links_cache["key"] == key:
+        return dict(_links_cache["value"])
+    try:
+        raw = json.loads(path.read_text(encoding="utf8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("Could not read the folder links %s: %s", path, exc)
+        raw = {}
+    links = {}
+    for name, folder in (raw.items() if isinstance(raw, dict) else []):
+        if not isinstance(folder, str) or file_name_problem(folder):
+            logger.warning("Folder link %r -> %r in %s is not a plain folder name; ignored", name, folder, path)
+            continue
+        links[str(name).strip().casefold()] = folder
+    _links_cache.update(key=key, value=links)
+    return dict(links)
+
+
+def _write_json(path: Path, data: Any) -> None:
+    from mfethuls._files import replace_with_retry
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf8") as handle:
+        handle.write(definition_text(data))
+    replace_with_retry(temp, str(path))
+
+
+def link_folder(names, folder: str, data_root: Optional[str] = None) -> None:
+    """Make the instruments ``names`` read the folder ``folder`` of the data folder.
+
+    A built-in instrument gets a link in ``.mfethuls/folders.json`` (removed again when
+    ``folder`` is its own folder); a lab definition's file is changed. One folder holds
+    one kind of measurement: a folder another type of instrument reads is refused
+    (``ValueError``), as is a name that is not a plain folder name.
+    """
+    from mfethuls.naming import file_name_problem
+
+    folder = str(folder).strip()
+    if not folder or (issue := file_name_problem(folder)):
+        raise ValueError(f"The folder {folder!r} {issue or 'is empty'}.")
+    if lab_dir(data_root) is None:
+        raise ValueError("No data folder: set the data folder before linking instruments.")
+    entries, used, _ = _resolve(data_root)
+    names = [str(n).strip().casefold() for n in names]
+    unknown = [n for n in names if n not in entries]
+    if unknown:
+        raise ValueError(f"Unknown instrument(s): {', '.join(unknown)}")
+    types = {entries[n]["type"] for n in names}
+    for name, entry in entries.items():
+        if name not in names and entry["folder_name"].casefold() == folder.casefold() and entry["type"] not in types:
+            raise ValueError(f"{entry['folder_name']} is already the folder of {name} ({entry['type']} data). "
+                             "Keep one kind of measurement per folder.")
+
+    links = folder_links(data_root)
+    lab = lab_dir(data_root).resolve()
+    for name in names:
+        definition = used.get(name)
+        if definition is not None and definition.source and Path(definition.source).resolve().parent == lab:
+            data = json.loads(Path(definition.source).read_text(encoding="utf8"))
+            data["folder_name"] = folder
+            _write_json(Path(definition.source), data)
+        elif folder == entries[name].get("default_folder", entries[name]["folder_name"]):
+            links.pop(name, None)
+        else:
+            links[name] = folder
+    path = folders_file(data_root)
+    if links or path.exists():
+        _write_json(path, dict(sorted(links.items())))
+    logger.info("Linked %s to the folder %s", ", ".join(names), folder)
 
 
 REMOVED_SUBDIR = "removed"

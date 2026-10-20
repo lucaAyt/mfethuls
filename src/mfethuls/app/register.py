@@ -21,8 +21,11 @@ from mfethuls.discovery import (
     REGISTRY_COLUMNS,
     NewData,
     discover_unregistered,
+    chosen_rows,
     filter_new_data,
-    proposed_rows,
+    overlapping_folders,
+    sync_folder_ticks,
+    tree_rows,
     validate_proposed,
 )
 from mfethuls.experiments import Registry, append_rows
@@ -30,7 +33,8 @@ from mfethuls.registry_validator import _load_instrument_config
 from mfethuls.settings import get_settings
 
 _SCHEMA_DIR = os.path.join(os.path.dirname(mfethuls.config.__file__), "schemas")
-_HELPER_COLUMNS = ["include", "_folder", "_modified"]
+_HELPER_COLUMNS = ["include", "_folder", "_modified", "_kind", "_data", "_whole"]
+_TREE = "register_tree"
 
 
 def instrument_options() -> List[str]:
@@ -103,11 +107,51 @@ def _filter_controls(items: List[NewData]) -> tuple[List[NewData], str]:
     text = search_col.text_input("Search", placeholder="File or folder name")
 
     shown = filter_new_data(items, modified_since=_since(age), folders=set(folders) or None, text=text)
-    note = f"Showing **{len(shown)}** of {len(items)} new items, newest first."
+    note = f"Showing **{len(shown)}** of {len(items)} new items."
     if not has_recent and age == "All":
         note += f" Nothing changed in the last {_DEFAULT_AGE}, so all are shown."
     st.caption(note + " Changing the filters clears ticks and edits.")
     return shown, f"{age}|{','.join(sorted(folders))}|{text.strip().casefold()}"
+
+
+# -- the folder tree being edited --------------------------------------------------
+#
+# Ticking a folder ticks its files, which the editor cannot do by itself. The table is kept
+# in the session (``tree``); the editor shows ``base`` and its edits are applied to ``base``
+# again on every change. Only a folder's tick redraws the editor (new key), to show its
+# files ticked: ticking a file or typing a sample ID leaves it as it is, so it stays quick.
+
+
+def _show(state: Dict[str, Any]) -> None:
+    state.update(base=state["tree"].copy(), version=state["version"] + 1)
+
+
+def _tree_state(proposals: pd.DataFrame, filters_key: str) -> Dict[str, Any]:
+    """The table being edited; started again when the filters or the data found change."""
+    found = proposals["_folder"].astype(str) + "/" + proposals["raw_data_filename"].astype(str)
+    signature = f"{filters_key}|{'|'.join(found)}"
+    state = st.session_state.get(_TREE)
+    if state is None or state["signature"] != signature:
+        tree = proposals.copy()
+        tree.insert(0, "include", False)  # nothing is registered unless ticked
+        state = {"signature": signature, "tree": tree, "version": state["version"] if state else 0}
+        _show(state)
+        st.session_state[_TREE] = state
+    return state
+
+
+def _edited(editor_key: str) -> None:
+    state = st.session_state[_TREE]
+    base = state["base"]
+    tree = base.copy()
+    for position, change in st.session_state[editor_key]["edited_rows"].items():
+        for column, value in change.items():
+            tree.at[base.index[int(position)], column] = value
+    folders = tree["_kind"] == "folder"
+    redraw = not tree.loc[folders, "include"].eq(True).equals(base.loc[folders, "include"].eq(True))
+    state["tree"] = sync_folder_ticks(base, tree)
+    if redraw:
+        _show(state)
 
 
 @st.dialog("Register new data", width="large")
@@ -115,10 +159,13 @@ def register_dialog(registry_path: str, data_root: str, *, writes_registry: bool
     """Propose registry rows for unregistered raw data, validate them live, then save or download."""
 
     registry = Registry.load(registry_path)
-    _unclaimed_note(data_root)
+    _unclaimed_note(data_root, writes=writes_registry)
     items = discover_unregistered(registry, data_root)
     if not items:
-        st.success("Everything in the data folder is already in the registry.")
+        if unclaimed(data_root):
+            st.caption("Once an instrument reads a folder, its files are proposed here.")
+        else:
+            st.success("Everything in the data folder is already in the registry.")
         return
 
     items, filters_key = _filter_controls(items)
@@ -126,36 +173,32 @@ def register_dialog(registry_path: str, data_root: str, *, writes_registry: bool
         st.info("No new data matches these filters.")
         return
 
-    folders = [item for item in items if item.layout == "folder" and item.runs and not item.issue]
-    split: List[str] = []
-    if folders:
-        split = st.multiselect(
-            "Folders to register as one experiment per file",
-            options=[item.key for item in folders],
-            default=[item.key for item in folders if item.split_by_default],
-            format_func=lambda key: f"{key} ({len(next(i for i in folders if i.key == key).runs)} files)",
-            help=(
-                "Selected: each file in the folder is its own experiment (runs R001, R002, ...). "
-                "Not selected: the whole folder is one experiment, e.g. a titration or time series."
-            ),
-        )
-
-    proposals = proposed_rows(items, registry, split=set(split))
+    proposals = tree_rows(items, registry, data_root)
     if proposals.empty:
         st.info("Nothing can be registered as found; see below.")
     else:
-        # Nothing is registered unless ticked: registering is a deliberate choice per row.
-        proposals.insert(0, "include", False)
-        st.caption("Tick **Register** for the rows to add, and fill in the sample and anything else you know.")
-        edited = st.data_editor(
-            proposals,
-            key=f"register-editor-{filters_key}-{'|'.join(sorted(split))}",
+        state = _tree_state(proposals, filters_key)
+        st.markdown("Tick what to register, then fill in the sample and anything else you know.\n"
+                    "- A **file** is one experiment.\n"
+                    "- Ticking a **📁 folder** ticks all the files under it, each its own experiment "
+                    "(runs R001, R002, …); untick the ones you don't want.\n"
+                    "- A folder marked **one experiment** is registered whole, all its files together, "
+                    "e.g. a titration or a time series.")
+        extra = [c for c in proposals.columns if c not in REGISTRY_COLUMNS and c not in _HELPER_COLUMNS]
+        editor_key = f"register-editor-{state['version']}"
+        st.data_editor(
+            state["base"],
+            key=editor_key,
+            on_change=_edited,
+            args=(editor_key,),
             hide_index=True,
             width="stretch",
-            disabled=["raw_data_filename", "_folder", "_modified"],
-            column_order=["include", *REGISTRY_COLUMNS, *[c for c in proposals.columns if c not in REGISTRY_COLUMNS and c not in _HELPER_COLUMNS], "_folder", "_modified"],
+            disabled=["_data", "_modified"],
+            column_order=["include", "_data", *[c for c in REGISTRY_COLUMNS if c != "raw_data_filename"],
+                          *extra, "_modified"],
             column_config={
-                "include": st.column_config.CheckboxColumn("Register", width="small"),
+                "include": st.column_config.CheckboxColumn("Register"),
+                "_data": st.column_config.TextColumn("data", width="large", help="Found in the data folder."),
                 "name": st.column_config.TextColumn("name", required=True, help="Unique experiment name."),
                 "instrument_name": st.column_config.SelectboxColumn("instrument_name", options=instrument_options(), required=True),
                 "sample_id": st.column_config.TextColumn("sample_id", help="S followed by 3–6 digits, e.g. S001."),
@@ -163,19 +206,22 @@ def register_dialog(registry_path: str, data_root: str, *, writes_registry: bool
                 "measurement_profile": st.column_config.SelectboxColumn(
                     "measurement_profile", options=profile_options(), help="Needed for DMA and rheometer data."
                 ),
-                "raw_data_filename": st.column_config.TextColumn("raw data", help="File stem or folder name found on disk."),
-                "_folder": st.column_config.TextColumn("folder"),
                 "_modified": st.column_config.DatetimeColumn("modified", format="YYYY-MM-DD HH:mm"),
             },
         )
 
-        rows = registry_rows(edited)
+        chosen = chosen_rows(state["tree"])
+        rows = registry_rows(chosen)
+        both = overlapping_folders(chosen)
+        for folder in both:
+            st.error(f"**{folder}** is ticked as one experiment and file by file: untick the folder or its files.",
+                     icon=":material/error:")
         results = validate_proposed(registry, rows, data_root)
         if results:
             st.dataframe(status_table(rows, results), hide_index=True, width="stretch")
         else:
-            st.caption("No rows ticked yet.")
-        ready = bool(results) and not any(result["errors"] for result in results)
+            st.caption("Nothing ticked yet.")
+        ready = bool(results) and not both and not any(result["errors"] for result in results)
 
         if not writes_registry:
             st.info(
@@ -197,6 +243,7 @@ def register_dialog(registry_path: str, data_root: str, *, writes_registry: bool
                 except (PermissionError, ValueError) as exc:
                     st.error(str(exc))
                 else:
+                    st.session_state.pop(_TREE, None)
                     if on_saved is not None:
                         on_saved(list(rows["name"]), ingest=save_and_ingest)
                     st.rerun()
@@ -225,16 +272,23 @@ def unclaimed(data_root: str) -> list:
     return unclaimed_folders(data_root)
 
 
-def _unclaimed_note(data_root: str) -> None:
-    """Folders of data no instrument reads, each with a way to add the instrument."""
-    from mfethuls.app.instruments import request_dialog
+def _unclaimed_note(data_root: str, *, writes: bool = True) -> None:
+    """Folders of data no instrument reads, each with a way to choose a known instrument or add one."""
+    from mfethuls.app.instruments import UNCLAIMED, _link_result, link_folder_controls, request_dialog
 
+    _link_result(UNCLAIMED)
     for folder in unclaimed(data_root):
-        text_col, button_col = st.columns([3, 1], vertical_alignment="center")
-        text_col.info(f"**{folder.folder_name}** holds {folder.count_label} file(s) that no instrument reads.",
-                      icon=":material/help:")
-        if button_col.button("Add instrument", key=f"unclaimed-{folder.folder_name}", width="stretch"):
-            request_dialog(folder.folder_name)
+        with st.container(border=True):
+            text_col, button_col = st.columns([3, 1], vertical_alignment="center")
+            hint = (f" Its name suggests **{folder.suggested}**: check it below." if folder.suggested else
+                    " If mfethuls knows the instrument, choose it below; otherwise add it.")
+            text_col.markdown(f"**{folder.folder_name}** holds {folder.count_label} file(s) that no instrument "
+                              f"reads yet.{hint}")
+            if button_col.button("New instrument", key=f"unclaimed-{folder.folder_name}", width="stretch",
+                                 help="Teach mfethuls an instrument it does not know, from one of these files."):
+                request_dialog(folder.folder_name)
+            link_folder_controls(folder.folder_name, folder.suggested, f"unclaimed-{folder.folder_name}",
+                                 writes=writes)
 
 
 def _modified(path: str) -> float:
@@ -283,19 +337,27 @@ def new_data_prompt(backend, registry_path: str) -> None:
         st.success(message)
     try:
         count = count_new_data(registry_path, data_root)
+        folders = [folder.folder_name for folder in unclaimed(data_root)]
     except Exception as exc:
         st.caption(f"Could not scan the data folder: {exc}")
         return
     if count:
         st.info(f"**{count}** new data item{'s' if count != 1 else ''} found in the data folder.")
-    open_col, rescan_col = st.columns([3, 1], vertical_alignment="bottom")
-    if open_col.button("Review & register", icon=":material/playlist_add:", disabled=not count, width="stretch"):
+    if folders:
+        # Without this, data in a folder named unlike its instrument ("DMA data") would never show up.
+        st.info(f"No instrument reads the folder{'s' if len(folders) != 1 else ''} "
+                f"{', '.join(f'**{name}**' for name in folders)} yet: open **Review & register** to choose one.")
+    # The next step when there is new data, so it stands out then.
+    if st.button("Review & register", icon=":material/playlist_add:", disabled=not (count or folders),
+                 type="primary" if count or folders else "secondary", width="stretch"):
         register_dialog(
             registry_path, data_root, writes_registry=backend.writes_registry,
             on_saved=lambda names, ingest: _after_register(backend, registry_path, names, ingest),
         )
-    if rescan_col.button("", icon=":material/refresh:", help="Scan the data folder again", width="stretch"):
+    if st.button("Scan the data folder again", icon=":material/refresh:", type="tertiary", width="stretch",
+                 help="Look for raw files added since the app started"):
         _count_new_data.clear()
+        unclaimed.clear()
         st.rerun()
 
 
@@ -308,7 +370,7 @@ def _after_register(backend, registry_path: str, names: list[str], ingest: bool)
     message = f"Added {len(names)} experiment{'s' if len(names) != 1 else ''} to the registry."
     if ingest:
         with st.spinner(f"Ingesting {len(names)} experiment(s)…"):
-            results = backend.ingest(names, registry_path)
+            results = backend.ingest(names, registry_path, refresh=True)
         failed = [name for name, result in results if result.get("status") == "error"]
         message += f" Ingested {len(names) - len(failed)}." + (f" Failed: {', '.join(failed)}." if failed else "")
         backend.clear_caches()

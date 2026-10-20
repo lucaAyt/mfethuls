@@ -7,6 +7,20 @@ validator and storage can all use the same rules.
 from __future__ import annotations
 
 import re
+from typing import Optional
+
+# Characters a file or folder name may not hold (path separators, Windows' forbidden ones, control characters).
+_NOT_IN_FILE_NAMES = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+
+
+def file_name_problem(name: str) -> Optional[str]:
+    """Why ``name`` is not a plain file or folder name (no path), or None.
+
+    Spaces, brackets and accents are fine: people name files as they like.
+    """
+    if name in (".", "..") or name != name.strip() or _NOT_IN_FILE_NAMES.search(name):
+        return 'must be a plain name, without / \\ : * ? " < > | or spaces at either end'
+    return None
 
 
 def stem_key(raw_data_filename: str) -> str:

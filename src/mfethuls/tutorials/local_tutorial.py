@@ -148,8 +148,8 @@ def _(mo):
     - `comparison_label`: the experiment name (`LB_dsc_001`), handy for colouring plots
     - `name`: the raw file the row came from (`poly1`)
     - measurement columns with standard names and units, e.g. `temperature_C`, `heat_flow_mW`
-    - `profile` (DSC only): the segment of the temperature program, e.g. `Heating_0` for the
-      first heating ramp or `Cooling_0` for the first cooling ramp
+    - `profile` (DSC only): the segment of the temperature program, e.g. `Heating_1` for the
+      first heating ramp or `Cooling_1` for the first cooling ramp
     """)
     return
 
@@ -264,8 +264,8 @@ def _():
 @app.cell
 def _(df_dsc, sns):
     # DSC: keep only the first heating ramp and compare the two runs
-    df_dsc_heating_0 = df_dsc[df_dsc.profile.str.contains('Heating_0')]
-    sns.lineplot(df_dsc_heating_0, x='temperature_C', y='heat_flow_mW', hue='name', palette='flare')
+    df_dsc_heating_1 = df_dsc[df_dsc.profile == 'Heating_1']
+    sns.lineplot(df_dsc_heating_1, x='temperature_C', y='heat_flow_mW', hue='name', palette='flare')
     return
 
 

@@ -9,6 +9,9 @@ so a change takes effect immediately:
 2. then the data folder, registry and storage saved by the app (:func:`save_settings`,
    in ``~/.mfethuls/settings.json``, or ``MFETHULS_SETTINGS_FILE``). They take
    precedence, so a change made in the app is not undone by ``.env``.
+
+Without a registry path, the registry is ``registry.xlsx`` in the data folder
+(:data:`DEFAULT_REGISTRY_NAME`), as storage defaults to ``_storage`` there.
 """
 
 from __future__ import annotations
@@ -35,6 +38,8 @@ TEST_PATH_VARIABLES = {
 # Settings the app saves; everything else comes from the environment.
 SAVED_FIELDS = ("data_root", "registry_path", "local_storage")
 SETTINGS_FILE_VARIABLE = "MFETHULS_SETTINGS_FILE"
+# The registry in the data folder, used when no other registry is set.
+DEFAULT_REGISTRY_NAME = "registry.xlsx"
 
 
 @dataclass(frozen=True)
@@ -69,6 +74,13 @@ class Settings:
         overrides = {name: env.get(var) for name, var in TEST_PATH_VARIABLES.items() if env.get(var)}
         missing = [var for name, var in TEST_PATH_VARIABLES.items() if name not in overrides]
         return replace(self, **overrides), missing
+
+    def with_defaults(self) -> "Settings":
+        """These settings with the registry defaulting to :data:`DEFAULT_REGISTRY_NAME` in the data folder."""
+
+        if self.registry_path or not self.data_root:
+            return self
+        return replace(self, registry_path=os.path.join(self.data_root, DEFAULT_REGISTRY_NAME))
 
 
 _configured: Optional[Settings] = None
@@ -133,7 +145,16 @@ def save_settings(**values: Optional[str]) -> Path:
 
 
 def get_settings() -> Settings:
-    """The configured settings, or settings read from the environment and the saved settings right now."""
+    """The configured settings, or settings read from the environment and the saved settings right now.
+
+    A registry that is not set defaults to :data:`DEFAULT_REGISTRY_NAME` in the data folder.
+    """
+
+    return _given_settings().with_defaults()
+
+
+def _given_settings() -> Settings:
+    """The settings as configured, saved or set in the environment, without defaults."""
 
     if _configured is not None:
         return _configured
@@ -173,9 +194,9 @@ def use_folders(
     """
     given = {name: str(value) for name, value in
              {"data_root": data_root, "registry_path": registry_path, "local_storage": local_storage}.items() if value}
-    settings = replace(get_settings(), **given)
+    settings = replace(_given_settings(), **given)
     configure(settings)
-    return settings
+    return settings.with_defaults()
 
 
 def use_test_env() -> None:
@@ -186,7 +207,7 @@ def use_test_env() -> None:
     runtime path keeps its normal value. The environment itself is not changed.
     """
 
-    settings, missing = get_settings().with_test_paths()
+    settings, missing = _given_settings().with_test_paths()
     for variable in missing:
         logging.getLogger(__name__).warning(
             "use_test_env: %s is not set; the runtime path keeps its current value.", variable
