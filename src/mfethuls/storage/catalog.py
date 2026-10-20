@@ -2,7 +2,7 @@
 
 The catalog is derived data, rebuilt on each ingest from the owners of each fact:
 the registry (descriptive fields), the manifest (``experiment_id``) and the parsed
-dataset (instrument type/model, canonical measurement profile, row count). The app
+dataset (instrument type/model, row count). The app
 and ``storage.notebook`` read only the catalog; the metadata sink of the stores, if
 any, receives the same record (see :mod:`mfethuls.stores`).
 """
@@ -24,7 +24,6 @@ CATALOG_FIELDS: dict[str, str] = {
     "instrument_model": "TEXT",
     "sample_id": "TEXT",
     "run_id": "TEXT",
-    "measurement_profile": "TEXT",
     "rows": "BIGINT",
     "reader_fingerprint": "TEXT",
 }
@@ -42,7 +41,6 @@ class CatalogRecord:
     instrument_model: Optional[str] = None
     sample_id: Optional[str] = None
     run_id: Optional[str] = None
-    measurement_profile: Optional[str] = None
     rows: Optional[int] = None
     # Which reader read the data: a definition's fingerprint, or "<Class>-v<N>" for a code parser.
     reader_fingerprint: Optional[str] = None
@@ -59,7 +57,7 @@ class CatalogRecord:
         """Record for ``experiment`` stored at ``storage_path``.
 
         ``dataset_metadata`` is the parsed dataset's metadata (or its sidecar), which
-        holds the instrument type and model and the canonical measurement profile.
+        holds the instrument type and model.
         """
 
         metadata = dataset_metadata or {}
@@ -74,7 +72,6 @@ class CatalogRecord:
             instrument_model=metadata.get("instrument_model"),
             sample_id=experiment.sample_id,
             run_id=experiment.run_id,
-            measurement_profile=metadata.get("measurement_profile"),
             rows=rows,
             reader_fingerprint=metadata.get("reader_fingerprint"),
         )

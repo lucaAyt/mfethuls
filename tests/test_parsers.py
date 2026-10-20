@@ -108,13 +108,11 @@ PARSER_BEHAVIOR_CASES = [
         "key": ("rheometer", "anton_paar"),
         "raw": {"w [rad/s]": [1.0, 2.0], "G' [Pa]": [1000.0, 1100.0], "G'' [Pa]": [200.0, 220.0]},
         "expect": {"angular_frequency_rad_s", "storage_modulus_pa", "loss_modulus_pa"},
-        "parse_kwargs": {"measurement_profile": "oscillatory_frequency_sweep"},
     },
     {
         "key": ("dma", "ta_q800"),
         "raw": {"Frequency [Hz]": [1.0, 10.0], "Storage Modulus [MPa]": [1.0, 1.1], "Loss Modulus [MPa]": [0.2, 0.22]},
         "expect": {"frequency_hz", "storage_modulus_mpa", "loss_modulus_mpa"},
-        "parse_kwargs": {"measurement_profile": "oscillatory_frequency_sweep"},
     },
     {
         "key": ("uv_vis", "flame"),
@@ -160,66 +158,6 @@ def test_each_parser_normalizes_expected_columns(case, monkeypatch):
     assert case["expect"].issubset(set(dataset.data.columns))
     assert dataset.experiment_id == "EXP001"
     assert dataset.sample_id == "S001"
-
-
-def test_dma_parser_explicit_measurement_profile_trumps_metadata(monkeypatch):
-    parser = get_parser("dma", "ta_q800")
-    raw_df = pd.DataFrame(
-        {
-            "Frequency [Hz]": [1.0, 10.0],
-            "Storage Modulus [MPa]": [1.2, 1.3],
-            "Loss Modulus [MPa]": [0.2, 0.25],
-        }
-    )
-    monkeypatch.setattr(parser, "parse_raw_data", lambda _path, _df=raw_df, **_: _df.copy())
-
-    dataset = parser.parse(
-        {"dummy": ["dummy.txt"]},
-        experiment_id="EXP123",
-        sample_id="S001",
-        run_id="R001",
-        instrument_type="dma",
-        instrument_model="ta_q800",
-        instrument_name="dma",
-        experiment_name="dma_profile_priority",
-        measurement_profile="oscillatory_frequency_sweep",
-        metadata={"registry_measurement_profile": "oscillatory_temperature_sweep"},
-    )
-
-    # Explicit measurement_profile kwarg should be treated as registry value and canonicalized
-    assert dataset.metadata.get("registry_measurement_profile") == "oscillatory_frequency_sweep"
-    assert dataset.metadata.get("measurement_profile") == "oscillatory_frequency_sweep"
-
-
-def test_dma_parser_subset_measurement_profile_maps_to_canonical(monkeypatch):
-    parser = get_parser("dma", "ta_q800")
-    raw_df = pd.DataFrame(
-        {
-            "Frequency [Hz]": [1.0, 10.0],
-            "Storage Modulus [MPa]": [1.2, 1.3],
-            "Loss Modulus [MPa]": [0.2, 0.25],
-        }
-    )
-    monkeypatch.setattr(parser, "parse_raw_data", lambda _path, _df=raw_df, **_: _df.copy())
-
-    dataset = parser.parse(
-        {"dummy": ["dummy.txt"]},
-        experiment_id="EXP124",
-        sample_id="S001",
-        run_id="R001",
-        instrument_type="dma",
-        instrument_model="ta_q800",
-        instrument_name="dma",
-        experiment_name="dma_profile_subset",
-        measurement_profile="frequency sweep",
-        metadata={"registry_measurement_profile": "oscillatory_temperature_sweep"},
-    )
-
-    # Registry value "frequency sweep" should be canonicalized to "oscillatory_frequency_sweep"
-    assert dataset.metadata.get("registry_measurement_profile") == "frequency sweep"
-    assert dataset.metadata.get("measurement_profile") == "oscillatory_frequency_sweep"
-
-
 
 
 @pytest.mark.parametrize(

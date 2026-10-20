@@ -35,7 +35,7 @@ pip install "mfethuls[notebook,viz]"
 uv pip install "mfethuls[notebook,viz]"
 ```
 
-The `notebook` extra installs both Jupyter and Marimo. Use whichever you prefer — the Python API and DuckDB patterns below work identically in both.
+The `notebook` extra installs Marimo, which the tutorial uses. If you prefer Jupyter, install it yourself (`pip install jupyterlab`): the Python API and DuckDB patterns below work the same in both.
 
 ---
 
@@ -223,7 +223,7 @@ All datasets also carry `experiment_name`, `experiment_id` (internal hex, system
 
 ## Tips for model building
 
-**Normalise before concatenating** — instruments report in different units even within the same type. Check `measurement_profile` in the catalog — it tells you which experimental protocol was used and whether signals are directly comparable.
+**Normalise before concatenating** — instruments report in different units even within the same type. Check which quantity each run swept (DMA and rheometer: `mfethuls.plotting.sweeps.sweep_axis`) and its units before comparing signals.
 
 **Use `experiment_name` as the join key** — it is human-readable and present in the catalog and the data. `experiment_id` is an internal hex assigned by the system and not needed outside the storage layer.
 

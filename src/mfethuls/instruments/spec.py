@@ -218,14 +218,24 @@ def json_schema() -> Dict[str, Any]:
                                "stay in the file text too.",
                 "items": {
                     "type": "object",
-                    "required": ["name", "starts_at"],
+                    "required": ["name"],
                     "properties": {
                         "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
-                        "starts_at": {"type": "string", "description": "Text on the line before its rows."},
+                        "starts_at": {"type": "string", "description": "Text on the line before its rows "
+                                                                       "(with 'header': on its header line)."},
                         "ends_at": {"type": "string", "description": "Text on the line after its rows."},
                         "columns": {"type": "array", "items": {"type": "string",
                                                                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
-                                    "description": "Names of the fields, in order."},
+                                    "description": "Names of the fields, in order (with 'header': of the "
+                                                   "fields without a header name)."},
+                        "sheet": {"type": "string",
+                                  "description": "Excel workbooks only: the sheet holding the table, e.g. Results."},
+                        "header": {"type": "object", "required": ["rows"],
+                                   "properties": {"rows": {"type": "integer", "minimum": 1, "maximum": 3}},
+                                   "additionalProperties": False,
+                                   "description": "The table's own header lines (1: names, 2: names then "
+                                                  "units); every line below them is a row, e.g. one per "
+                                                  "specimen."},
                     },
                     "additionalProperties": False,
                 },
@@ -340,6 +350,11 @@ RULES = [
     "\"ends_at\": text on the line after it, \"columns\": [field names]}] to keep it as metadata. Rows "
     "written twice (identical in every field) can be left out with `file.duplicate_rows: \"drop\"`; "
     "never use it when repeated rows are real measurements.",
+    "- A workbook's results sheet (one row per specimen or test, under its own header lines of names and "
+    "units: strength, modulus, dimensions) is kept as metadata with `tables`: [{\"name\": \"results\", "
+    "\"sheet\": its name, \"header\": {\"rows\": 2}, \"columns\": [\"specimen\"]}] (`columns` names "
+    "the fields without a header, such as the specimen name in the first column). Do not keep a sheet "
+    "of statistics (mean, min, max) this way; it stays in the file text.",
     "- For a measurement type mfethuls does not know yet, add `plot`: "
     "{\"x\": stored column, \"y\": stored column}.",
 ]

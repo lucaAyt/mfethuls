@@ -19,7 +19,7 @@ from mfethuls.settings import get_settings
 
 _CATALOG_TEXT_FIELDS = (
     "experiment_id", "experiment_name", "raw_data_filename", "instrument_name",
-    "instrument_type", "instrument_model", "sample_id", "run_id", "measurement_profile",
+    "instrument_type", "instrument_model", "sample_id", "run_id",
 )
 
 

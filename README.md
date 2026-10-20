@@ -61,7 +61,7 @@ The latest development version: `pip install "mfethuls[viz,notebook] @ git+https
 | Extra | Installs | Use when |
 |---|---|---|
 | `viz` | Plotly, Matplotlib, Kaleido, Streamlit | The app or notebook plotting |
-| `notebook` | Jupyter, Marimo, Matplotlib, Plotly, seaborn | Interactive notebooks with plotting |
+| `notebook` | Marimo, Matplotlib, Plotly, seaborn | Interactive notebooks with plotting (the tutorial is a Marimo notebook) |
 
 ---
 
@@ -152,7 +152,7 @@ What each format and part is, to look things up.
 
 | Reference | Contents |
 |---|---|
-| [docs/reference/registry.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/reference/registry.md) | Registry format, column reference, measurement profiles |
+| [docs/reference/registry.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/reference/registry.md) | Registry format, column reference, instrument folders |
 | [docs/reference/schema.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/reference/schema.md) | Canonical column names, units, normalisation rules |
 | [docs/reference/architecture.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/reference/architecture.md) | System diagrams, ETL pipeline, storage design |
 

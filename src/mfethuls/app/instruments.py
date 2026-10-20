@@ -370,9 +370,10 @@ def _digest(value: Any) -> str:
 
 # -- Streamlit: opening the dialog, the Settings section ------------------------
 
-def request_dialog(folder: Optional[str] = None) -> None:
-    """Open the "Add instrument" dialog on the next run (e.g. from inside another dialog)."""
-    st.session_state[OPEN_REQUEST] = {"folder": folder}
+def request_dialog(folder: Optional[str] = None, *, edit: Optional[str] = None) -> None:
+    """Open the "Add instrument" dialog on the next run (e.g. from inside another dialog), or with
+    ``edit`` (a lab definition's path) the "Edit instrument" dialog."""
+    st.session_state[OPEN_REQUEST] = {"folder": folder, "edit": edit}
     st.rerun()
 
 
@@ -382,7 +383,9 @@ def open_requested_dialog(backend) -> None:
     if message:
         st.toast(message, icon=":material/check_circle:")
     request = st.session_state.pop(OPEN_REQUEST, None)
-    if request is not None:
+    if request is not None and request.get("edit"):
+        edit_instrument_dialog(backend, request["edit"])
+    elif request is not None:
         add_instrument_dialog(backend, folder=request.get("folder"))
 
 
@@ -532,9 +535,12 @@ def _set_removing(source: Optional[str]) -> None:
 def _remove_row(backend, status, registry_path: str) -> None:
     path = Path(status.source)
     label = status.name or path.stem
-    left, right = st.columns([3, 1], vertical_alignment="center")
+    left, edit, right = st.columns([3, 1, 1], vertical_alignment="center")
     left.markdown(f"`{label}` · {_plain(path.name)}" +("" if status.active else " *(not used)*"))
     if st.session_state.get(_REMOVING) != status.source:
+        if edit.button("Edit", key=f"edit-{path.name}", icon=":material/edit:", width="stretch",
+                       help="Change how its files are read: header, columns, values. Checked before saving."):
+            request_dialog(edit=status.source)
         right.button("Remove", key=f"remove-{path.name}", icon=":material/delete:", width="stretch",
                      on_click=_set_removing, args=(status.source,))
         return
@@ -858,6 +864,8 @@ def _reading_section(seed_file: Dict[str, Any], key: str, sample: Path) -> Dict[
         settings["blocks"] = {"starts_at": blocks_at.strip(), "column": blocks_column.strip() or "block"}
         if blocks_label.strip():
             settings["blocks"]["label"] = blocks_label.strip()
+    # Settings the form does not show (e.g. duplicate_rows) are kept as they were.
+    settings.update({k: v for k, v in seed_file.items() if k not in _FILE_FORM_KEYS})
     return settings
 
 
@@ -1088,13 +1096,16 @@ def _check_section(data: Dict[str, Any], sample: Path, file_columns: List[str], 
     return True, warnings + other_warnings
 
 
-def _save_controls(backend, data: Dict[str, Any], sample: Path, key: str) -> None:
+def _save_controls(backend, data: Dict[str, Any], sample: Path, key: str, *,
+                   editing: Optional[str] = None) -> None:
     name = data.get("name", "")
     # Compared as save_definition writes it: "TGA" replaces tga.json and the built-in tga.
     stored_name = str(name).strip().casefold()
     folder = lab_dir()
     existing = folder / f"{stored_name}.json" if folder else None
-    if existing is not None and existing.exists():
+    if editing is not None and stored_name == str(editing).strip().casefold():
+        allowed = True  # changing it is the point
+    elif existing is not None and existing.exists():
         allowed = st.checkbox(f"Replace the lab's existing instrument {name!r}", key=f"{key}-replace")
     elif stored_name in builtin_names():
         allowed = st.checkbox(f"Replace mfethuls' built-in instrument {name!r} for everyone using this data "
@@ -1115,7 +1126,8 @@ def _save_controls(backend, data: Dict[str, Any], sample: Path, key: str) -> Non
         st.info("This app does not write to the data folder. Put both files in the data folder's "
                 "`.mfethuls/instruments` folder (e.g. on OneDrive), then sync.")
         return
-    if right.button("Save instrument", type="primary", disabled=not allowed, width="stretch", key=f"{key}-save"):
+    if right.button("Save changes" if editing else "Save instrument", type="primary", disabled=not allowed,
+                    width="stretch", key=f"{key}-save"):
         try:
             path = save_definition(data, sample, overwrite=True)
         except Exception as exc:  # noqa: BLE001
@@ -1124,9 +1136,21 @@ def _save_controls(backend, data: Dict[str, Any], sample: Path, key: str) -> Non
         from mfethuls.app.register import clear_registry_caches
 
         clear_registry_caches()
-        st.session_state[_MESSAGE] = f"Added the instrument {name} ({path.name}). Its data can now be registered."
+        if editing:
+            st.session_state[_MESSAGE] = (f"Saved the changes to {name}. Data already ingested is read again "
+                                          "when you ingest it, or under ⚙ Settings → Clean up (Read again).")
+        else:
+            st.session_state[_MESSAGE] = f"Added the instrument {name} ({path.name}). Its data can now be registered."
         st.rerun()
 
+
+# The file settings the form shows (see _reading_section); others are kept from the seed.
+_FILE_FORM_KEYS = {"extensions", "encoding", "delimiter", "decimal", "header", "sheet", "data_ends", "contains",
+                   "comment", "segment_lines", "blocks"}
+# The definition's keys the form fills in (see definition_form); others (tables, ...) are kept from the seed.
+_FORM_KEYS = {"spec_version", "name", "type", "model", "folder_name", "data_layout", "name_from", "description",
+              "file", "columns", "formats", "from_file_name", "from_header", "derived", "plot", "characterizer",
+              "check"}
 
 # The tabs of "Adjust details", by the section problems are routed to (see route_problems).
 _TABS = {"instrument": "Instrument", "file": "Reading the file", "columns": "Columns", "extras": "Values and plot"}
@@ -1144,26 +1168,34 @@ def needs_fixing(seed: Dict[str, Any]) -> bool:
 
 
 def definition_form(backend, seed: Dict[str, Any], sample: Path, key: str, *, folder: Optional[str] = None,
-                    origin: str = "", guess_columns: bool = False, others: Optional[List[Path]] = None) -> None:
+                    origin: str = "", guess_columns: bool = False, others: Optional[List[Path]] = None,
+                    editing: Optional[str] = None) -> None:
     """The form every route ends in: the outcome, the name and Save, with everything else that was
     filled in under **Adjust details**; checked against ``sample`` (and ``others``).
 
     ``seed`` is a definition (possibly incomplete or wrong) that fills the form.
-    With ``guess_columns``, columns the seed leaves empty get mfethuls' guesses.
+    With ``guess_columns``, columns the seed leaves empty get mfethuls' guesses. ``editing`` is
+    the name of the lab instrument being changed: its name stays (registry rows use it).
     """
     seed_layouts = layouts(seed)
     index = layout_for(seed_layouts, sample)
     layout = seed_layouts[index]
 
+    name_help = ("What the registry's instrument_name column says for this instrument: lower case letters, "
+                 "digits, _ and -.")
+    if editing:
+        name_help += " Registry rows use it, so it stays when editing; to rename, add the instrument again."
     name = st.text_input("Name", value=str(seed.get("name") or ""), key=f"{key}-name", placeholder="e.g. tga_netzsch",
-                         help="What the registry's instrument_name column says for this instrument: lower case "
-                              "letters, digits, _ and -.")
+                         disabled=editing is not None, help=name_help)
     slots = {"name": st.container()}
     result = st.container()
 
-    with st.expander(":material/tune: Adjust details", expanded=needs_fixing(seed)):
-        st.caption("Everything the chatbot or mfethuls filled in. Most files need nothing here: change only "
-                   "what is wrong.")
+    with st.expander(":material/tune: Adjust details", expanded=editing is not None or needs_fixing(seed)):
+        if editing:
+            st.caption("How this instrument's files are read: change what is wrong, and check the result above.")
+        else:
+            st.caption("Everything the chatbot or mfethuls filled in. Most files need nothing here: change only "
+                       "what is wrong.")
         tabs = st.tabs([*_TABS.values(), "Stored data", "Definition (JSON)"])
         with tabs[0]:
             identity = _identity_section(seed, key, sample, folder, name)
@@ -1210,6 +1242,8 @@ def definition_form(backend, seed: Dict[str, Any], sample: Path, key: str, *, fo
     data.update(extras)
     if isinstance(seed.get("characterizer"), dict):
         data["characterizer"] = seed["characterizer"]
+    # What the form does not show (a results table, ...) is kept as the seed has it.
+    data.update({k: v for k, v in seed.items() if k not in _FORM_KEYS})
     with json_tab:
         st.code(definition_text(data), language="json")
 
@@ -1228,7 +1262,7 @@ def definition_form(backend, seed: Dict[str, Any], sample: Path, key: str, *, fo
                            "the details below.")
                 st.code(problems_prompt(problems, data), language="markdown", height=200)
         if ok:
-            _save_controls(backend, data, sample, key)
+            _save_controls(backend, data, sample, key, editing=editing)
 
 
 def _chatbot_flow(backend, sample: Path, others: List[Path], folder: Optional[str], key: str) -> None:
@@ -1304,6 +1338,53 @@ def _manual_flow(backend, sample: Path, others: List[Path], folder: Optional[str
         st.code("\n".join(detection.outline), language=None)
     definition_form(backend, seed_from_detection(detection, folder), sample, f"{key}-auto", folder=folder,
                     others=others, guess_columns=True)
+
+
+def saved_sample(path: Path, seed: Dict[str, Any]) -> Optional[Path]:
+    """The copy of the file a lab definition was made from, saved next to it, if it is still there."""
+    check = seed.get("check") if isinstance(seed.get("check"), dict) else {}
+    sample = path.parent / str(check.get("sample") or "")
+    return sample if check.get("sample") and sample.is_file() else None
+
+
+def _folder_others(folder: Optional[str], sample: Path) -> List[Path]:
+    """Files in the instrument's folder to check an edited definition against, like Add instrument's."""
+    from mfethuls.discovery import folder_files
+
+    data_root = get_settings().data_root
+    if not (data_root and folder) or not (Path(data_root) / folder).is_dir():
+        return []
+    base = Path(data_root) / folder
+    files, _, _ = folder_files(str(base))
+    return [base / name for name in files_to_check(base, files, sample.name)]
+
+
+@st.dialog("Edit instrument", width="large")
+def edit_instrument_dialog(backend, source: str) -> None:
+    """A lab instrument's saved definition in the form, checked against the file it was made from."""
+    path = Path(source)
+    try:
+        seed = definition_json(path.read_text(encoding="utf8"), str(path))
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"{path.name} cannot be opened: {_plain(exc)}")
+        return
+    if not isinstance(seed, dict):
+        st.error(f"{path.name} is not an instrument definition.")
+        return
+    name = str(seed.get("name") or path.stem)
+    folder = seed.get("folder_name") if isinstance(seed.get("folder_name"), str) else None
+    sample = saved_sample(path, seed)
+    if sample is None:
+        st.info("The file this instrument was made from is not next to it any more: choose one of its files.")
+        sample, others = _sample_picker(folder, f"edit-{path.stem}")
+        if sample is None:
+            return
+    else:
+        others = _folder_others(folder, sample)
+        st.caption(f"Checked against **{sample.name}**, the file it was made from"
+                   + (f", and {len(others)} other file(s) in `{folder}`." if others else "."))
+    definition_form(backend, seed, sample, f"edit-{path.stem}-{_digest(seed)}", folder=folder, others=others,
+                    editing=name)
 
 
 @st.dialog("Add instrument", width="large")

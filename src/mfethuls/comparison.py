@@ -40,7 +40,6 @@ class ComparisonSet:
                 "run_id",
                 "instrument_name",
                 "instrument_type",
-                "measurement_profile",
             ):
                 value = metadata.get(column)
                 if column not in frame.columns and value is not None:

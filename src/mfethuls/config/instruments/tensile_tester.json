@@ -5,7 +5,7 @@
   "model": "ZwickRoell_testXpert",
   "folder_name": "tensile_tester",
   "data_layout": "file",
-  "description": "Universal testing machine, Excel export (testXpert style): sheets Parameters, Results, Statistics, then one sheet per test named after the specimen (sample name, three header rows: name, column names, units). Lap shear (EN 2243-1): Strain in mm, Shearing stress in MPa. Tensile (ASTM D 638): Elongation in %, 'Standard force' in kPa (a stress). A workbook may hold several tests; each is a curve named after its sheet. The test date comes from the specimen's row in the Results sheet.",
+  "description": "Universal testing machine, Excel export (testXpert style): sheets Parameters, Results, Statistics, then one sheet per test named after the specimen (sample name, three header rows: name, column names, units). Lap shear (EN 2243-1): Strain in mm, Shearing stress in MPa. Tensile (ASTM D 638): Elongation in %, 'Standard force' in kPa (a stress). A workbook may hold several tests; each is a curve named after its sheet. The test date comes from the specimen's row in the Results sheet; that sheet (one row per specimen: strength, modulus, dimensions, ...) is kept as the metadata table 'results'.",
   "name_from": "sheet",
   "formats": [
     {
@@ -35,5 +35,8 @@
   ],
   "from_header": [
     { "column": "test_date", "pattern": "^{sheet}\\t([0-9]+\\.[0-9]+)\\t", "type": "datetime", "timezone": "Europe/Zurich" }
+  ],
+  "tables": [
+    { "name": "results", "sheet": "Results", "header": { "rows": 2 }, "columns": ["specimen"] }
   ]
 }

@@ -44,13 +44,12 @@ def _coerce_comparison_set(comparison: ComparisonSet | Sequence[Dataset]) -> Com
 
 
 def _resolve_x_column(dataset: Dataset, resolved_kind: str) -> str | None:
-    """Resolve the x-axis column for a dataset based on instrument type and measurement profile.
-    
+    """Resolve the x-axis column for a dataset from its instrument type.
+
     Strategy:
     1. For simple instrument types, use fixed x-column
-    2. For profile-dependent types (DMA, rheology), use canonical measurement_profile to select x-column
-    3. Fall back to generic candidates if profile not recognized or missing
-    4. Return None if no suitable column found
+    2. For DMA and rheology, the quantity the run swept (see ``sweeps.sweep_axis``)
+    3. Return None if no suitable column found
     """
     columns = set(dataset.data.columns)
 
@@ -73,47 +72,12 @@ def _resolve_x_column(dataset: Dataset, resolved_kind: str) -> str | None:
         candidate = definition.plot["x"] if definition is not None else None
         return candidate if candidate in columns else None
 
-    if resolved_kind == "dma":
-        from .dma import _PROFILE_MAP as _DMA_PROFILE_MAP
+    if resolved_kind in ("dma", "rheology"):
+        from .dma import DMA_AXES
+        from .rheology import RHEOLOGY_AXES
+        from .sweeps import sweep_axis
 
-        profile = str(dataset.metadata.get("measurement_profile") or "").strip()
-        if profile and profile in _DMA_PROFILE_MAP:
-            candidate = _DMA_PROFILE_MAP[profile][0]
-            if candidate in columns:
-                return candidate
-        
-        # Fall back to generic candidates when profile not recognized
-        if profile:
-            LOGGER.debug(
-                "DMA x-column: canonical profile '%s' not in profile map, using fallback candidates",
-                profile,
-            )
-        
-        for candidate in ("frequency_hz", "temperature_C", "strain_pct", "time_s"):
-            if candidate in columns:
-                return candidate
-        return None
-
-    if resolved_kind == "rheology":
-        from .rheology import _PROFILE_MAP as _RHEOLOGY_PROFILE_MAP
-
-        profile = str(dataset.metadata.get("measurement_profile") or "").strip()
-        if profile and profile in _RHEOLOGY_PROFILE_MAP:
-            candidate = _RHEOLOGY_PROFILE_MAP[profile][0]
-            if candidate in columns:
-                return candidate
-        
-        # Fall back to generic candidates when profile not recognized
-        if profile:
-            LOGGER.debug(
-                "Rheology x-column: canonical profile '%s' not in profile map, using fallback candidates",
-                profile,
-            )
-
-        for candidate in ("angular_frequency_rad_s", "strain_pct", "time_s", "shear_rate_s_inv"):
-            if candidate in columns:
-                return candidate
-        return None
+        return sweep_axis(dataset.data, DMA_AXES if resolved_kind == "dma" else RHEOLOGY_AXES)
 
     return None
 

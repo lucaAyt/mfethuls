@@ -13,8 +13,7 @@ The registry is a CSV or XLSX spreadsheet that serves as the primary interface b
 | `raw_data_filename` | no | filename stem (no extension) | The filename stem of the raw data export (e.g. `chitosan_jan15` for `chitosan_jan15.txt`). If absent, defaults to `name`. Used to locate the file anywhere under the instrument folder. |
 | `sample_id` | no | `S` + 3–6 digits | Identifies the sample (e.g. `S001`). Included in the Parquet filename. |
 | `run_id` | no | `R` + 3–6 digits | Run number within a sample (e.g. `R001`). Defaults to `R001` when absent. |
-| `measurement_profile` | conditional | see profiles table | Required for **rheometer** and **DMA** experiments (see below). Ignored for other instruments. |
-| `description` | no | free text | Free-text description. If `measurement_profile` is missing, mfethuls will attempt to infer a profile from the description (e.g. "frequency sweep" → `oscillatory_frequency_sweep`). |
+| `description` | no | free text | Free-text description. |
 | any other column | no | any | Stored as metadata alongside the experiment. Useful for batch, operator, sample concentration, etc. |
 
 ---
@@ -42,13 +41,13 @@ These are optional and validated on load. Rows with malformed identifiers are sk
 | `uv_vis` | UV-Vis — Shimadzu | `UV_Vis/` | Instrument definition; `titrant` from the file name |
 | `uv_insitu` | UV-Vis in-situ — Ocean Insight Flame | `UV_Vis/` | Instrument definition; `timestamp` from the header date plus the milliseconds in the file name |
 | `fluorescence_insitu` | Fluorescence in-situ — Ocean Insight Flame | `Fluorescence/` | Instrument definition, same layout as `uv_insitu` |
-| `rheometer` | Rheometer — Anton Paar | `Rheology/` | Instrument definition; one table per interval, numbered in the `interval` column; `measurement_profile` recommended |
+| `rheometer` | Rheometer — Anton Paar | `Rheology/` | Instrument definition; one table per interval, numbered in the `interval` column |
 | `tga` | TGA | `TGA/` | Instrument definition: `.txt` text export and `.csv` export; `mass_pct` is % of the initial mass |
 | `tensile_tester` | Universal testing machine — ZwickRoell testXpert | `tensile_tester/` | Instrument definition, Excel `.xlsx`: lap shear (`strain_mm`, `shear_stress_mpa`) and tensile tests (`strain_pct`, `stress_mpa`); one curve per test sheet; `test_date` from the Results sheet. A workbook with several samples is one experiment (see below) |
 | `nmr` | NMR — Bruker | `NMR/` | Code parser. One dataset folder per experiment, as TopSpin writes it (`NMR/EXP014/1/pdata/1/1r`); `raw_data_filename` = the dataset folder. Every processed spectrum (`<expno>/pdata/<procno>`) is read once, named in `source_file` (`1/pdata/1`), with its `nucleus` and `solvent` on every row; parameters and title in `file_text` |
 | `ftir` | FTIR — Bruker | `FTIR/` | Instrument definition |
 | `sec` | SEC — Agilent | `SEC/` | Instrument definition; `detector_name` (ri, uv, ls, viscometer) from the file name |
-| `dma` | DMA — TA Q800 | `DMA/` | Instrument definition (column names from the `SigN` lines; time read in minutes); `measurement_profile` recommended |
+| `dma` | DMA — TA Q800 | `DMA/` | Instrument definition (column names from the `SigN` lines; time read in minutes) |
 | `saxs` | SAXS — Anton Paar | `SAXS/` | Instrument definition |
 | `ms` | MS — Bruker | `MS/` | Definition (`ms.json`); rows written twice left out; the `MS Peak List` stored in metadata (`tables.peak_list`) |
 
@@ -56,39 +55,9 @@ Instruments added by the lab (**⚙ Settings → Instruments**) are listed there
 
 ---
 
-## Measurement profiles (rheometer and DMA)
-
 **Your folder has another name?** The folders above are where each instrument looks by default. If yours is called differently (`DMA data`, `Rheometer 2024`), the app lists it under **Ingest** as a folder no instrument reads yet: open **Review & register** and choose the instrument (mfethuls suggests one when the folder's name says it), or change it later under **⚙ Settings → Instruments → Change an instrument's folder**. The choice is saved in the data folder (`.mfethuls/folders.json`), so everyone using it gets the same folders. A folder holds one kind of measurement: a folder another type of instrument reads can't be chosen.
 
-Rheometer and DMA experiments can contain data from several different measurement types in the same folder. The `measurement_profile` column tells mfethuls which schema to apply. Without it, the parser will attempt inference but may choose the wrong profile.
-
-### Rheometer profiles
-
-| `measurement_profile` value | What it means |
-|----------------------------|---------------|
-| `oscillatory_frequency_sweep` | Frequency sweep — ω vs G′, G″ |
-| `oscillatory_strain_sweep` | Amplitude sweep — strain % vs G′, G″ |
-| `oscillatory_time_sweep` | Time sweep — time vs G′, G″ |
-| `flow_curve` | Viscometry — shear rate vs stress, viscosity |
-
-### DMA profiles
-
-| `measurement_profile` value | What it means |
-|----------------------------|---------------|
-| `oscillatory_temperature_sweep` | Temperature ramp — T vs E′, E″, tan δ |
-| `oscillatory_frequency_sweep` | Frequency sweep — f vs E′, E″ |
-| `oscillatory_strain_sweep` | Amplitude sweep — strain vs E′, E″ |
-| `oscillatory_time_sweep` | Time sweep — time vs E′, E″ |
-
-The profile value is flexible — mfethuls accepts common synonyms and normalises them:
-
-```
-"frequency sweep"         → oscillatory_frequency_sweep
-"Frequency Sweep"         → oscillatory_frequency_sweep
-"oscillatory_freq_sweep"  → oscillatory_frequency_sweep
-"flow curve"              → flow_curve
-"temperature"             → oscillatory_temperature_sweep
-```
+**DMA and rheometer data need no extra column.** Their built-in plots read what each run swept from the data: the quantity that changes (temperature, frequency, strain, or shear rate for a flow curve) is the x-axis, and a run where only time changes is a time sweep. A `measurement_profile` column from older registries is kept as an ordinary column.
 
 If you are unsure, check the registry before ingesting: rows that do not validate are listed with the reason in the app's **Register new data** dialog, and `Registry.load(path).problems` lists them in Python.
 
@@ -152,7 +121,7 @@ Instead of typing rows by hand, let the Streamlit app find raw data that is not 
 - **A subfolder of a series instrument** (`UV_Vis/titration_A/`, Flame UV-Vis/fluorescence, NMR) is marked **one experiment**: ticking it registers all its files together, e.g. a titration or a time series (`raw_data_filename` = the folder name). Where another instrument reads its files one by one, they are listed under it too; ticking the folder and its files at once is flagged, so the data is not registered twice.
 - **Pre-filled:** `raw_data_filename`, `run_id`, the instrument when only one fits the folder, and the `name` (the file or folder name, made unique). When a folder is split and one of its files is named like the folder, that row's `raw_data_filename` is the file name with its extension (`LUB055.txt`), since the bare name means the whole folder.
 - **You choose** which rows to register by ticking **Register**; nothing is ticked at first.
-- **You fill in:** `sample_id`, the instrument where several share a folder (e.g. the DSC models in `DSC/`), `measurement_profile` for DMA and rheometer data, and any other columns your registry has.
+- **You fill in:** `sample_id`, the instrument where several share a folder (e.g. the DSC models in `DSC/`), and any other columns your registry has.
 
 **Validation** runs as you type, with the same checks as ingest. It also requires the instrument to be chosen, the raw data to be found exactly once, and the data to read as the chosen instrument's: the first file is test-read with that instrument's parser, so files of another instrument (say, Shimadzu UV-Vis files offered as in-situ Flame data) are flagged before they are registered. Ingest makes the same check on every file and stops with an error instead of storing data it could not read properly. Rows with problems are marked ✗ with the reason. Data that cannot be registered as found (for example the same file name in two folders) is listed under **Not proposed**, with the reason. Files next to the data that no instrument reads, such as plots, are listed under **Files that will not be read**. They don't stop a row from being registered, and a folder holding only such files isn't proposed.
 
@@ -191,14 +160,14 @@ From the command line: `mfethuls cleanup` shows the plan, and `mfethuls cleanup 
 A realistic multi-instrument registry for one research batch:
 
 ```
-name,instrument_name,sample_id,run_id,raw_data_filename,measurement_profile,description,batch,operator
+name,instrument_name,sample_id,run_id,raw_data_filename,description,batch,operator
 CL_dsc_001,dsc_mettler_toledo_v1,S001,R001,,,PB-2024-01,Maria
 CL_dsc_002,dsc_mettler_toledo_v1,S002,R001,,,PB-2024-01,Maria
 CL_dsc_002_repeat,dsc_mettler_toledo_v1,S002,R002,dsc_s002_run2,,PB-2024-01,Maria
 CL_tga_001,tga,S001,R001,,,PB-2024-01,Carlos
-CL_rheometer_freq,rheometer,S003,R001,,oscillatory_frequency_sweep,,PB-2024-01,Priya
-CL_rheometer_flow,rheometer,S003,R001,,flow_curve,viscometry at 25C,PB-2024-01,Priya
-CL_dma_temp,dma,S004,R001,,oscillatory_temperature_sweep,Tg measurement,PB-2024-01,Carlos
+CL_rheometer_freq,rheometer,S003,R001,,frequency sweep,PB-2024-01,Priya
+CL_rheometer_flow,rheometer,S003,R001,,viscometry at 25C,PB-2024-01,Priya
+CL_dma_temp,dma,S004,R001,,Tg measurement,PB-2024-01,Carlos
 CL_ftir_001,ftir,S001,R001,,,PB-2024-01,Maria
 CL_sec_001,sec,S002,R001,,,PB-2024-01,Priya
 CL_nmr_001,nmr,S001,R001,,,PB-2024-01,Maria
@@ -213,7 +182,7 @@ CL_pending,,,,,Planned — not yet run,,
 - `CL_dsc_002_repeat` uses an explicit `raw_data_filename = dsc_s002_run2` because the raw file has a different name to the registry entry.
 - `CL_pending` has no `instrument_name` — this row will be skipped at ingest with a warning. Keep it in the registry as a placeholder and fill it in before ingesting.
 - `batch` and `operator` are custom columns; they are stored as metadata alongside each experiment.
-- `CL_rheometer_flow` uses a free-text `description` instead of `measurement_profile`. mfethuls infers `flow_curve` from the word "viscometry". Explicit `measurement_profile` is preferred where possible.
+- The rheometer and DMA rows need nothing extra: their plots see from the data that `CL_rheometer_flow` is a flow curve and `CL_dma_temp` a temperature sweep. The `description` is only for people.
 
 ---
 

@@ -310,3 +310,39 @@ def test_each_test_gets_its_date_from_its_results_row(tmp_path):
     assert str(dates["LUB640_1"]) == "2026-08-12 16:00:00+00:00"
     assert dataset.metadata["file_text"][path.name]["values"]["test_date"] == {
         "LUB640": "2026-08-12T15:53:01+00:00", "LUB640_1": "2026-08-12T16:00:00+00:00"}
+
+
+def test_the_results_sheet_is_kept_as_a_table_of_numbers(tmp_path):
+    """One row per specimen, named by its header lines (name and unit), keyed by the specimen."""
+    path = _multi_test_workbook(tmp_path / "LUB640toLUB641.xlsx", specimens=("LUB640", "LUB641"))
+    definition = parse_definition({
+        "name": "tensile_tester", "type": "tensile", "model": "zwick", "folder_name": "tensile_tester",
+        "name_from": "sheet",
+        "file": {"extensions": [".xlsx"], "header": {"starts_at": "Elongation", "rows": 2}},
+        "columns": [{"source": "Elongation %", "quantity": "strain", "unit": "%"}],
+        "tables": [{"name": "results", "sheet": "Results", "header": {"rows": 2}, "columns": ["specimen"]}],
+    })
+    dataset = _parse(definition, path)
+    assert dataset.metadata["tables"]["results"][path.name] == [
+        {"specimen": "LUB640", "sM kPa": 20.0, "eB %": 300.0},
+        {"specimen": "LUB641", "sM kPa": 21.0, "eB %": 301.0},
+    ]
+    assert "sheet: Results" in dataset.metadata["file_text"][path.name]  # the text stays too
+
+
+@pytest.mark.parametrize(("table", "problem"), [
+    ({"name": "r", "sheet": "Results", "header": {"rows": 5}}, "'header' must be"),
+    ({"name": "r", "sheet": "", "header": {"rows": 2}}, "'sheet' must be the sheet's name"),
+    ({"name": "r", "sheet": "Results"}, "'starts_at' must be text"),
+])
+def test_results_tables_are_checked(table, problem):
+    with pytest.raises(DefinitionError) as info:
+        parse_definition({**TENSILE, "tables": [table]})
+    assert any(problem in line for line in info.value.problems), info.value.problems
+
+
+def test_a_sheet_table_needs_a_workbook():
+    with pytest.raises(DefinitionError) as info:
+        parse_definition({**TENSILE, "file": {"extensions": [".txt"]},
+                          "tables": [{"name": "r", "sheet": "Results", "header": {"rows": 2}}]})
+    assert any("'sheet' only goes with workbooks" in line for line in info.value.problems)

@@ -1,6 +1,6 @@
 """Registry validator: fail-fast checks before parsing.
 
-Validates that instrument, model, profile, and schema expectations are
+Validates that instrument, model and schema expectations are
 coherent before attempting to parse, reducing runtime surprises.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -49,92 +49,6 @@ def _get_instrument_entry(name: str) -> Optional[Dict[str, Any]]:
         if isinstance(entry_name, str) and entry_name.casefold() == name_norm:
             return entry
     return None
-
-
-def _load_canonical_profiles_from_schema(
-    schema: Dict[str, Any], instrument_model: Optional[str] = None
-) -> set[str]:
-    """Collect canonical profile keys from global and model-specific schema layers."""
-
-    global_profiles = schema.get("profiles", {}) if isinstance(schema.get("profiles", {}), dict) else {}
-    return set(global_profiles)
-
-
-def _profile_tokens(profile: str) -> set[str]:
-    """Split a profile string into comparable tokens."""
-
-    return {token for token in re.findall(r"[a-z0-9]+", str(profile).casefold()) if token}
-
-
-def _profile_similarity_matches(registry_profile: str, canonical_profile: str) -> bool:
-    """Return True when the registry profile is a token subset of the canonical profile."""
-
-    registry_tokens = _profile_tokens(registry_profile)
-    canonical_tokens = _profile_tokens(canonical_profile)
-    if not registry_tokens or not canonical_tokens:
-        return False
-    return registry_tokens.issubset(canonical_tokens)
-
-
-def _match_canonical_profile(
-    registry_profile: Optional[str], canonical_profiles: Iterable[str]
-) -> Optional[str]:
-    """Match a registry profile to a canonical schema profile conservatively."""
-
-    if not registry_profile:
-        return None
-
-    known_profiles = [str(profile) for profile in canonical_profiles]
-    if not known_profiles:
-        return None
-
-    if registry_profile in known_profiles:
-        return registry_profile
-
-    profile_cf = registry_profile.casefold()
-    for canonical in known_profiles:
-        if canonical.casefold() == profile_cf:
-            return canonical
-
-    normalized = profile_cf.replace(" ", "_").replace("-", "_")
-    for canonical in known_profiles:
-        if canonical.casefold() == normalized:
-            return canonical
-
-    subset_matches = [canonical for canonical in known_profiles if _profile_similarity_matches(profile_cf, canonical)]
-    if subset_matches:
-        subset_matches.sort(key=lambda canonical: (len(_profile_tokens(canonical)), canonical.casefold()))
-        return subset_matches[0]
-
-    return None
-
-
-def infer_canonical_profile_from_registry_profile(
-    instrument_type: str, registry_profile: Optional[str], instrument_model: Optional[str] = None
-) -> Optional[str]:
-    """Map a registry-provided measurement_profile to a canonical schema profile key.
-
-    Canonicalization happens in parsers/datasets, not at registry load time.
-    The registry only stores the raw registry_measurement_profile value.
-
-    Matching strategy (conservative):
-    1. Exact match (registry_profile in canonical_profiles)
-    2. Case-insensitive match
-    3. Underscore-normalized match (spaces/hyphens → underscores)
-    4. Token subset match (all registry tokens are in canonical)
-
-    Returns canonical profile name, or None if no match found.
-    """
-
-    if not registry_profile:
-        return None
-
-    schema = _load_instrument_schema(instrument_type)
-    if not schema:
-        return None
-
-    canonical_profiles = _load_canonical_profiles_from_schema(schema, instrument_model)
-    return _match_canonical_profile(registry_profile, canonical_profiles)
 
 
 class RegistryValidationError(ValueError):
@@ -199,13 +113,6 @@ class RegistryValidator:
                 f"Expected: schemas/{instr_type}.json"
             )
             return False, errors
-
-        # 5. For profile-driven instruments, validate profile and requirements
-        if instr_type in {"rheometer", "dma"}:
-            profile_errors = self._validate_measurement_profile(
-                experiment, instr_type, instr_model, schema
-            )
-            errors.extend(profile_errors)
 
         return len(errors) == 0, errors
 
@@ -286,57 +193,6 @@ class RegistryValidator:
                 "Expected pattern R### (e.g. R001)."
             )
         return run_id
-
-    def _validate_measurement_profile(
-        self,
-        experiment: Experiment,
-        instr_type: str,
-        instr_model: Optional[str],
-        schema: Dict[str, Any],
-    ) -> List[str]:
-        """Validate measurement profile for profile-driven instruments.
-
-        Checks that registry_measurement_profile (raw registry value) can be
-        canonicalized to a known schema profile.
-        """
-        errors: List[str] = []
-        registry_profile = experiment.metadata.get("registry_measurement_profile")
-        canonical_profiles = _load_canonical_profiles_from_schema(schema)
-
-        if not registry_profile:
-            logger.warning(
-                "No registry_measurement_profile provided for %s experiment %s. "
-                "Schema normalization will use profile inference.",
-                instr_type,
-                experiment.name,
-            )
-            return errors
-
-        # Check if registry profile can be canonicalized
-        matched_profile = _match_canonical_profile(registry_profile, canonical_profiles)
-        if matched_profile is None:
-            available = sorted(canonical_profiles)
-            logger.warning(
-                "Could not canonicalize registry_measurement_profile '%s' for %s experiment %s. "
-                "Available profiles: %s. Parsing will attempt inference from data.",
-                registry_profile,
-                instr_type,
-                experiment.name,
-                available,
-            )
-            return errors
-
-        # Check that profile has required columns defined
-        profile_def = schema.get("profiles", {}).get(matched_profile, {}) if isinstance(schema.get("profiles", {}), dict) else {}
-        required_cols = profile_def.get("required_columns", [])
-        if not required_cols:
-            logger.warning(
-                "Profile '%s' for %s has no required_columns defined.",
-                matched_profile,
-                instr_type,
-            )
-
-        return errors
 
     def _list_instrument_names(self) -> str:
         """Return comma-separated list of available instrument names."""
@@ -434,7 +290,7 @@ def validate_registry_dataframe(
     """Validate all rows in an uploaded registry spreadsheet.
 
     Uses the same rules as pre-parse validation (instrument config, parser,
-    schema, profiles) without mutating the in-memory experiment registry.
+    schema) without mutating the in-memory experiment registry.
     """
 
     from mfethuls.experiments import experiment_from_registry_record

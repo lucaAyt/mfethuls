@@ -80,7 +80,6 @@ def test_plotly_dma_uses_log_axes():
         data=pd.DataFrame(
             {"frequency_hz": [0.1, 1.0, 10.0], "storage_modulus_mpa": [10, 100, 1000], "loss_modulus_mpa": [5, 50, 500]}
         ),
-        metadata={"measurement_profile": "oscillatory_frequency_sweep"},
     )
 
     fig = plot_dma(dataset, backend="plotly")

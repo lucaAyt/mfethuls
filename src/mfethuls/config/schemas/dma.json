@@ -9,35 +9,5 @@
     "storage_modulus_mpa": "float64",
     "loss_modulus_mpa": "float64",
     "tan_delta": "float64"
-  },
-  "profiles": {
-    "oscillatory_temperature_sweep": {
-      "required_columns": [
-        "temperature_C",
-        "storage_modulus_mpa",
-        "loss_modulus_mpa"
-      ]
-    },
-    "oscillatory_frequency_sweep": {
-      "required_columns": [
-        "frequency_hz",
-        "storage_modulus_mpa",
-        "loss_modulus_mpa"
-      ]
-    },
-    "oscillatory_strain_sweep": {
-      "required_columns": [
-        "strain_pct",
-        "storage_modulus_mpa",
-        "loss_modulus_mpa"
-      ]
-    },
-    "oscillatory_time_sweep": {
-      "required_columns": [
-        "time_s",
-        "storage_modulus_mpa",
-        "loss_modulus_mpa"
-      ]
-    }
   }
 }

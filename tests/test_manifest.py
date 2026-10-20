@@ -383,3 +383,20 @@ def test_find_data_files_collects_an_experiment_folder_with_its_subfolders(tmp_p
     assert parent == str(tmp_path / "EXP014")
     assert sorted(os.path.relpath(f, parent).replace(os.sep, "/") for f in files) == [
         "1/acqus", "1/fid", "1/pdata/1/1r", "1/pdata/1/procs"]
+
+
+def test_a_series_is_listed_in_numeric_order(tmp_path):
+    """One file per spectrum: poly3__2 comes before poly3__10, as it was measured."""
+    series = tmp_path / "Fluorescence" / "poly3"
+    series.mkdir(parents=True)
+    for i in (0, 1, 2, 10, 11, 20):
+        (series / f"poly3__{i}__18-11-{i:02d}.txt").write_text("x")
+    _, files = find_data_files(str(tmp_path / "Fluorescence"), "poly3")
+    assert [os.path.basename(f).split("__")[1] for f in files] == ["0", "1", "2", "10", "11", "20"]
+
+
+def test_natural_key_compares_numbers_as_numbers():
+    from mfethuls.naming import natural_key
+
+    names = ["run10.txt", "Run2.txt", "run1.txt", "run1a.txt"]
+    assert sorted(names, key=natural_key) == ["run1.txt", "run1a.txt", "Run2.txt", "run10.txt"]

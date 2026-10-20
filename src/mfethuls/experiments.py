@@ -35,34 +35,6 @@ def resolve_registry_path(path: Optional[str] = None) -> str:
     )
 
 
-def _infer_measurement_profile_from_text(text: Optional[str]) -> Optional[str]:
-    """Infer a measurement profile from free-text description.
-
-    This produces a raw registry profile value (not canonical).
-    The same profile names are used for rheometer and DMA where the intent is
-    comparable (frequency, strain, or temperature sweep).
-    Canonicalization happens later in the parser layer.
-    """
-
-    if text is None:
-        return None
-
-    value = str(text).strip().lower()
-    if not value:
-        return None
-
-    if any(token in value for token in ("freq", "frequency", "oscill")):
-        return "oscillatory_frequency_sweep"
-    if any(token in value for token in ("temp", "temperature")):
-        return "oscillatory_temperature_sweep"
-    if any(token in value for token in ("strain", "amplitude")):
-        return "oscillatory_strain_sweep"
-    if any(token in value for token in ("flow", "viscos", "shear")):
-        return "flow_curve"
-
-    return None
-
-
 @dataclass
 class Experiment:
     """Represents a single experiment definition.
@@ -131,15 +103,10 @@ def experiment_from_registry_record(rec: dict) -> RegistryRowResult:
     raw_data_filename = _normalize_optional_str(rec.get("raw_data_filename")) or name
 
     description = _normalize_optional_str(rec.get("description"))
-    explicit_measurement_profile = _normalize_optional_str(rec.get("measurement_profile"))
     sample_id = _normalize_optional_str(rec.get("sample_id"))
     raw_run_id = _normalize_optional_str(rec.get("run_id"))
     run_id = raw_run_id or "R001"
     instrument_name = _normalize_optional_str(rec.get("instrument_name"))
-
-    measurement_profile = explicit_measurement_profile or _infer_measurement_profile_from_text(
-        description
-    )
 
     if instrument_name is None:
         warnings.append(
@@ -154,7 +121,6 @@ def experiment_from_registry_record(rec: dict) -> RegistryRowResult:
         "sample_id",
         "run_id",
         "description",
-        "measurement_profile",
     }
     for key, value in rec.items():
         if key in _known_keys:
@@ -163,8 +129,6 @@ def experiment_from_registry_record(rec: dict) -> RegistryRowResult:
 
     if description is not None:
         metadata["description"] = description
-    if measurement_profile is not None:
-        metadata["registry_measurement_profile"] = measurement_profile
 
     try:
         exp = Experiment(
@@ -265,8 +229,7 @@ class Registry:
         Required columns: ``name`` and ``instrument_name``. Optional:
         ``raw_data_filename`` (stem of the raw file; defaults to ``name``),
         ``sample_id`` (e.g. S001), ``run_id`` (e.g. R001, default R001),
-        ``measurement_profile``, ``description`` (used to infer a profile when
-        none is given). Any other column is kept in ``Experiment.metadata``.
+        ``description``. Any other column is kept in ``Experiment.metadata``.
 
         Invalid rows are skipped and recorded in ``problems``; both skipped rows
         and warnings are also logged.

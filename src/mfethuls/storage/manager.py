@@ -51,7 +51,6 @@ def _prepare_registration_metadata(
         rows=record.rows,
         cols=int(dataset.data.shape[1]),
         schema_version=metadata.get("schema_version"),
-        measurement_profile=record.measurement_profile,
         schema_normalization=metadata.get("schema_normalization"),
         mfethuls_version=metadata.get("mfethuls_version") or _get_package_version(),
         provenance=provenance,

@@ -58,7 +58,6 @@ def test_dma_temperature_sweep_keeps_linear_x():
         data=pd.DataFrame(
             {"temperature_C": [20, 40], "storage_modulus_mpa": [100, 50], "loss_modulus_mpa": [10, 20]}
         ),
-        metadata={"measurement_profile": "oscillatory_temperature_sweep"},
     )
 
     panel = build_dataset_spec(dataset).panel
