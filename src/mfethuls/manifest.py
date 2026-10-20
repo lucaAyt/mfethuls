@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from filelock import FileLock
 
 from ._files import replace_with_retry
-from .naming import stem_key
+from .naming import natural_key, stem_key
 
 logger = logging.getLogger(__name__)
 
@@ -83,12 +83,12 @@ def content_hash(paths: list[str]) -> str:
 def _collect_files(directory: str) -> list[str]:
     """Every file of a folder-per-experiment, also in its subfolders (Bruker NMR keeps the
     spectrum in ``<expno>/pdata/<procno>/``). Hidden folders, parquet files and the
-    manifest are left out."""
+    manifest are left out. Numbers in names sort as numbers (a series' ``__2`` before ``__10``)."""
     found = []
     for root, dirs, files in os.walk(directory):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
         found.extend(os.path.join(root, f) for f in files if not f.endswith(".parquet") and f != MANIFEST_FILENAME)
-    return sorted(found)
+    return sorted(found, key=natural_key)
 
 
 def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[str, list[str]]:
@@ -164,7 +164,7 @@ def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[
             if files:
                 return folder, files
             parent_dir, matched = next(iter(file_matches.items()))
-            return parent_dir, sorted(matched)
+            return parent_dir, sorted(matched, key=natural_key)
         matched = next(iter(file_matches.values()))
         raise ValueError(
             f"raw_data_filename {raw_data_filename!r} matches both a file and a directory:\n"
@@ -176,7 +176,7 @@ def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[
 
     if file_matches:
         parent_dir, matched = next(iter(file_matches.items()))
-        return parent_dir, sorted(matched)
+        return parent_dir, sorted(matched, key=natural_key)
 
     if dir_matched_folders:
         folder = dir_matched_folders[0]

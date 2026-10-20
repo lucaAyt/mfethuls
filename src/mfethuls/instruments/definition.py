@@ -71,7 +71,7 @@ _FORMAT_KEYS = {"label", "file", "columns"}
 _FILE_KEYS = {"extensions", "encoding", "delimiter", "decimal", "header", "data_ends", "comment", "contains",
               "segment_lines", "blocks", "sheet", "duplicate_rows"}
 DUPLICATE_ROWS = ("keep", "drop")
-_TABLE_KEYS = {"name", "starts_at", "ends_at", "columns"}
+_TABLE_KEYS = {"name", "starts_at", "ends_at", "columns", "sheet", "header"}
 _BLOCK_KEYS = {"starts_at", "label", "column"}
 # "auto": UTF-8, else Windows cp1252 (what most instrument software writes).
 AUTO_ENCODING = "auto"
@@ -185,12 +185,21 @@ class TextTable:
     containing ``ends_at`` (or the end of that text), that start with a number. They
     are stored in the dataset's metadata ``tables[name][file]`` as records named by
     ``columns`` (further fields: ``column_3``, ...). The lines also stay in the file text.
+
+    With ``header_rows``, the table has its own header lines (names, then units),
+    starting at the ``starts_at`` line (or the first line), and every line below
+    them is a row, whatever its first field: a workbook's results sheet with one row
+    per specimen. Fields are named as the data's columns are (``"sM kPa"``);
+    ``columns`` names those without a header, in order. ``sheet`` (workbooks) looks
+    only in that sheet.
     """
 
     name: str
-    starts_at: str
+    starts_at: Optional[str] = None
     columns: Tuple[str, ...] = ()
     ends_at: Optional[str] = None
+    sheet: Optional[str] = None
+    header_rows: int = 0
 
 
 @dataclass(frozen=True)
@@ -372,7 +381,7 @@ def parse_definition(data: Dict[str, Any], source: Optional[str] = None) -> Inst
     for column in sorted({c for c in captured if captured.count(c) > 1}):
         problems.append(f"the column {column!r} is filled twice by from_file_name / from_header")
 
-    tables = _parse_tables(data.get("tables"), problems)
+    tables = _parse_tables(data.get("tables"), problems, workbooks=any(f.file.workbook for f in formats))
 
     if problems:
         raise DefinitionError(problems, source)
@@ -442,7 +451,7 @@ def _parse_values(data: Dict[str, Any], key: str, problems: List[str]) -> Tuple[
     return tuple(out)
 
 
-def _parse_tables(raw: Any, problems: List[str]) -> Tuple[TextTable, ...]:
+def _parse_tables(raw: Any, problems: List[str], workbooks: bool = False) -> Tuple[TextTable, ...]:
     """``tables``: second tables in the text around the data, kept as metadata."""
     if raw is None:
         return ()
@@ -459,7 +468,25 @@ def _parse_tables(raw: Any, problems: List[str]) -> Tuple[TextTable, ...]:
         where = f"tables {i} ({item['name']})"
         _unknown(item, _TABLE_KEYS, f"{where}: ", problems)
         starts_at, ends_at, columns = item.get("starts_at"), item.get("ends_at"), item.get("columns", [])
-        if not (isinstance(starts_at, str) and starts_at.strip()):
+        sheet, header = item.get("sheet"), item.get("header")
+        header_rows = 0
+        if header is not None:
+            if not (isinstance(header, dict) and set(header) <= {"rows"} and header.get("rows") in (1, 2, 3)):
+                problems.append(f"{where}: 'header' must be {{\"rows\": 1}} (names) or {{\"rows\": 2}} (names, then units)")
+                continue
+            header_rows = header["rows"]
+        if sheet is not None:
+            if not (isinstance(sheet, str) and sheet.strip()):
+                problems.append(f"{where}: 'sheet' must be the sheet's name, e.g. \"Results\"")
+                continue
+            if not workbooks:
+                problems.append(f"{where}: 'sheet' only goes with workbooks (.xlsx)")
+                continue
+        if starts_at is None and not (sheet and header_rows):
+            problems.append(f"{where}: 'starts_at' must be text on the line before the table's rows "
+                            "(or on its header line); a table with a 'sheet' and a 'header' needs none")
+            continue
+        if starts_at is not None and not (isinstance(starts_at, str) and starts_at.strip()):
             problems.append(f"{where}: 'starts_at' must be text on the line before the table's rows")
             continue
         if ends_at is not None and not (isinstance(ends_at, str) and ends_at.strip()):
@@ -471,7 +498,7 @@ def _parse_tables(raw: Any, problems: List[str]) -> Tuple[TextTable, ...]:
         if any(t.name == item["name"] for t in out):
             problems.append(f"{where}: another table has this name")
             continue
-        out.append(TextTable(item["name"], starts_at, tuple(columns), ends_at))
+        out.append(TextTable(item["name"], starts_at, tuple(columns), ends_at, sheet, header_rows))
     return tuple(out)
 
 

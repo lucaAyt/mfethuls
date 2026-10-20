@@ -75,7 +75,6 @@ class DatasetMetadata(TypedDict, total=False):
     cols: int
 
     schema_version: Optional[str]
-    measurement_profile: Optional[str]
     schema_normalization: Optional[dict]
 
     mfethuls_version: Optional[str]

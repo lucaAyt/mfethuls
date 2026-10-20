@@ -47,7 +47,6 @@ REGISTRY_COLUMNS = [
     "sample_id",
     "run_id",
     "raw_data_filename",
-    "measurement_profile",
     "description",
 ]
 _IGNORED_NAMES = {MANIFEST_FILENAME, ".gitkeep"}

@@ -35,55 +35,13 @@ class TestRegistryValidator:
         assert not is_valid
         assert any("is not a known instrument" in err for err in errors)
 
-    def test_validate_rheometer_with_valid_profile(self):
+    def test_validate_rheometer_needs_no_measurement_profile(self):
+        """Plots read what the run swept from the data; an old profile column is only metadata."""
         validator = RegistryValidator()
-        exp = Experiment(
-            name="test_rheometer",
-            instrument_name="rheometer",
-            metadata={"measurement_profile": "oscillatory_frequency_sweep"},
-        )
-        is_valid, errors = validator.validate_experiment(exp)
-        assert is_valid, f"Validation failed with errors: {errors}"
-
-    def test_validate_rheometer_with_profile_similarity_match(self):
-        validator = RegistryValidator()
-        exp = Experiment(
-            name="test_rheometer_similarity",
-            instrument_name="rheometer",
-            metadata={"measurement_profile": "Oscillatory Frequency Sweep"},
-        )
-        is_valid, errors = validator.validate_experiment(exp)
-        assert is_valid, f"Validation failed with errors: {errors}"
-
-    def test_validate_rheometer_with_profile_subset_similarity_match(self):
-        validator = RegistryValidator()
-        exp = Experiment(
-            name="test_rheometer_subset_similarity",
-            instrument_name="rheometer",
-            metadata={"measurement_profile": "frequency sweep"},
-        )
-        is_valid, errors = validator.validate_experiment(exp)
-        assert is_valid, f"Validation failed with errors: {errors}"
-
-    def test_validate_rheometer_with_invalid_profile(self):
-        validator = RegistryValidator()
-        exp = Experiment(
-            name="test_rheometer",
-            instrument_name="rheometer",
-            metadata={"registry_measurement_profile": "nonexistent_profile"},
-        )
-        is_valid, errors = validator.validate_experiment(exp)
-        assert is_valid
-
-    def test_validate_rheometer_rejects_non_subset_profile(self):
-        validator = RegistryValidator()
-        exp = Experiment(
-            name="test_rheometer_non_subset",
-            instrument_name="rheometer",
-            metadata={"registry_measurement_profile": "frequency sweep extra"},
-        )
-        is_valid, errors = validator.validate_experiment(exp)
-        assert is_valid
+        for metadata in ({}, {"measurement_profile": "nonexistent_profile"}):
+            exp = Experiment(name="test_rheometer", instrument_name="rheometer", metadata=metadata)
+            is_valid, errors = validator.validate_experiment(exp)
+            assert is_valid, f"Validation failed with errors: {errors}"
 
     def test_a_renamed_instrument_names_its_new_name(self):
         exp = Experiment(name="old_dsc", instrument_name="dsc", sample_id="S001")

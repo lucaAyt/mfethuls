@@ -44,3 +44,16 @@ def view_name(basename: str) -> str:
 def view_key(basename: str) -> str:
     """What two experiments must not share: their view name, ignoring case."""
     return view_name(basename).casefold()
+
+
+_DIGITS = re.compile(r"(\d+)")
+
+
+def natural_key(path: str) -> tuple:
+    """Sort key putting numbers in file names in numeric order: ``poly3__2`` before ``poly3__10``.
+
+    A series written one file per spectrum (``poly3__0``, ``poly3__1``, ..., ``poly3__10``) is
+    then read in the order it was measured. Text compares without case.
+    """
+    return tuple((0, int(part), "") if part.isdigit() else (1, 0, part.casefold())
+                 for part in _DIGITS.split(str(path)))

@@ -257,22 +257,13 @@ def _resolve_plot_kind(dataset: Dataset, kind: Optional[str]) -> Optional[str]:
     if kind is not None:
         return kind
 
-    from .dma import is_supported_dma_profile
-    from .rheology import is_supported_rheology_profile
-
     metadata = dataset.metadata if isinstance(dataset.metadata, dict) else {}
     columns = set(dataset.data.columns)
     instrument_type = str(metadata.get("instrument_type") or "").strip().casefold()
-    measurement_profile = str(metadata.get("measurement_profile") or "").strip()
 
     instrument_type = _FAMILY_OF_TYPE.get(instrument_type, instrument_type)
     if instrument_type in _PLOT_FAMILIES:
         return instrument_type
-
-    if is_supported_dma_profile(measurement_profile):
-        return "dma"
-    if is_supported_rheology_profile(measurement_profile):
-        return "rheology"
 
     if {"wavelength_nm", "emission_counts"}.issubset(columns):
         return "fluorescence"
@@ -366,7 +357,7 @@ def build_dataset_spec(
     from .tga import build_tga_spec
     from .uv_vis import build_uv_vis_spec
 
-    # Families that take extra keyword arguments (signal, profile, detector) get **kwargs.
+    # Families that take extra keyword arguments (signal, x, detector) get **kwargs.
     builders = {
         "uv_vis": (build_uv_vis_spec, True),
         "fluorescence": (build_fluorescence_spec, True),

@@ -48,7 +48,6 @@ def _sidecar(storage_path: Path) -> None:
                 "instrument_model": "mettler_toledo_v1",
                 "sample_id": "S001",
                 "run_id": "R001",
-                "measurement_profile": None,
             }
         ),
         encoding="utf8",
@@ -67,7 +66,7 @@ def test_record_from_experiment_and_dataset_metadata():
     assert record.fields() == {
         "experiment_id": "abc123", "experiment_name": "LB_dsc_001", "raw_data_filename": "poly1",
         "instrument_name": "dsc_mettler_toledo_v1", "instrument_type": "dsc", "instrument_model": "mettler_toledo_v1",
-        "sample_id": "S001", "run_id": "R001", "measurement_profile": None, "rows": 42,
+        "sample_id": "S001", "run_id": "R001", "rows": 42,
         "reader_fingerprint": None,
     }
 

@@ -59,8 +59,8 @@ fig, ax = plot_ftir(dataset, signal="transmittance_pct")
 | FTIR | Wavenumber, high to low | Absorbance or transmittance | |
 | UV/Vis | Wavelength | Absorbance or transmittance | |
 | Fluorescence | Wavelength | Emission intensity | Spectra series are coloured by time (see below) |
-| DMA | Depends on the measurement profile | Storage and loss modulus | Log scales, except a linear time or temperature axis |
-| Rheology | Depends on the measurement profile | G′, G″, or stress and viscosity | Log scales, except a linear time axis |
+| DMA | What the run swept, read from the data: temperature, frequency, strain, else time | Storage and loss modulus | Log scales, except a linear time or temperature axis |
+| Rheology | What the run swept: shear rate (a flow curve), frequency, strain, temperature, else time | G′, G″, or stress and viscosity for a flow curve | Log scales, except a linear time or temperature axis |
 | SEC | Retention time | Detector response | One line per detector |
 | MS | m/z | Intensity | |
 | NMR | Chemical shift, high to low | Intensity | One panel per nucleus (¹H first, then ¹³C, …), its axis naming the nucleus; in comparisons each experiment keeps its colour in every panel |

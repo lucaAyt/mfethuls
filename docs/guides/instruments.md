@@ -33,9 +33,15 @@ The definition is saved in the data folder, in `.mfethuls/instruments/<name>.jso
 
 Then register and ingest its data as usual.
 
+### Editing an instrument
+
+**⚙ Settings → Instruments** lists the lab's instruments, each with **Edit** and **Remove**. **Edit** opens the same form, filled in with the saved definition and with **Adjust details** open: change what was wrong (the header lines, a column's unit, the end of the table) and the result is checked again, against the file the instrument was made from and other files in its folder, before **Save changes**. Its name stays, since registry rows use it; to rename an instrument, add it again under the new name. Settings the form does not show (such as `tables`) are kept as they are.
+
+Data already ingested keeps the earlier reading until it is read again: ingesting it again does that, and **⚙ Settings → Clean up** offers **Read again** for every experiment the instrument read before the change.
+
 ### Removing an instrument
 
-**⚙ Settings → Instruments** lists the lab's instruments, each with **Remove**. It first says how many registry rows and ingested experiments use the instrument, then moves its files to `.mfethuls/instruments/removed/<date-time>/`. Nothing is deleted:
+**⚙ Settings → Instruments** lists the lab's instruments, each with **Edit** and **Remove**. It first says how many registry rows and ingested experiments use the instrument, then moves its files to `.mfethuls/instruments/removed/<date-time>/`. Nothing is deleted:
 
 - ingested data stays where it is;
 - registry rows that use the instrument can't be ingested again until an instrument reads them (Clean up never forgets their data because of that);
@@ -101,7 +107,7 @@ A definition for it:
 | `name_from` | `file` (default), `folder`, or `sheet`: what each file's rows (its curve) are named after. `sheet` is for workbooks holding one test per sheet; a workbook with a single test keeps the file name. |
 | `from_file_name` | Columns filled from the file name: `[{"column": "titrant", "pattern": "_0*([^_]+)$"}]` puts what follows the last underscore (without leading zeros) in `titrant`. Optional: `type` (`text`, `number`, `datetime`), `values` to turn codes into words (`{"ri": "^RID", "uv": "^(VWD\|DAD)"}`; a code matching none is stored as it is) and, for date-times, `timezone`. |
 | `from_header` | The same, from the text around the table (the first line that matches, searched above the table first, then below it and in the other sheets of a workbook): a sample weight, a date. A `datetime` in local time needs its `timezone` (`Europe/Zurich`); it is stored in UTC. Dates Excel saved as plain numbers (`46246.745`) are read too. In a workbook with one test per sheet, `{sheet}` in the pattern stands for each test's sheet name, so each test gets the value from its own row of a results sheet. Each value is a column and is also listed in the metadata (`file_text` → `values`). |
-| `tables` | Second tables in the text around the data (a peak list), kept in the metadata `tables[name][file]`: `{"name", "starts_at", "ends_at", "columns"}`. See [A second table, and rows written twice](#a-second-table-and-rows-written-twice). |
+| `tables` | Second tables in the text around the data (a peak list), kept in the metadata `tables[name][file]`: `{"name", "starts_at", "ends_at", "columns"}`. See [A second table, and rows written twice](#a-second-table-and-rows-written-twice). A workbook's results sheet, with its own header lines: `{"name", "sheet", "header": {"rows": 2}, "columns"}` (see [Excel workbooks](#excel-workbooks)). |
 | `check` | Written by mfethuls when saving: the sample file and what it read. |
 
 The full list of quantities, their standard columns and accepted units: `python -c "from mfethuls.instruments.spec import quantity_table; print(quantity_table())"`. Units are case-sensitive (`MPa` is not `mPa`).
@@ -185,8 +191,9 @@ A workbook (`.xlsx`) is read sheet by sheet, each row as tab-separated cells, so
 - **Which sheet.** `file.sheet` picks one by name or number (`1` = first, `-1` = last). Without it, **every sheet containing `header.starts_at`** is read, and each row gets a `sheet` column. Instrument software often writes one test per sheet, named after the specimen, and none of them is skipped. Sheet names that follow the sample change from file to file, so rely on `header.starts_at` or a number, never a sheet name.
 - **Nothing is dropped.** The other sheets (parameters, results, statistics) are kept as text in the metadata, under `file_text` → `sheet: <name>`.
 - **One curve per test.** With `"name_from": "sheet"`, each test sheet is its own curve, named after its sheet.
+- **A results sheet as numbers.** A sheet with one row per specimen under its own header lines (strength, modulus, dimensions) can also be kept as a table of numbers with `tables`: `{"name": "results", "sheet": "Results", "header": {"rows": 2}, "columns": ["specimen"]}`. Each row becomes a record whose fields are named like data columns, name and unit joined (`"sM kPa"`, `"eB %"`); `columns` names the fields without a header, here the specimen name in the first column. Empty cells are left out. The records are in the metadata under `tables` → `results` → the file's name, and the sheet's text stays in `file_text`.
 
-The built-in tensile tester (`tensile_tester.json`, ZwickRoell testXpert exports) shows all of it. It has two layouts in one definition: lap-shear tests (Strain in mm, Shearing stress in MPa) and tensile tests (Elongation in %, and "Standard force" in kPa, which is a stress). Each test takes its date from its own row of the Results sheet:
+The built-in tensile tester (`tensile_tester.json`, ZwickRoell testXpert exports) shows all of it. It has two layouts in one definition: lap-shear tests (Strain in mm, Shearing stress in MPa) and tensile tests (Elongation in %, and "Standard force" in kPa, which is a stress). Each test takes its date from its own row of the Results sheet, and the whole Results sheet is kept as the `results` table:
 
 ```json
 "name_from": "sheet",
@@ -202,7 +209,18 @@ The built-in tensile tester (`tensile_tester.json`, ZwickRoell testXpert exports
 ],
 "from_header": [
   { "column": "test_date", "pattern": "^{sheet}\\t([0-9]+\\.[0-9]+)\\t", "type": "datetime", "timezone": "Europe/Zurich" }
+],
+"tables": [
+  { "name": "results", "sheet": "Results", "header": { "rows": 2 }, "columns": ["specimen"] }
 ]
+```
+
+`dataset.metadata["tables"]["results"]["LUB645.xlsx"]` is then one record per specimen:
+
+```python
+[{"specimen": "LUB645", "Date/Clock time": 46246.7499, "L0 mm": 13.48, "Et kPa": 129.66,
+  "sM kPa": 11.57, "eM %": 353.30, "sB MPa": 0.00088, "eB %": 596.47, "h mm": 0.4, "b mm": 3.73, "A0 mm²": 1.492},
+ ...]
 ```
 
 #### Several samples in one workbook: current limits

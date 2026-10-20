@@ -1,10 +1,10 @@
-"""Check a parsed table against its instrument type's schema (config/schemas): required columns, dtypes, profiles."""
+"""Check a parsed table against its instrument type's schema (config/schemas): required columns and dtypes."""
 
 from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 
@@ -101,19 +101,11 @@ def missing_required(required: List[Any], columns) -> List[str]:
     return missing
 
 
-def _safe_layer(container: Dict[str, Any], key: Optional[str]) -> Dict[str, Any]:
-    if not key:
-        return {}
-    value = container.get(key, {})
-    return value if isinstance(value, dict) else {}
-
-
 def apply_dataframe_schema(
     df: pd.DataFrame,
     *,
     instrument_type: str,
     instrument_model: str,
-    measurement_profile: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Normalize parser output columns according to schema config.
 
@@ -123,8 +115,6 @@ def apply_dataframe_schema(
     - ``renamed_columns``
     - ``missing_required_columns``
     - ``warnings``
-    - ``measurement_profile``
-    - ``layers_applied``
     """
 
     schema = _load_instrument_schema(instrument_type)
@@ -138,27 +128,14 @@ def apply_dataframe_schema(
         }
 
     # How a model's files are read (column names, units) is its instrument definition's job;
-    # the schema is the type's contract: required columns, dtypes and measurement profiles.
-    global_profile_map = schema.get("profiles", {}) if isinstance(schema.get("profiles", {}), dict) else {}
-    profile_schema = _safe_layer(global_profile_map, measurement_profile)
-
-    layers = [schema, profile_schema]
-
-    aliases = _merge_aliases(*layers)
-    required_columns = _merge_required_columns(*layers)
-    dtypes = _merge_dtypes(*layers)
+    # the schema is the type's contract: required columns and dtypes.
+    aliases = _merge_aliases(schema)
+    required_columns = _merge_required_columns(schema)
+    dtypes = _merge_dtypes(schema)
 
     normalized = df.copy()
     renamed_columns: Dict[str, str] = {}
     warnings: List[str] = []
-
-    if measurement_profile:
-        known_profiles = set(global_profile_map)
-        if known_profiles and measurement_profile not in known_profiles:
-            warnings.append(
-                f"Unknown measurement_profile={measurement_profile!r} for instrument_type={instrument_type!r}, "
-                f"instrument_model={instrument_model!r}."
-            )
 
     rename_map: Dict[str, str] = {}
     for canonical, candidates in aliases.items():
@@ -198,9 +175,5 @@ def apply_dataframe_schema(
         "renamed_columns": renamed_columns,
         "missing_required_columns": missing_required_columns,
         "warnings": warnings,
-        "measurement_profile": measurement_profile,
-        "layers_applied": {
-            "profile": bool(profile_schema),
-        },
     }
     return normalized, report

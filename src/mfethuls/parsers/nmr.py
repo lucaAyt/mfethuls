@@ -17,6 +17,7 @@ from typing import Any, List, Optional
 import numpy as np
 import pandas as pd
 
+from mfethuls.naming import natural_key
 from mfethuls.parsers.ingestion import FILE_TEXT_ATTR, ParseError, build_dataset, keep_text
 from mfethuls.parsers.registry import register_parser
 from mfethuls.schema_normalization import apply_dataframe_schema
@@ -46,10 +47,10 @@ class BrukerNMRParser:
         Without one (e.g. only the dataset folder is given), each file's folder is tried.
         """
         paths = [p for group in dict_paths.values() for p in group]
-        folders = sorted({os.path.dirname(p) for p in paths if os.path.basename(p) == "1r"})
+        folders = sorted({os.path.dirname(p) for p in paths if os.path.basename(p) == "1r"}, key=natural_key)
         spectra_found = bool(folders)
         if not folders:
-            folders = sorted({p if os.path.isdir(p) else os.path.dirname(p) for p in paths})
+            folders = sorted({p if os.path.isdir(p) else os.path.dirname(p) for p in paths}, key=natural_key)
 
         frames = []
         file_text: dict = {}

@@ -8,7 +8,6 @@ OneDrive) and the dialog offers the rows as a download to add there.
 from __future__ import annotations
 
 import io
-import json
 import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -16,7 +15,6 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import streamlit as st
 
-import mfethuls.config
 from mfethuls.discovery import (
     REGISTRY_COLUMNS,
     NewData,
@@ -32,22 +30,12 @@ from mfethuls.experiments import Registry, append_rows
 from mfethuls.registry_validator import _load_instrument_config
 from mfethuls.settings import get_settings
 
-_SCHEMA_DIR = os.path.join(os.path.dirname(mfethuls.config.__file__), "schemas")
 _HELPER_COLUMNS = ["include", "_folder", "_modified", "_kind", "_data", "_whole"]
 _TREE = "register_tree"
 
 
 def instrument_options() -> List[str]:
     return [entry["name"] for entry in _load_instrument_config()]
-
-
-def profile_options() -> List[str]:
-    """Measurement profiles of the instruments that need one (DMA, rheometer)."""
-    profiles: List[str] = []
-    for instrument_type in ("dma", "rheometer"):
-        with open(os.path.join(_SCHEMA_DIR, f"{instrument_type}.json"), encoding="utf8") as handle:
-            profiles.extend(json.load(handle).get("profiles", {}))
-    return sorted(set(profiles))
 
 
 def registry_rows(edited: pd.DataFrame) -> pd.DataFrame:
@@ -203,9 +191,6 @@ def register_dialog(registry_path: str, data_root: str, *, writes_registry: bool
                 "instrument_name": st.column_config.SelectboxColumn("instrument_name", options=instrument_options(), required=True),
                 "sample_id": st.column_config.TextColumn("sample_id", help="S followed by 3–6 digits, e.g. S001."),
                 "run_id": st.column_config.TextColumn("run_id", help="R followed by 3–6 digits, e.g. R001."),
-                "measurement_profile": st.column_config.SelectboxColumn(
-                    "measurement_profile", options=profile_options(), help="Needed for DMA and rheometer data."
-                ),
                 "_modified": st.column_config.DatetimeColumn("modified", format="YYYY-MM-DD HH:mm"),
             },
         )

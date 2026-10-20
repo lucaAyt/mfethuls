@@ -12,9 +12,8 @@ This document defines the canonical data contract after parser normalization.
 
 1. Required columns are checked after alias mapping.
 2. Dtype coercion is best-effort. Failed casts become warnings in schema reports.
-3. Unknown measurement profiles are warned and do not crash normalization.
-4. No synthetic signal conversion for UV/Vis and FTIR. Only observed source signals are published.
-5. Profile-driven instruments can have empty global required columns and enforce requirements at profile level.
+3. No synthetic signal conversion for UV/Vis and FTIR. Only observed source signals are published.
+4. DMA and rheometer schemas require no columns: a run holds what it swept (temperature, frequency, strain, shear rate or only time), and the built-in plots read that from the data.
 
 ## Canonical Column Semantics
 

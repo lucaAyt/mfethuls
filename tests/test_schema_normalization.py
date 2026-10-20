@@ -1,4 +1,4 @@
-"""The schema of each instrument type: required columns, dtypes, measurement profiles and time_s.
+"""The schema of each instrument type: required columns, dtypes and time_s.
 
 Column names and units are the instrument definitions' job (tests/test_instrument_definitions.py);
 the schema no longer renames file columns.
@@ -15,9 +15,8 @@ from mfethuls.schema_normalization import add_elapsed_time, apply_dataframe_sche
 SCHEMAS = sorted((Path(__file__).resolve().parents[1] / "src" / "mfethuls" / "config" / "schemas").glob("*.json"))
 
 
-def _required(schema, profile=None):
-    layer = schema["profiles"][profile] if profile else schema
-    return [entry[0] if isinstance(entry, list) else entry for entry in layer.get("required_columns", [])]
+def _required(schema):
+    return [entry[0] if isinstance(entry, list) else entry for entry in schema.get("required_columns", [])]
 
 
 @pytest.mark.parametrize("path", SCHEMAS, ids=lambda p: p.stem)
@@ -42,29 +41,9 @@ def test_a_missing_required_column_is_reported(path):
     assert report["missing_required_columns"][0].split(" or ")[0] == required[0]
 
 
-PROFILES = [(path.stem, profile) for path in SCHEMAS
-            for profile in json.loads(path.read_text(encoding="utf8")).get("profiles", {})]
-
-
-@pytest.mark.parametrize("instrument_type, profile", PROFILES)
-def test_a_measurement_profile_adds_its_required_columns(instrument_type, profile):
-    schema = json.loads((SCHEMAS[0].parent / f"{instrument_type}.json").read_text(encoding="utf8"))
-    required = _required(schema, profile)
-    complete = pd.DataFrame({column: [1.0, 2.0] for column in required})
-    _, report = apply_dataframe_schema(complete, instrument_type=instrument_type, instrument_model="any",
-                                       measurement_profile=profile)
-    assert report["layers_applied"]["profile"] is True and report["missing_required_columns"] == []
-    if required:
-        _, report = apply_dataframe_schema(complete.drop(columns=required[0]), instrument_type=instrument_type,
-                                           instrument_model="any", measurement_profile=profile)
-        assert required[0] in report["missing_required_columns"]
-
-
-def test_an_unknown_profile_is_warned_about():
-    df = pd.DataFrame({"angular_frequency_rad_s": [1.0]})
-    _, report = apply_dataframe_schema(df, instrument_type="rheometer", instrument_model="anton_paar",
-                                       measurement_profile="not_a_profile")
-    assert any("Unknown measurement_profile" in w for w in report["warnings"])
+def test_no_schema_has_measurement_profiles():
+    """Plots read what a DMA or rheometer run swept from the data (plotting/sweeps.py)."""
+    assert not [p.stem for p in SCHEMAS if "profiles" in json.loads(p.read_text(encoding="utf8"))]
 
 
 def test_the_schema_does_not_rename_file_columns():

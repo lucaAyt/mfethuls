@@ -231,38 +231,62 @@ def test_plot_ftir_chooses_absorbance_and_reverses_axis():
     assert left > right
 
 
-def test_plot_rheology_uses_profile_requirements():
-    dataset = Dataset(
-        data=pd.DataFrame(
-            {
-                "angular_frequency_rad_s": [0.1, 1.0, 10.0],
-                "storage_modulus_pa": [10, 100, 1000],
-                "loss_modulus_pa": [5, 50, 500],
-            }
-        ),
-        metadata={"measurement_profile": "oscillatory_frequency_sweep"},
-    )
+def test_plot_rheology_plots_against_what_the_run_swept():
+    # A frequency sweep: temperature drifts a little and time runs, but only the frequency was swept.
+    dataset = Dataset(data=pd.DataFrame({
+        "time_s": [1.0, 2.0, 3.0],
+        "temperature_C": [20.95, 20.96, 20.97],
+        "strain_pct": [0.99, 1.0, 1.01],
+        "angular_frequency_rad_s": [0.1, 1.0, 10.0],
+        "storage_modulus_pa": [10, 100, 1000],
+        "loss_modulus_pa": [5, 50, 500],
+    }))
 
     fig, ax = _close(plot_rheology(dataset))
     assert ax.get_xlabel() == r"Angular frequency (rad s$^{-1}$)"
     assert len(ax.lines) == 2
+    fig, ax = _close(plot_rheology(dataset, x="time_s"))  # another axis on request
+    assert ax.get_xlabel() == "Time (s)"
 
 
-def test_plot_dma_uses_profile_requirements():
-    dataset = Dataset(
-        data=pd.DataFrame(
-            {
-                "frequency_hz": [0.1, 1.0, 10.0],
-                "storage_modulus_mpa": [10, 100, 1000],
-                "loss_modulus_mpa": [5, 50, 500],
-            }
-        ),
-        metadata={"measurement_profile": "oscillatory_frequency_sweep"},
-    )
+def test_plot_rheology_draws_a_flow_curve_as_stress_and_viscosity():
+    dataset = Dataset(data=pd.DataFrame({
+        "shear_rate_s_inv": [0.1, 1.0, 10.0],
+        "shear_stress_pa": [1.0, 5.0, 20.0],
+        "viscosity_pa_s": [10.0, 5.0, 2.0],
+    }))
+    fig, ax = _close(plot_rheology(dataset))
+    assert ax.get_xlabel() == r"Shear rate (s$^{-1}$)"
+    from mfethuls.plotting.labels import legend_name
+
+    assert [line.get_label() for line in ax.lines] == [legend_name("shear_stress_pa"), legend_name("viscosity_pa_s")]
+
+
+def test_plot_dma_plots_against_what_the_run_swept():
+    # A strain sweep at 1 Hz while the temperature crept from 26 to 28 °C (as in a real TA Q800 file).
+    dataset = Dataset(data=pd.DataFrame({
+        "time_s": [3.0, 600.0, 1200.0],
+        "temperature_C": [25.98, 27.0, 28.2],
+        "frequency_hz": [1.0, 1.0, 1.0],
+        "strain_pct": [0.1, 0.5, 1.01],
+        "storage_modulus_mpa": [10, 100, 1000],
+        "loss_modulus_mpa": [5, 50, 500],
+    }))
 
     fig, ax = _close(plot_dma(dataset))
-    assert ax.get_xlabel() == "Frequency (Hz)"
+    assert ax.get_xlabel() == "Strain (%)"
     assert len(ax.lines) == 2
+
+
+def test_a_run_that_swept_nothing_is_plotted_against_time():
+    from mfethuls.plotting.sweeps import sweep_axis
+
+    held = pd.DataFrame({"time_s": [1.0, 60.0], "temperature_C": [25.74, 25.75], "strain_pct": [0.998, 1.01],
+                         "angular_frequency_rad_s": [10.0, 10.0]})
+    assert sweep_axis(held, ["temperature_C", "angular_frequency_rad_s", "strain_pct", "time_s"]) == "time_s"
+    assert sweep_axis(held.drop(columns="time_s"), ["temperature_C", "strain_pct"]) is None
+    ramp = held.assign(temperature_C=[-50.0, 150.0])
+    assert sweep_axis(ramp, ["temperature_C", "angular_frequency_rad_s", "time_s"]) == "temperature_C"
 
 
 def test_plot_sec_groups_by_detector():

@@ -99,7 +99,6 @@ def test_dma_spec_uses_shared_modulus_axis():
         data=pd.DataFrame(
             {"frequency_hz": [0.1, 1.0], "storage_modulus_mpa": [10, 100], "loss_modulus_mpa": [5, 50]}
         ),
-        metadata={"measurement_profile": "oscillatory_frequency_sweep"},
     )
 
     panel = build_dataset_spec(dataset).panel

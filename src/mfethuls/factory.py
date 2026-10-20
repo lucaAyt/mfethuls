@@ -85,10 +85,9 @@ def parse_experiment(
 ):
     """Parse the raw data of ``experiment`` with its instrument's parser and characterizer.
 
-    Runs registry validation first to fail fast if instrument/model/profile
-    expectations are not coherent. The registry row's metadata (including its
-    measurement profile) is passed to the parser, and the reader's fingerprint is
-    stored with the dataset.
+    Runs registry validation first to fail fast if instrument/model
+    expectations are not coherent. The registry row's metadata is passed to the
+    parser, and the reader's fingerprint is stored with the dataset.
     """
 
     # Validate registry before attempting parse

@@ -453,3 +453,52 @@ def test_read_by_tells_built_in_definitions_from_lab_ones(tmp_path):
     assert _read_by({"definition": str(tmp_path / ".mfethuls" / "instruments" / "tga.json")}) == "lab definition"
     assert _read_by({}) == "built-in code"
 
+
+
+# --- editing a lab instrument -------------------------------------------------------
+
+EDIT = """
+import streamlit as st
+from mfethuls.app.backend import LocalBackend
+from mfethuls.app.instruments import edit_instrument_dialog
+
+edit_instrument_dialog(LocalBackend(), {path!r})
+"""
+
+
+def test_settings_offer_edit_next_to_remove(data_root):
+    save_definition(ANSWER, data_root / "Photometer" / "kin1.dat")
+    at = AppTest.from_string(SETTINGS.format(registry=""), default_timeout=60).run()
+    [b for b in at.button if b.label == "Edit"][0].click().run()
+    request = at.session_state["add_instrument_request"]
+    assert request["edit"].endswith("photometer.json")
+
+
+def test_edit_opens_the_saved_instrument_and_saves_the_changes(data_root):
+    path = save_definition({**ANSWER, "file": {**ANSWER["file"], "duplicate_rows": "drop"},
+                            "tables": [{"name": "notes", "starts_at": "Sample:"}]},
+                           data_root / "Photometer" / "kin1.dat")
+    at = _run(EDIT.format(path=str(path)))
+    name = _by_key(at.text_input, "-name")
+    assert name.value == "photometer" and name.disabled  # registry rows use the name
+    assert any("Checked against **photometer.sample.dat**" in c.value for c in at.caption)
+    assert any("Read **3** rows" in c.value for c in at.caption)
+    assert not [c for c in at.checkbox if c.label.startswith("Replace")]  # editing needs no Replace
+
+    _by_key(at.text_input, "-model").input("lab_built_v2").run()
+    _click(at, "Save changes")
+    saved = _saved(data_root)
+    assert saved["name"] == "photometer" and saved["model"] == "lab_built_v2"
+    assert saved["columns"] == ANSWER["columns"] and saved["check"]["rows"] == 3
+    # What the form does not show is kept.
+    assert saved["file"]["duplicate_rows"] == "drop" and saved["tables"] == [{"name": "notes", "starts_at": "Sample:"}]
+    assert sorted(p.name for p in path.parent.iterdir()) == ["photometer.json", "photometer.sample.dat"]
+
+
+def test_edit_without_its_sample_file_asks_for_one(data_root):
+    path = save_definition(ANSWER, data_root / "Photometer" / "kin1.dat")
+    (path.parent / "photometer.sample.dat").unlink()
+    at = _run(EDIT.format(path=str(path)))
+    assert any("not next to it any more" in i.value for i in at.info)
+    assert _by_key(at.selectbox, "-folder").value == "Photometer"
+    assert any("Read **3** rows" in c.value for c in at.caption)
