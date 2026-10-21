@@ -63,7 +63,7 @@ _PLOT_KEYS = {"x", "y", "group_by"}
 
 _TOP_KEYS = {
     "spec_version", "name", "type", "model", "folder_name", "data_layout", "description",
-    "file", "columns", "formats", "derived", "characterizer", "plot", "check", "name_from", "from_file_name",
+    "file", "columns", "formats", "derived", "characterizer", "plot", "check", "name_from", "from_file_name", "from_sheet_name",
     "from_header", "tables",
 }
 NAME_FROM = ("file", "folder", "sheet")
@@ -229,6 +229,8 @@ class InstrumentDefinition:
     check: Optional[Dict[str, Any]] = None
     name_from: str = "file"  # each file's rows are named after the file, or its folder
     from_file_name: Tuple[CapturedValue, ...] = ()
+    # Workbooks: columns filled from each test sheet's name (e.g. the sample: LUB640_1 -> LUB640).
+    from_sheet_name: Tuple[CapturedValue, ...] = ()
     from_header: Tuple[CapturedValue, ...] = ()
     tables: Tuple[TextTable, ...] = ()
     spec_version: int = SPEC_VERSION
@@ -376,10 +378,13 @@ def parse_definition(data: Dict[str, Any], source: Optional[str] = None) -> Inst
         name_from = "file"
 
     from_file_name = _parse_values(data, "from_file_name", problems)
+    from_sheet_name = _parse_values(data, "from_sheet_name", problems)
+    if from_sheet_name and not any(f.file.workbook for f in formats):
+        problems.append("'from_sheet_name' only goes with workbooks (.xlsx): their tests are on named sheets")
     from_header = _parse_values(data, "from_header", problems)
-    captured = [v.column for v in (*from_file_name, *from_header)]
+    captured = [v.column for v in (*from_file_name, *from_sheet_name, *from_header)]
     for column in sorted({c for c in captured if captured.count(c) > 1}):
-        problems.append(f"the column {column!r} is filled twice by from_file_name / from_header")
+        problems.append(f"the column {column!r} is filled twice by from_file_name / from_sheet_name / from_header")
 
     tables = _parse_tables(data.get("tables"), problems, workbooks=any(f.file.workbook for f in formats))
 
@@ -400,6 +405,7 @@ def parse_definition(data: Dict[str, Any], source: Optional[str] = None) -> Inst
         check=dict(check) if check else None,
         name_from=name_from,
         from_file_name=tuple(from_file_name),
+        from_sheet_name=tuple(from_sheet_name),
         from_header=tuple(from_header),
         tables=tables,
         raw=json.loads(json.dumps(data)),

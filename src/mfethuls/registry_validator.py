@@ -40,9 +40,9 @@ def _load_instrument_config() -> List[Dict[str, Any]]:
     return instrument_entries()
 
 
-def _get_instrument_entry(name: str) -> Optional[Dict[str, Any]]:
-    """Retrieve an instrument config entry by name."""
-    config = _load_instrument_config()
+def _get_instrument_entry(name: str, config: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
+    """Retrieve an instrument config entry by name (from ``config``, else the current instruments)."""
+    config = _load_instrument_config() if config is None else config
     name_norm = str(name).casefold()
     for entry in config:
         entry_name = entry.get("name")
@@ -71,7 +71,7 @@ class RegistryValidator:
         errors: List[str] = []
 
         # 1. Check instrument exists in config
-        instr_entry = _get_instrument_entry(experiment.instrument_name)
+        instr_entry = _get_instrument_entry(experiment.instrument_name, self.config)
         if instr_entry is None:
             renamed = _RENAMED_INSTRUMENTS.get(str(experiment.instrument_name or "").casefold())
             if renamed:
@@ -147,7 +147,7 @@ class RegistryValidator:
                 )
             else:
                 from mfethuls.manifest import find_data_files
-                entry = _get_instrument_entry(experiment.instrument_name)
+                entry = _get_instrument_entry(experiment.instrument_name, self.config)
                 folder_name = entry.get("folder_name") if entry else None
                 if not folder_name:
                     warnings.append(

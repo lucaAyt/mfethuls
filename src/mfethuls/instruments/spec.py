@@ -204,6 +204,13 @@ def json_schema() -> Dict[str, Any]:
                                "found in the file name without its ending.",
                 "items": captured,
             },
+            "from_sheet_name": {
+                "type": "array",
+                "description": "Excel workbooks with one test per sheet: columns filled from each test sheet's "
+                               "name, e.g. the sample (LUB640_1 -> LUB640): the first group of a regular "
+                               "expression found in the sheet name.",
+                "items": captured,
+            },
             "from_header": {
                 "type": "array",
                 "description": "Columns filled from the text around the table (before it, then after it and "
@@ -316,7 +323,9 @@ RULES = [
     "`extensions: [\".xlsx\"]` and the `header`; leave out encoding, delimiter and decimal. Without "
     "`file.sheet`, EVERY sheet containing `header.starts_at` is read (a workbook often holds one test per "
     "sheet) and rows get a `sheet` column; then set `name_from: \"sheet\"` so each test is its own curve. "
-    "`file.sheet` (name or number, 1 = first, -1 = last) reads only that sheet. The other sheets are kept. When sheet names change from file to file "
+    "When test sheets are named after the sample and a replicate number (LUB640, LUB640_1, LUB640_2), add "
+    "`from_sheet_name`: [{\"column\": \"sample\", \"pattern\": \"^(.+?)(?:_\\\\d+)?$\"}] so each curve knows its "
+    "sample. `file.sheet` (name or number, 1 = first, -1 = last) reads only that sheet. The other sheets are kept. When sheet names change from file to file "
     "(e.g. named after the sample), use a number or rely on `header.starts_at`, never the name. In a "
     "`from_header` pattern, `{sheet}` stands for each test's sheet name, to take a value from that test's "
     "row in a results sheet, e.g. `^{sheet}\\\\t([0-9.]+)`. Dates Excel saved as plain numbers "

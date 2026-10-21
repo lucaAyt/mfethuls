@@ -200,3 +200,17 @@ def test_instrument_names_in_capitals_are_the_same_instrument(lab):
     current = _plan(shouted)
     assert [a for a in current.actions if a.kind == "forget"] == []
     assert not current.blocked
+
+
+def test_a_plan_resolves_each_instrument_once(lab, monkeypatch):
+    """Clean up asked for every instrument's reader again for each experiment (slow on a synced drive)."""
+    import mfethuls.instruments.configured as configured
+
+    _, _, frame = lab
+    registry = Registry.from_frame(frame)  # loading the registry checks its rows; not part of the plan
+    calls = []
+    real = configured.instrument_entries
+    monkeypatch.setattr(configured, "instrument_entries", lambda *a, **k: calls.append(1) or real(*a, **k))
+    with open_stores() as stores:
+        current = plan(registry, stores)
+    assert current.actions == [] and len(calls) == 1  # 7 experiments, 1 resolution

@@ -346,3 +346,37 @@ def test_a_sheet_table_needs_a_workbook():
         parse_definition({**TENSILE, "file": {"extensions": [".txt"]},
                           "tables": [{"name": "r", "sheet": "Results", "header": {"rows": 2}}]})
     assert any("'sheet' only goes with workbooks" in line for line in info.value.problems)
+
+
+def test_each_curve_gets_its_sample_from_its_sheet_name(tmp_path):
+    path = _multi_test_workbook(tmp_path / "LUB640toLUB641.xlsx", specimens=("LUB640", "LUB640_1", "LUB641"))
+    definition = parse_definition({
+        "name": "tensile_tester", "type": "tensile", "model": "zwick", "folder_name": "tensile_tester",
+        "name_from": "sheet",
+        "file": {"extensions": [".xlsx"], "header": {"starts_at": "Elongation", "rows": 2}},
+        "columns": [{"source": "Elongation %", "quantity": "strain", "unit": "%"}],
+        "from_sheet_name": [{"column": "sample", "pattern": r"^(.+?)(?:_\d+)?$"}],
+    })
+    data = _parse(definition, path).data
+    assert data.groupby("name")["sample"].first().to_dict() == {"LUB640": "LUB640", "LUB640_1": "LUB640",
+                                                                "LUB641": "LUB641"}
+
+
+def test_sheet_names_only_go_with_workbooks():
+    with pytest.raises(DefinitionError) as info:
+        parse_definition({**TENSILE, "file": {"extensions": [".txt"]},
+                          "from_sheet_name": [{"column": "sample", "pattern": "^(.+)$"}]})
+    assert any("'from_sheet_name' only goes with workbooks" in line for line in info.value.problems)
+    with pytest.raises(DefinitionError) as info:
+        parse_definition({**TENSILE, "from_sheet_name": [{"column": "x", "pattern": "^(.+)$"}],
+                          "from_file_name": [{"column": "x", "pattern": "^(.+)$"}]})
+    assert any("filled twice" in line for line in info.value.problems)
+
+
+def test_the_built_in_tensile_tester_knows_each_curves_sample(tmp_path):
+    from mfethuls.instruments.definition import BUILTIN_DIR, load_definition
+
+    path = _multi_test_workbook(tmp_path / "LUB640toLUB641.xlsx", specimens=("LUB640", "LUB640_2", "LUB641_1"))
+    definition = load_definition(BUILTIN_DIR / "tensile_tester.json")
+    data = TabularParser(definition).parse({"x": [str(path)]}, experiment_id="e1", instrument_type="tensile").data
+    assert sorted(data["sample"].unique()) == ["LUB640", "LUB641"]

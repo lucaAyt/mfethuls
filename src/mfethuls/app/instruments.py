@@ -227,7 +227,7 @@ def _cell(value: Any) -> str:
 
 
 # Where a value in "Values from the file name and header" comes from.
-_VALUE_SOURCES = {"from_file_name": "file name", "from_header": "header"}
+_VALUE_SOURCES = {"from_file_name": "file name", "from_sheet_name": "sheet name", "from_header": "header"}
 _CAPTURED_COLUMNS = ["from", "column", "pattern", "type", "timezone", "values"]
 
 
@@ -247,7 +247,7 @@ def values_from_text(text: str) -> Dict[str, str]:
 
 
 def captured_rows(seed: Dict[str, Any]) -> pd.DataFrame:
-    """``from_file_name`` and ``from_header`` entries as rows of one table."""
+    """``from_file_name``, ``from_sheet_name`` and ``from_header`` entries as rows of one table."""
     rows = []
     for key, source in _VALUE_SOURCES.items():
         for item in seed.get(key) or []:
@@ -260,7 +260,8 @@ def captured_rows(seed: Dict[str, Any]) -> pd.DataFrame:
 
 
 def captured_from_rows(frame: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
-    """The table back as ``{"from_file_name": [...], "from_header": [...]}`` (empty lists left out)."""
+    """The table back as ``{"from_file_name": [...], "from_sheet_name": [...], "from_header": [...]}``
+    (empty lists left out)."""
     out: Dict[str, List[Dict[str, Any]]] = {}
     keys = {source: key for key, source in _VALUE_SOURCES.items()}
     for row in frame.to_dict("records"):
@@ -283,7 +284,7 @@ def route_problems(problems: List[str]) -> Dict[str, List[str]]:
     routed: Dict[str, List[str]] = {"instrument": [], "file": [], "columns": [], "extras": [], "other": []}
     for problem in problems:
         head = re.sub(r"^format \d+: ", "", problem).split(":")[0]
-        if problem.startswith(("derived", "'plot'", "from_file_name", "from_header", "'from_")) \
+        if problem.startswith(("derived", "'plot'", "from_file_name", "from_sheet_name", "from_header", "'from_")) \
                 or "filled twice" in problem:
             routed["extras"].append(problem)
         elif "'file" in problem or "file:" in problem:
@@ -1149,7 +1150,8 @@ _FILE_FORM_KEYS = {"extensions", "encoding", "delimiter", "decimal", "header", "
                    "comment", "segment_lines", "blocks"}
 # The definition's keys the form fills in (see definition_form); others (tables, ...) are kept from the seed.
 _FORM_KEYS = {"spec_version", "name", "type", "model", "folder_name", "data_layout", "name_from", "description",
-              "file", "columns", "formats", "from_file_name", "from_header", "derived", "plot", "characterizer",
+              "file", "columns", "formats", "from_file_name", "from_sheet_name", "from_header", "derived", "plot",
+              "characterizer",
               "check"}
 
 # The tabs of "Adjust details", by the section problems are routed to (see route_problems).
