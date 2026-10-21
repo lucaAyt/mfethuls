@@ -3,7 +3,9 @@ import pandas as pd
 import pytest
 
 from mfethuls.dataset import Dataset
-from mfethuls.plotting import build_dataset_spec, build_experiments_spec
+from mfethuls.plotting import PlotError, build_dataset_spec, build_experiments_spec
+from mfethuls.plotting.backend import render
+from mfethuls.plotting.comparison import shares_x_axis
 from mfethuls.plotting.dsc import DSC_EXPERIMENT_LINESTYLES
 
 
@@ -102,7 +104,7 @@ def test_dsc_overlay_encodes_segment_by_colour_and_experiment_by_linestyle():
     assert by_label["B | Cooling_1"].legend_group == experiments.entries[1].group
 
 
-def test_facet_has_one_untitled_panel_per_dataset():
+def test_facet_has_one_panel_per_dataset_named_after_it():
     other = Dataset(
         data=pd.DataFrame({"temperature_C": [25, 50], "heat_flow_mW": [0.2, 0.4]}),
         metadata={"experiment_id": "B"},
@@ -113,7 +115,63 @@ def test_facet_has_one_untitled_panel_per_dataset():
     assert spec.layout == "facet"
     assert spec.title == "Mixed"
     assert [panel.xlabel for panel in spec.panels] == ["Wavelength (nm)", "Temperature (°C)"]
-    assert all(panel.title is None for panel in spec.panels)
+    assert [panel.title for panel in spec.panels] == ["A", "B"]  # which panel is which experiment
+    assert not spec.shared_x  # wavelength and temperature: no common x-axis
+
+
+def _dsc_run(name, heat):
+    return Dataset(data=pd.DataFrame({"temperature_C": [25.0, 50.0, 75.0], "heat_flow_mW": heat}),
+                   metadata={"experiment_name": name, "instrument_type": "dsc"})
+
+
+def test_panels_with_a_common_x_quantity_share_the_x_axis():
+    spec = build_experiments_spec([_dsc_run("A", [0.1, 0.2, 0.3]), _dsc_run("B", [1.0, 2.0, 3.0])], mode="facet")
+    assert spec.layout == "facet" and spec.shared_x
+    assert shares_x_axis([_dsc_run("A", [0.1, 0.2, 0.3]), _dsc_run("B", [1.0, 2.0, 3.0])])
+
+    fig = render(spec, backend="plotly")
+    assert fig.layout.xaxis.matches == "x2" or fig.layout.xaxis2.matches == "x"  # zooming one zooms all
+    assert [a.text for a in fig.layout.annotations] == ["A", "B"]
+    names = [t.name for t in fig.data if t.showlegend]
+    assert len(names) == len(set(names))  # each legend entry once, not once per panel
+
+
+def test_offset_stacks_experiments_by_the_tallest_range_and_hides_the_y_values():
+    spec = build_experiments_spec([_dsc_run("A", [0.0, 1.0, 2.0]), _dsc_run("B", [0.0, 0.5, 1.0])], mode="stacked")
+    by_experiment = {}
+    for trace in spec.panel.traces:
+        by_experiment.setdefault(trace.label.split(" | ")[0], []).extend(trace.y)
+    assert min(by_experiment["B"]) == pytest.approx(1.1 * 2.0)  # 1.1 x the tallest range (A: 2)
+    assert not spec.panel.y_ticks and spec.panel.ylabel.endswith("(offset)")
+
+    wider = build_experiments_spec([_dsc_run("A", [0.0, 1.0, 2.0]), _dsc_run("B", [0.0, 0.5, 1.0])], mode="stacked",
+                                   spacing=2.0)
+    assert min(t.y.min() for t in wider.panel.traces if t.label.startswith("B")) == pytest.approx(4.4)
+    fixed = build_experiments_spec([_dsc_run("A", [0.0, 1.0, 2.0]), _dsc_run("B", [0.0, 0.5, 1.0])], mode="stacked",
+                                   stacked_offset=10.0)
+    assert min(t.y.min() for t in fixed.panel.traces if t.label.startswith("B")) == pytest.approx(10.0)
+    with pytest.raises(PlotError):
+        build_experiments_spec([_dsc_run("A", [0.0, 1.0, 2.0]), _dsc_run("B", [0.0, 0.5, 1.0])], mode="stacked",
+                               stacked_offset=0)
+
+
+def test_offset_on_a_log_axis_is_a_factor():
+    from mfethuls.plotting.comparison import stack_step
+    from mfethuls.plotting.spec import Panel, Trace
+
+    panels = [Panel(traces=[Trace(np.array([1.0, 2.0]), np.array([1.0, 100.0]))], yscale="log")]
+    assert stack_step(panels, "auto", log=True) == pytest.approx(2.2)  # 2 decades x 1.1
+
+
+def test_matplotlib_panels_share_x_and_name_each_panel():
+    import matplotlib
+
+    spec = build_experiments_spec([_dsc_run("A", [0.1, 0.2, 0.3]), _dsc_run("B", [1.0, 2.0, 3.0])], mode="facet")
+    fig, axes = render(spec, backend="matplotlib")
+    assert axes[0, 0].get_shared_x_axes().joined(axes[0, 0], axes[1, 0])
+    assert [axis.get_title(loc="left") for axis in axes.ravel()] == ["A", "B"]
+    assert axes[0, 0].get_xlabel() == "" and axes[1, 0].get_xlabel() == "Temperature (°C)"
+    matplotlib.pyplot.close(fig)
 
 
 def test_matplotlib_figure_has_no_title_minor_y_ticks_and_columns_for_a_long_legend():

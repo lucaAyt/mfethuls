@@ -359,4 +359,9 @@ def _after_register(backend, registry_path: str, names: list[str], ingest: bool)
         failed = [name for name, result in results if result.get("status") == "error"]
         message += f" Ingested {len(names) - len(failed)}." + (f" Failed: {', '.join(failed)}." if failed else "")
         backend.clear_caches()
+        if not failed:
+            # Done: the data is next. Ingest closes and Datasets opens; the result is a toast.
+            st.session_state["ingest_message"] = message
+            st.session_state["just_ingested"] = True
+            return
     st.session_state["register_message"] = message

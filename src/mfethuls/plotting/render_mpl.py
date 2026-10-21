@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from typing import Any, Tuple
 
 from matplotlib.cm import ScalarMappable
@@ -135,6 +136,8 @@ def draw_panel(axis, panel: Panel, *, colorbar: bool = True) -> None:
         axis.yaxis.set_minor_locator(AutoMinorLocator(2))
 
     apply_axes_style(axis, xlabel=panel.xlabel, ylabel=panel.ylabel)
+    if not panel.y_ticks:
+        axis.tick_params(axis="y", which="both", labelleft=False)
     _draw_legends(axis, panel)
     if colorbar and panel.colorbar is not None:
         _draw_colorbar(axis, panel.colorbar)
@@ -199,11 +202,30 @@ def render(spec: PlotSpec, ax=None) -> Tuple[Any, Any]:
                 count,
                 1,
                 squeeze=False,
+                sharex=spec.shared_x,
                 figsize=(FACET_WIDTH_IN, FACET_PANEL_HEIGHT_IN * count),
                 layout="constrained",
             )
+            if spec.shared_x:
+                # Limits set on one shared axis stop the others from widening it: draw every
+                # panel first, then set the x range and direction once, and name it under the last.
+                for axis, panel in zip(axes.ravel(), spec.panels):
+                    draw_panel(axis, replace(panel, xlim=None, x_reversed=False), colorbar=False)
+                    axis.set_xlabel("")
+                first = spec.panels[0]
+                if first.xlim is not None:
+                    axes[0, 0].set_xlim(*first.xlim)
+                left, right = axes[0, 0].get_xlim()
+                if first.x_reversed and left < right:
+                    axes[0, 0].set_xlim(right, left)
+                axes[-1, 0].set_xlabel(spec.panels[-1].xlabel or "")
+            else:
+                for axis, panel in zip(axes.ravel(), spec.panels):
+                    draw_panel(axis, panel, colorbar=False)
+            # Each panel is named after its experiment, small and on the left.
             for axis, panel in zip(axes.ravel(), spec.panels):
-                draw_panel(axis, panel, colorbar=False)
+                if panel.title:
+                    axis.set_title(panel.title, loc="left", fontsize="medium")
             data_axes, result = list(axes.ravel()), (fig, axes)
         else:
             # Constrained layout so that widening the figure below keeps the axes size.
