@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import io
+from dataclasses import replace
 import os
 import threading
 
@@ -43,8 +44,16 @@ from mfethuls.app.welcome import (
 )
 from mfethuls.dataset import Dataset
 from mfethuls.plotting import PlotError, PlotSpec, build_experiments_spec, plotly_config
+from mfethuls.plotting.comparison import shares_x_axis, stack_step
 from mfethuls.plotting.backend import render
 from mfethuls.plotting.labels import axis_label, legend_name, shared_axis_label
+from mfethuls.plotting.normalise import (
+    LOG_MINMAX_NOTE,
+    NORMALISE_METHODS,
+    normalisation,
+    normalised_label,
+    window_text,
+)
 from mfethuls.plotting.spec import LINESTYLES, MARKERS, Colorbar, Legend, LegendEntry, Panel, Trace
 from mfethuls.reconcile import LABELS as _RECONCILE_LABELS
 from mfethuls.schema_normalization import add_elapsed_time
@@ -144,10 +153,17 @@ def _xy_spec(
     log_x: bool,
     log_y: bool,
     invert_x: bool,
+    layout: str = "overlay",
+    spacing: float = 1.0,
 ) -> PlotSpec:
     """Line/scatter spec: one colour per value of ``color``, one line style (lines) or
-    marker shape (scatter) per value of ``style``, and one line per experiment."""
-    split = ["_experiment"] if mode == "lines" and "_experiment" in df.columns else []
+    marker shape (scatter) per value of ``style``, and one line per experiment.
+
+    ``layout`` "stacked" shifts each experiment up (see :func:`_laid_out`), "facet" gives
+    each its own panel; "overlay" draws them together.
+    """
+    by_experiment = mode == "lines" or layout != "overlay"
+    split = ["_experiment"] if by_experiment and "_experiment" in df.columns else []
     keys = list(dict.fromkeys(([color] if color else []) + ([style] if style else []) + split))
     colorbar = None
     if _uses_colorbar(df, color):
@@ -159,6 +175,7 @@ def _xy_spec(
     by_time = mode == "lines" and (x == "time_s" or pd.api.types.is_datetime64_any_dtype(df[x]))
 
     traces: list[Trace] = []
+    owners: list = []  # each trace's experiment
     colour_index: dict[str, int] = {}
     style_index: dict[str, int] = {}
     groups = df.groupby(keys, dropna=False, sort=False) if keys else [((), df)]
@@ -184,9 +201,12 @@ def _xy_spec(
                 mode=trace_mode,
                 linestyle=appearance if appearance and trace_mode == "lines" else "-",
                 marker=appearance if appearance and trace_mode == "markers" else "o",
-                legend_group=colour_value,
+                # A curve has one legend group: its colour's, or its style's when only styles are listed.
+                legend_group=f"style:{values[style]}" if style and (not color or colorbar is not None)
+                else colour_value,
             )
         )
+        owners.append(values.get("_experiment"))
 
     legends: list[Legend] = []
     if style:
@@ -227,7 +247,41 @@ def _xy_spec(
         colorbar=colorbar,
         legends=legends,
     )
-    return PlotSpec([panel])
+    return _laid_out(panel, owners, layout, spacing)
+
+
+def _points_own_lines(df: pd.DataFrame, color: str, style: str | None) -> bool:
+    """True when colouring lines by ``color`` leaves most of them with one point: a line per
+    ``time_s`` value on a time axis (one wavelength of a spectra series), which draws no line."""
+    keys = [c for c in dict.fromkeys([color, style, "_experiment"]) if c and c in df.columns]
+    sizes = df.groupby(keys, dropna=False, sort=False).size()
+    return len(sizes) > 1 and bool((sizes < 2).mean() > 0.5)
+
+
+def _laid_out(panel: Panel, owners: list, layout: str, spacing: float) -> PlotSpec:
+    """``panel`` with its experiments (``owners``, one per trace) together, offset or in panels.
+
+    Offset: each experiment shifted up from the one before by ``spacing`` times 1.1 times the
+    tallest experiment (decades on a log axis); the y-axis then shows no values. Panels: one
+    per experiment, named after it, sharing the x-axis; hand-built legends go on the first.
+    """
+    names = list(dict.fromkeys(owner for owner in owners if owner is not None))
+    if layout not in {"stacked", "facet"} or len(names) < 2:
+        return PlotSpec([panel])
+    by_name = {name: [t for t, owner in zip(panel.traces, owners) if owner == name] for name in names}
+    if layout == "stacked":
+        log = panel.yscale == "log"
+        step = stack_step([Panel(traces=traces) for traces in by_name.values()], "auto", spacing, log=log)
+        for position, name in enumerate(names):
+            for trace in by_name[name]:
+                y = trace.y.astype(float)
+                trace.y = y * 10 ** (position * step) if log else y + position * step
+        panel.ylabel = f"{panel.ylabel} (offset)" if panel.ylabel else "Offset"
+        panel.y_ticks = False
+        return PlotSpec([panel])
+    panels = [replace(panel, traces=by_name[name], title=str(name), legends=panel.legends if i == 0 else [])
+              for i, name in enumerate(names)]
+    return PlotSpec(panels, layout="facet", title=panel.title, shared_x=True)
 
 
 def _builtin_datasets(data: pd.DataFrame, datasets_meta: dict) -> list[Dataset]:
@@ -247,18 +301,41 @@ def _builtin_datasets(data: pd.DataFrame, datasets_meta: dict) -> list[Dataset]:
     return result
 
 
-def _plot_toolbar(*, axis_options: bool = True):
-    """Row above the chart: axis limits, Log X / Log Y / Invert X, then a Download menu on the right.
+# The sidebar's sections; INGESTED (set after an ingest) closes Ingest and opens Datasets.
+_INGEST_KEY = "sidebar_ingest"
+_DATASETS_KEY = "sidebar_datasets"
+INGESTED = "just_ingested"
 
-    Returns the limits column, the Download menu and the axis options (all off without them).
+# How several experiments share a plot: the label shown, the library's mode.
+_LAYOUTS = {"Together": "overlay", "Offset": "stacked", "Panels": "facet"}
+_LAYOUT_KEY = "plot_layout"
+
+
+def _plot_toolbar(*, axis_options: bool = True, layouts: bool = False):
+    """Row above the chart: axis limits, Log X / Log Y / Invert X, the layout of several
+    experiments (with ``layouts``), then a Download menu on the right.
+
+    Returns the limits column, the Download menu and the options: the axis options (off
+    without them), ``layout`` (the library's mode) and ``spacing`` (offset curves).
     """
     # One row, each control as wide as its label, so they sit together next to Axis limits.
-    row = st.container(horizontal=True, gap="medium", vertical_alignment="center")
+    row = st.container(horizontal=True, gap="small", vertical_alignment="center")
     limits_col = row.container(width="content")
-    options = {"log_x": False, "log_y": False, "invert_x": False}
+    options = {"log_x": False, "log_y": False, "invert_x": False, "layout": "overlay", "spacing": 1.0}
     if axis_options:
-        options = {"log_x": row.checkbox("Log X"), "log_y": row.checkbox("Log Y"),
-                   "invert_x": row.checkbox("Invert X")}
+        options.update(log_x=row.checkbox("Log X"), log_y=row.checkbox("Log Y"), invert_x=row.checkbox("Invert X"))
+    if layouts:
+        choice = row.segmented_control(
+            "Layout", list(_LAYOUTS), default="Together", key=_LAYOUT_KEY, label_visibility="collapsed",
+            help="Several experiments: together on one axis, offset (each shifted up, so the curves don't "
+                 "overlap), or in panels one under the other, sharing the x-axis.",
+        ) or "Together"  # clicking the chosen layout again unselects it
+        options["layout"] = _LAYOUTS[choice]
+        if choice == "Offset":
+            options["spacing"] = row.slider(
+                "Spacing", 0.2, 3.0, 1.0, 0.1, key="plot_spacing", width=110, format="spacing %.1f×",
+                label_visibility="collapsed", help="Spacing: how far apart the curves are, in multiples of the "
+                                                   "tallest curve.")
     row.space("stretch")
     downloads = row.popover("Download", icon=":material/download:",
                             help="The figure as SVG or HTML, or its data as CSV.")
@@ -271,6 +348,24 @@ _LIMIT_FIELDS = ("x_min", "x_max", "y_min", "y_max")
 def _stored_limits(key: str) -> dict:
     """The limits typed for one plot, kept while the limits row is closed (closed widgets lose their state)."""
     return st.session_state.setdefault("_axis_limits", {}).setdefault(key, {})
+
+
+def _x_window(key: str) -> tuple[float | None, float | None] | None:
+    """The x limits typed for the plot ``key``, before it is drawn: Normalise uses them as its window.
+
+    While the limits row is open its fields hold the newest values; once closed, the stored ones.
+    """
+    stored = _stored_limits(key)
+    low, high = (st.session_state.get(f"{key}|{field}", stored.get(field)) for field in ("x_min", "x_max"))
+    if low is None and high is None:
+        return None
+    if low is not None and high is not None and low > high:
+        low, high = high, low
+    return low, high
+
+
+def _window_note(window, xlabel: str | None) -> None:
+    st.caption(f":material/straighten: Normalised over {xlabel or 'x'} {window_text(window)} (the axis limits).")
 
 
 def _reset_axis_limits(key: str) -> None:
@@ -458,6 +553,68 @@ def _plot_filter(container, data: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
                                 placeholder="Choose values")
     conditions = {column: chosen} if chosen else {}
     return apply_conditions(data, conditions), conditions
+
+
+_NORMALISE_KEY = "plot_normalise"
+# What each method does, in the menu.
+_NORMALISE_HELP = {
+    "max": "The largest value of each experiment becomes 1 (a negative peak -1).",
+    "minmax": "Each experiment runs from 0 (its lowest value) to 1 (its highest).",
+    "area": "The area under each experiment's curves becomes 1.",
+}
+
+
+def _normalise_menu(container) -> str | None:
+    """The **Normalise** button and its menu; returns the method chosen, or None.
+
+    Display only: each experiment's curves are scaled together, the data stays as it is. With x
+    axis limits, only the points inside them set the scale (see :func:`_x_window`).
+    """
+    method = st.session_state.get(_NORMALISE_KEY)
+    label = f"Normalised: {NORMALISE_METHODS[method].lower()}" if method else "Normalise"
+    with container.popover(label, icon=":material/height:", type="primary" if method else "secondary",
+                           key="plot-normalise-menu",
+                           help="Compare curves by their shape: scale each experiment, without changing the data."):
+        method = st.radio("Scale each experiment so that", [None, *NORMALISE_METHODS], key=_NORMALISE_KEY,
+                          on_change=_clear_y_limits,
+                          format_func=lambda m: "As measured" if m is None else NORMALISE_METHODS[m],
+                          captions=["The values as stored.", *_NORMALISE_HELP.values()])
+    return method
+
+
+def _clear_y_limits() -> None:
+    """Y limits are in the plot's units, which normalising changes: forget them (the x limits stay)."""
+    for stored in st.session_state.get("_axis_limits", {}).values():
+        stored.pop("y_min", None)
+        stored.pop("y_max", None)
+    for key in [k for k in st.session_state if str(k).endswith(("|y_min", "|y_max"))]:
+        del st.session_state[key]
+
+
+def _normalised_frame(df: pd.DataFrame, x: str, y: str, method: str, lines: list[str] | None = None,
+                      x_range: tuple[float | None, float | None] | None = None) -> tuple[pd.DataFrame, list[str]]:
+    """``df`` with each experiment's (and Y column's) ``y`` normalised; the experiments left as they are.
+
+    ``lines`` are the columns that split an experiment into the lines drawn (colour, style): the
+    area is summed over those lines, so a DSC run's heating and cooling are each integrated on
+    their own instead of as one curve zigzagging between them. With ``x_range`` only the rows in
+    that x range set the scale (the axis limits); every row is scaled.
+    """
+    keys = [k for k in ("_experiment", "_y_metric") if k in df.columns]
+    lines = [c for c in dict.fromkeys(lines or []) if c in df.columns and c not in keys]
+    df = df.copy()
+    df[y] = pd.to_numeric(df[y], errors="coerce").astype(float)
+    unchanged = []
+    groups = df.groupby(keys, sort=False, dropna=False) if keys else [("", df)]
+    for key, rows in groups:
+        parts = [part for _, part in rows.groupby(lines, sort=False, dropna=False)] if lines else [rows]
+        found = normalisation([p[x].to_numpy() for p in parts], [p[y].to_numpy() for p in parts], method, x_range)
+        if found is None:
+            unchanged.append(" · ".join(map(str, key if isinstance(key, tuple) else (key,))))
+            continue
+        shift, factor = found
+        df.loc[rows.index, y] = (rows[y] - shift) * factor
+    return df, unchanged
 
 
 def _filter_label(kept: list | None, suggested: list[str]) -> str:
@@ -689,8 +846,13 @@ def run(app_backend) -> None:
     except Exception as exc:
         datasets, datasets_error = [], exc
 
+    # After ingesting, the next step is the data: close Ingest and open Datasets.
+    if st.session_state.pop(INGESTED, False):
+        st.session_state[_INGEST_KEY] = False
+        st.session_state[_DATASETS_KEY] = True
     # Open while nothing is ingested yet: that is where a new user goes next.
-    with st.sidebar.expander(":material/input: **Ingest**", expanded=not datasets):
+    with st.sidebar.expander(":material/input: **Ingest**", expanded=not datasets, key=_INGEST_KEY,
+                             on_change="rerun"):
         registry_path = backend.render_ingest()
 
     with settings_row:
@@ -711,7 +873,8 @@ def run(app_backend) -> None:
     # ---------------------------------------------------------------------------
     # Datasets expander
     # ---------------------------------------------------------------------------
-    with st.sidebar.expander(":material/dataset: **Datasets**", expanded=True):
+    with st.sidebar.expander(":material/dataset: **Datasets**", expanded=True, key=_DATASETS_KEY,
+                             on_change="rerun"):
         if datasets_error is not None:
             st.error(f"Could not load datasets: {datasets_error}")
         _cleanup_hint(registry_path, datasets)
@@ -803,6 +966,7 @@ def run(app_backend) -> None:
         top_row = st.container(horizontal=True, gap="medium", vertical_alignment="center")
         builtin_col = top_row.container(width="content")
         data, conditions = _plot_filter(top_row, data)
+        normalise = _normalise_menu(top_row)
         numeric_cols = data.select_dtypes(include="number").columns.tolist()
 
         use_builtin = builtin_col.toggle(
@@ -812,18 +976,29 @@ def run(app_backend) -> None:
         )
 
         if use_builtin:
-            comparison_mode = st.selectbox("Comparison mode", ["auto", "overlay", "facet"], index=0)
             datasets_meta = {(d.get("experiment_name") or d["name"]): d for d in datasets}
+            experiments = _builtin_datasets(data, datasets_meta)
+            several = len(experiments) > 1
+            together = several and shares_x_axis(experiments)
+            if several and not together:
+                st.caption(":material/view_agenda: One panel per experiment: their x-axes differ.")
+            limits_col, downloads, layout = _plot_toolbar(axis_options=False, layouts=together)
+            comparison_mode = layout["layout"] if together else "auto"
+            limits_key = "|".join(["limits", "builtin", comparison_mode, *selected_names])
+            window = _x_window(limits_key) if normalise and comparison_mode != "facet" else None
             try:
-                spec = build_experiments_spec(_builtin_datasets(data, datasets_meta), mode=comparison_mode)
+                spec = build_experiments_spec(experiments, mode=comparison_mode, spacing=layout["spacing"],
+                                              normalise=normalise, normalise_x=window)
             except PlotError as exc:
                 st.warning(f"No built-in plot for this selection: {exc}")
             else:
+                for note in spec.notes:
+                    st.caption(f":material/info: {note}")
+                if window and spec.layout == "single":
+                    _window_note(window, spec.panel.xlabel)
                 title = spec.title or spec.panel.title or "mfethuls"
-                limits_col, downloads, _ = _plot_toolbar(axis_options=False)
                 if spec.layout == "single":
-                    key = "|".join(["limits", "builtin", comparison_mode, *selected_names])
-                    _axis_limits(limits_col, spec.panel, key)
+                    _axis_limits(limits_col, spec.panel, limits_key)
                 else:
                     _limits_unavailable(limits_col, "Not available for figures with one panel per experiment.")
                 fig = render(spec, backend="plotly")
@@ -872,9 +1047,10 @@ def run(app_backend) -> None:
             discrete_seq = _DISCRETE_PALETTES["Plotly"]
             cmap = "viridis"
             if continuous:
-                scale_col, reverse_col = palette_col.columns([3, 1], vertical_alignment="bottom")
-                cmap = scale_col.selectbox("Colour scale", _CONTINUOUS_PALETTES, index=0)
-                if reverse_col.toggle("Reverse", help="Flip the colour scale, e.g. dark for late times."):
+                scale_row = palette_col.container(horizontal=True, vertical_alignment="bottom")
+                cmap = scale_row.selectbox("Colour scale", _CONTINUOUS_PALETTES, index=0)
+                if scale_row.toggle("Reverse", help="Flip the colour scale, e.g. dark for late times.",
+                                    width="content"):
                     cmap = f"{cmap}_r"
             else:
                 palette_name = palette_col.selectbox("Colour palette", list(_DISCRETE_PALETTES), index=0)
@@ -906,7 +1082,8 @@ def run(app_backend) -> None:
                     y_series = y_cols[0] if y_cols else x_col
                     color = color_col
 
-                limits_col, downloads, axis = _plot_toolbar()
+                several = plot_type in {"line", "scatter"} and data["_experiment"].nunique() > 1
+                limits_col, downloads, axis = _plot_toolbar(layouts=several)
                 use_log_x, use_log_y, invert_x = axis["log_x"], axis["log_y"], axis["invert_x"]
                 if plot_type in {"line", "scatter"}:
                     # WebGL (Plotly) on screen and Matplotlib for the vector SVG: no downsampling.
@@ -921,6 +1098,24 @@ def run(app_backend) -> None:
                         st.caption(f"'{_column_title(style)}' has more than {max_styles} values; "
                                    "drawing without styles.")
                         style = None
+                    if mode == "lines" and color and color != "_experiment" and _points_own_lines(long_df, color, style):
+                        st.caption(f"Each {_column_title(color)} value has one point here, so each experiment's "
+                                   "points are joined in one line, coloured by experiment.")
+                        color = "_experiment" if "_experiment" in long_df.columns else None
+                    ylabel = shared_axis_label(y_cols)
+                    limits_key = "|".join(["limits", x_col, *y_cols])
+                    window = _x_window(limits_key) if normalise and axis["layout"] != "facet" else None
+                    if normalise:
+                        long_df, unchanged = _normalised_frame(long_df, x_col, y_series, normalise,
+                                                               lines=[c for c in (color, style) if c], x_range=window)
+                        if window:
+                            _window_note(window, axis_label(x_col))
+                        ylabel = normalised_label(ylabel)
+                        if unchanged:
+                            st.caption(f":material/info: Drawn as they are, since they cannot be normalised "
+                                       f"({NORMALISE_METHODS[normalise]}): {', '.join(unchanged)}.")
+                        if normalise == "minmax" and use_log_y:
+                            st.caption(f":material/info: {LOG_MINMAX_NOTE}")
                     palette, _ = convert_colors_to_same_type(list(discrete_seq), colortype="tuple")
                     spec = _xy_spec(
                         long_df,
@@ -932,19 +1127,24 @@ def run(app_backend) -> None:
                         palette=palette,
                         cmap=cmap,
                         title=title,
-                        ylabel=shared_axis_label(y_cols),
+                        ylabel=ylabel,
                         log_x=use_log_x,
                         log_y=use_log_y,
                         invert_x=invert_x,
+                        layout=axis["layout"],
+                        spacing=axis["spacing"],
                     )
-                    _axis_limits(limits_col, spec.panel, "|".join(["limits", x_col, *y_cols]))
-                    if mode == "lines" and any(t.mode == "markers" for t in spec.panel.traces):
-                        hint = (f" There is one line per {_column_title(color)} value; colour by **Experiment** "
-                                "to join them." if color and color != "_experiment" else "")
-                        st.caption(f"Some lines have only one point, so they are drawn as points.{hint}")
+                    if spec.layout == "single":
+                        _axis_limits(limits_col, spec.panel, limits_key)
+                    else:
+                        _limits_unavailable(limits_col, "Not available for figures with one panel per experiment.")
+                    if mode == "lines" and any(t.mode == "markers" for p in spec.panels for t in p.traces):
+                        st.caption("Some lines have only one point, so they are drawn as points.")
                     fig = render(spec, backend="plotly")
                 else:
                     _limits_unavailable(limits_col, "Available for line and scatter plots.")
+                    if normalise:
+                        st.caption(":material/info: Normalise applies to line and scatter plots.")
                     if plot_type == "histogram":
                         fig = px.histogram(data, x=x_col, color=color_col,
                                            title=f"Histogram: {x_col}", color_discrete_sequence=discrete_seq)

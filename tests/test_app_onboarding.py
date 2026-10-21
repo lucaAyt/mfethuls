@@ -306,3 +306,83 @@ def test_filter_columns_are_those_with_few_values():
     assert filter_columns(data) == ["profile", "cycle"]
     kept = apply_conditions(data, {"profile": ["Cooling_1"], "cycle": ["2"]})
     assert kept["temperature_C"].tolist() == [2.0]
+
+
+def test_the_built_in_plot_lays_out_several_experiments(new_user):
+    at = _app()
+    _click(at, "Try the example")
+    [c for c in at.checkbox if c.label == "Select all"][0].check().run()
+    _click(at, "Ingest")
+    # Ingested: the data is next, so Ingest closes and Datasets opens.
+    assert at.session_state["sidebar_ingest"] is False and at.session_state["sidebar_datasets"] is True
+    picker = [m for m in at.multiselect if m.label == "Select experiments to plot"][0]
+    picker.select("LB_dsc_001").run()
+    [t for t in at.toggle if t.label == "Built-in instrument plot"][0].set_value(True).run()
+    assert not at.exception
+    assert not [s for s in at.get("button_group") if s.proto.label == "Layout"]  # one experiment: nothing to lay out
+
+    [m for m in at.multiselect if m.label == "Select experiments to plot"][0].select("LB_dsc_002").run()
+    (layout,) = [s for s in at.get("button_group") if s.proto.label == "Layout"]
+    assert [o.content for o in layout.proto.options] == ["Together", "Offset", "Panels"]
+    assert not [s for s in at.slider if s.label == "Spacing"]
+
+    at.session_state["plot_layout"] = "Offset"
+    at.run()
+    assert not at.exception
+    assert [s for s in at.slider if s.label == "Spacing"]
+    at.session_state["plot_layout"] = "Panels"
+    at.run()
+    assert not at.exception and not [s for s in at.slider if s.label == "Spacing"]
+
+    # The free-form plot has the same layouts, in the same place.
+    [t for t in at.toggle if t.label == "Built-in instrument plot"][0].set_value(False).run()
+    assert not at.exception
+    assert [s for s in at.get("button_group") if s.proto.label == "Layout"]
+    at.session_state["plot_layout"] = "Offset"
+    at.run()
+    assert not at.exception and [s for s in at.slider if s.label == "Spacing"]
+
+    # Normalise sits next to Filter and names what it does once chosen, in both plots.
+    assert any(p.proto.popover.label == "Normalise" for p in at.get("popover"))
+    at.session_state["plot_normalise"] = "max"
+    at.run()
+    assert not at.exception
+    assert any(p.proto.popover.label == "Normalised: max = 1" for p in at.get("popover"))
+    # With x axis limits, only that window sets the scale, and the plot says so.
+    at.session_state["plot_layout"] = "Together"
+    at.run()
+    [t for t in at.toggle if t.label == "Axis limits"][0].set_value(True).run()
+    [n for n in at.number_input if n.label == "X min"][0].set_value(50.0).run()
+    assert not at.exception
+    assert any("Normalised over" in c.value and "from 50" in c.value for c in at.caption)
+    [t for t in at.toggle if t.label == "Built-in instrument plot"][0].set_value(True).run()
+    assert not at.exception
+
+
+def _after_register_script(status):
+    import streamlit as st
+
+    from mfethuls.app.register import _after_register
+
+    class Backend:
+        def ingest(self, names, registry_path, refresh):
+            return [(name, {"status": status}) for name in names]
+
+        def clear_caches(self):
+            pass
+
+    if "ran" not in st.session_state:
+        st.session_state["ran"] = True
+        _after_register(Backend(), "registry.csv", ["a", "b"], True)
+
+
+@pytest.mark.parametrize("status", ["persisted", "error"])
+def test_save_and_ingest_hands_over_to_the_data_unless_something_failed(new_user, status):
+    at = AppTest.from_function(_after_register_script, args=(status,)).run()
+    assert not at.exception
+    if status == "persisted":  # Ingest closes, Datasets opens, the result is a toast
+        assert at.session_state["just_ingested"] is True
+        assert "Ingested 2" in at.session_state["ingest_message"]
+    else:  # the errors stay in Ingest, where they are fixed
+        assert "just_ingested" not in at.session_state
+        assert "Failed: a, b" in at.session_state["register_message"]

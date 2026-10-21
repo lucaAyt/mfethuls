@@ -122,6 +122,10 @@ def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[
     target_stem = stem_key(Path(raw_data_filename).stem)
     target_name = stem_key(raw_data_filename)
 
+    # Names can contain dots that are not an extension (Agilent's "…01-00-01.dx_RID1A.CSV"):
+    # files whose whole stem is the name come first; only without any is the part after the
+    # last dot taken as an extension ("LUB055.txt").
+    whole_stem: dict[str, list[str]] = {}
     file_matches: dict[str, list[str]] = {}
     dir_matched_folders: list[str] = []
 
@@ -130,11 +134,15 @@ def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[
             fpath = Path(fname)
             if fpath.suffix.lower() == ".parquet":
                 continue
+            if stem_key(fpath.stem) == target_name:
+                whole_stem.setdefault(root, []).append(os.path.join(root, fname))
             if stem_key(fpath.stem) == target_stem or stem_key(fpath.name) == target_name:
                 file_matches.setdefault(root, []).append(os.path.join(root, fname))
         for dirname in dirs:
             if stem_key(dirname) == target_name:
                 dir_matched_folders.append(os.path.join(root, dirname))
+    if whole_stem:
+        file_matches = whole_stem
 
     for root, matched in file_matches.items():
         spellings = sorted({Path(path).stem for path in matched})

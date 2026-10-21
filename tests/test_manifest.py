@@ -400,3 +400,20 @@ def test_natural_key_compares_numbers_as_numbers():
 
     names = ["run10.txt", "Run2.txt", "run1.txt", "run1a.txt"]
     assert sorted(names, key=natural_key) == ["run1.txt", "run1a.txt", "Run2.txt", "run10.txt"]
+
+
+def test_a_name_with_a_dot_that_is_not_an_extension(tmp_path):
+    """Agilent names its exports '<date>.dx_RID1A.CSV': '.dx_RID1A' is part of the name, and its
+    result folder holds '<date>.dx' files that must not be taken for it."""
+    sec = tmp_path / "SEC"
+    (sec / "DMF" / "LUB114_1_ON").mkdir(parents=True)
+    (sec / "DMF" / "run.rslt").mkdir()
+    name = "2024-01-30 17-03-42+01-00-01"
+    (sec / "DMF" / "LUB114_1_ON" / f"{name}.dx_RID1A.CSV").write_text("1,2\n")
+    (sec / "DMF" / "run.rslt" / f"{name}.dx").write_text("binary")
+    folder, files = find_data_files(str(sec), f"{name}.dx_RID1A")
+    assert [os.path.basename(f) for f in files] == [f"{name}.dx_RID1A.CSV"]
+    # A real extension still names one file: the LUB055.txt rule.
+    (sec / "LUB055.txt").write_text("x")
+    (sec / "LUB055.csv").write_text("x")
+    assert [os.path.basename(f) for f in find_data_files(str(sec), "LUB055.txt")[1]] == ["LUB055.csv", "LUB055.txt"]

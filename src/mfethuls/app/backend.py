@@ -143,6 +143,7 @@ class LocalBackend:
                 st.warning(message)  # stays with the errors above
             else:
                 st.session_state["ingest_message"] = message
+                st.session_state["just_ingested"] = True  # the page opens Datasets (page.INGESTED)
                 st.rerun()
         return registry_path
 
