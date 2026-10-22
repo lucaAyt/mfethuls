@@ -97,7 +97,7 @@ A definition for it:
 
 | Part | What it says |
 |---|---|
-| `name`, `type`, `model` | The instrument's name in the registry, its measurement type and its make/model/software. Two instruments can't share both type and model: for two identical instruments with their own folders (two PerkinElmer DSCs in two rooms), give the second its own `model`, e.g. `perkin_elmer_room_b`, next to its own `name` and `folder_name`. |
+| `name`, `type`, `model` | The instrument's name in the registry, its measurement type and its make/model/software. Instruments are told apart by `name`, so two identical instruments with their own folders (two PerkinElmer DSCs in two rooms) can share type and model. For a second one that reads exactly like an existing instrument, a `same_as` file is enough (see [Another instrument of the same kind](#another-instrument-of-the-same-kind)). |
 | `folder_name`, `data_layout` | Its folder under the data folder; whether one experiment is one `file` or one `folder` of files. |
 | `file` | How to find the table. `encoding` (`auto` = UTF-8, else Windows cp1252; or `utf-8`, `cp1252`, ...); `delimiter` (`comma`, `semicolon`, `tab`, `whitespace` or one character); `decimal` (`.` or `,`); `header.starts_at` (text on the line with the column names) and/or `header.skip_lines`; `header.rows` (`0` none, `1` names, `2` names then units, joined as `Weight [mg]`); `data_ends` (`end_of_file`, `first_non_numeric_row`, or text on the first line after the data; `first_non_numeric_row` ends the table at the first row of text *after* a row of numbers, so rows before the first number, such as Anton Paar's `1  (invalid)` points, are kept as data); `comment` (lines starting with it are kept as comments); `segment_lines: true` when text lines inside the table label the rows below them (PerkinElmer's "2) DSC 8500 Temperature Scan"): they fill a `segment` column. Without header lines the table starts at the first line of numbers. Blank lines between header lines (also lines of only tabs) are skipped. With `whitespace`, a units line with fewer fields than the names (no unit under `Index`) is matched to the names by where its fields stand. `blocks` is for files holding several tables, each with its own header lines (Anton Paar RheoCompass writes one per interval): `{"starts_at": "Interval and data points:", "label": "^Interval and data points:\\s*(\\d+)", "column": "interval"}` reads every table with the same settings and puts its label (the group of `label` on its first line, or its number) in the `interval` column. `header.names_from` (with `rows: 0`) is for files that list their column names one per line above the table: a regular expression whose group is the name, e.g. `^Sig\\d+\\t(.+)$` for TA Instruments' `Sig1<tab>Time (min)`. For Excel workbooks, `sheet` picks the sheet (see [Excel workbooks](#excel-workbooks)). `duplicate_rows: "drop"` leaves out rows repeating an earlier row in every field (see [A second table, and rows written twice](#a-second-table-and-rows-written-twice)). |
 | `columns` | Each `source` column (or a list of alternative names) is a `quantity` in the `unit` the file uses. mfethuls stores it under the standard name in the standard unit: `Weight [g]` with `"unit": "g"` is stored as `mass_mg`. A column that is no quantity can get a plain name instead: `{"source": "Detector", "column": "detector_name"}`. |
@@ -238,11 +238,32 @@ If samples must be separate experiments, export one workbook per sample (`LUB642
 
 ---
 
+## Another instrument of the same kind
+
+A second instrument that writes the same files as one mfethuls already reads (a second Bruker NMR, an
+identical DSC in another room) needs no definition of its own. Save a small file in the data folder's
+`.mfethuls/instruments/`, e.g. `nmr600.json`:
+
+```json
+{ "name": "nmr600", "same_as": "nmr", "folder_name": "NMR600" }
+```
+
+- `name`: the new instrument, as the registry's `instrument_name` will say it.
+- `same_as`: the instrument whose reader it uses: a built-in one (`nmr`, `dsc_mettler_toledo_v1`, ...; see
+  **⚙ Settings → Instruments** or `mfethuls instruments`) or one of the lab's definitions.
+- `folder_name`: its own folder in the data folder. One kind of measurement per folder: a folder another type
+  of instrument reads is refused.
+- `description` is optional; nothing else is accepted.
+
+It then appears in **⚙ Settings → Instruments** (*read by: same as nmr*); its folder can be changed there like
+any other's, and **Remove** takes it away again. Its data is read exactly like the instrument it names, and when
+that instrument's reader changes, **Clean up** offers to read both again.
+
 ## Safety nets
 
 - **The sample file is re-read** whenever mfethuls loads the definitions. If an update of mfethuls (or an edit) changes what it reads, **⚙ Settings → Instruments** says so.
 - **Edits are tracked.** Each ingested dataset records which reader read it: the version of its definition, or of mfethuls' own parser for code-read instruments. After a definition changes, or after an update of mfethuls improves a parser, **⚙ Settings → Clean up** lists those experiments as *Read again* and re-reads their raw data.
-- **Lab definitions override built-in ones** with the same name, for that data folder only. A definition that clashes with another instrument (same type and model) or is invalid is not used, and Settings shows why.
+- **Lab definitions override built-in ones** with the same name, for that data folder only. A definition that is invalid is not used, and Settings shows why.
 - **Definitions are data, not code.** Treat one from a chatbot or a colleague like any file you did not write, but it can only describe how to read a table: nothing in it is run. mfethuls also checks:
   - **Patterns** (`pattern`, `values`, `names_from`, `blocks.label`) may be at most 300 characters. A pattern that repeats a part that itself repeats, such as `(\w+\s?)+`, is refused: on some lines it can take hours. Write `[\w\s]+` instead. Every search also has a time limit (0.5 s per line). A pattern that hits it fails that file with a message naming the pattern, instead of freezing ingest.
   - **Names stay inside the data folder.** `folder_name` and `check.sample` must be plain names, without `/`, `\` or `..`. A `timezone` must be a zone name such as `Europe/Zurich`.

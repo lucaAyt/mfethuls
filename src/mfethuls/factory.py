@@ -2,7 +2,6 @@
 
 import os
 
-from mfethuls.parsers import get_parser
 from mfethuls.parsers.registry import reader_fingerprint
 from mfethuls.instruments.definition import CHARACTERIZERS
 from mfethuls.instruments.generic import GenericInstrument
@@ -31,7 +30,10 @@ def instrument_data_path_constructor(path, raw_filenames):
 
 
 def create_instrument(type_, name, model, characterizer=None, data_root_path=None):
-    parser = get_parser(type_, model)
+    """The instrument ``name`` (its type and model), with the reader looked up by its name."""
+    from mfethuls.instruments.configured import parser_for
+
+    parser = parser_for(name)
     return GenericInstrument(type_, name, model, parser, characterizer, data_root_path)
 
 

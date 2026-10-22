@@ -16,6 +16,7 @@ from mfethuls.instruments.configured import (
     instrument_definitions,
     instrument_entries,
     lab_dir,
+    parser_for,
     save_definition,
 )
 from mfethuls.instruments.definition import DefinitionError
@@ -58,7 +59,7 @@ def _sample(path: Path, rows: int = 3) -> Path:
 @pytest.fixture(autouse=True)
 def restore_parsers():
     yield
-    instrument_definitions()  # without a data folder: lab parsers are unregistered again
+    instrument_definitions()  # resolve again without a data folder
 
 
 @pytest.fixture
@@ -139,19 +140,87 @@ def test_lab_definition_overrides_a_builtin_and_is_undone(data_root, tmp_path):
     assert get_parser("ftir", "bruker") is builtin_parser
 
 
-def test_conflicting_and_invalid_lab_files_are_reported_not_used(data_root, tmp_path):
+def test_invalid_lab_files_are_reported_and_a_shared_type_and_model_is_fine(data_root, tmp_path):
     folder = lab_dir()
     folder.mkdir(parents=True)
     (folder / "broken.json").write_text("{ not json", encoding="utf8")
-    (folder / "clash.json").write_text(json.dumps({**PHOTOMETER, "name": "clash", "type": "tga",
-                                                   "model": "tgaX"}), encoding="utf8")
+    # Same type and model as the built-in tga: allowed now, each instrument has its own reader.
+    (folder / "tga_room_b.json").write_text(json.dumps({**PHOTOMETER, "name": "tga_room_b", "type": "tga",
+                                                        "model": "tgaX", "folder_name": "TGA_B"}), encoding="utf8")
     statuses = {Path(s.source).name: s for s in definition_statuses()}
 
     assert not statuses["broken.json"].active and "not valid JSON" in statuses["broken.json"].problems[0]
-    assert not statuses["clash.json"].active
-    assert "already read by the instrument 'tga'" in statuses["clash.json"].problems[0]
-    assert "clash" not in {e["name"] for e in instrument_entries()}
-    assert get_parser("tga", "tgaX").definition.name == "tga"
+    assert statuses["tga_room_b.json"].active and not statuses["tga_room_b.json"].problems
+    assert parser_for("tga").definition.name == "tga"
+    assert parser_for("tga_room_b").definition.name == "tga_room_b"
+    with pytest.raises(ValueError, match="Several instruments are tga tgaX"):
+        get_parser("tga", "tgaX")  # ambiguous by type and model: look up by name
+
+
+def _same_as(name, same_as, folder, **extra):
+    lab_dir().mkdir(parents=True, exist_ok=True)
+    path = lab_dir() / f"{name}.json"
+    path.write_text(json.dumps({"name": name, "same_as": same_as, "folder_name": folder, **extra}), encoding="utf8")
+    return path
+
+
+def test_same_as_adds_a_second_instrument_of_a_kind(data_root):
+    _same_as("nmr600", "nmr", "NMR600")
+    _same_as("dsc_room_b", "dsc_mettler_toledo_v1", "DSC room B")
+    entries = {e["name"]: e for e in instrument_entries()}
+
+    assert entries["nmr600"]["folder_name"] == "NMR600" and entries["nmr600"]["model"] == "bruker_nmr"
+    assert parser_for("nmr600") is parser_for("nmr")  # the same code parser
+    assert parser_for("dsc_room_b") is parser_for("dsc_mettler_toledo_v1")  # the same definition reader
+    assert definition_for("dsc_room_b") is definition_for("dsc_mettler_toledo_v1")
+    assert get_parser("nmr", "bruker_nmr") is parser_for("nmr")  # one reader for both: still found
+    assert {Path(s.source).name: s.active for s in definition_statuses()} == {
+        "nmr600.json": True, "dsc_room_b.json": True}
+
+
+@pytest.mark.parametrize("name, same_as, folder, extra, problem", [
+    ("nmr600", "nrm", "NMR600", {}, "not an instrument (did you mean nmr?)"),
+    ("tga", "nmr", "NMR600", {}, "already an instrument called 'tga'"),
+    ("nmr600", "nmr", "TGA", {}, "already the folder of tga (tga data)"),
+    ("nmr600", "nmr", "NMR600", {"formats": []}, "unknown keys 'formats'"),
+    ("NMR 600", "nmr", "a/b", {}, "'name' must be"),
+])
+def test_same_as_problems_are_reported(data_root, name, same_as, folder, extra, problem):
+    path = _same_as(name.replace(" ", "_"), same_as, folder, **extra)
+    if " " in name:
+        path.write_text(json.dumps({"name": name, "same_as": same_as, "folder_name": folder}), encoding="utf8")
+    (status,) = definition_statuses()
+    assert not status.active and problem in " ".join(status.problems)
+    assert name.casefold() not in {e["name"] for e in instrument_entries()} or name == "tga"
+
+
+def test_same_as_needs_an_instrument_with_its_own_reader(data_root):
+    _same_as("nmr600", "nmr", "NMR600")
+    _same_as("nmr800", "nmr600", "NMR800")
+    statuses = {Path(s.source).name: s for s in definition_statuses()}
+    assert statuses["nmr600.json"].active and not statuses["nmr800.json"].active
+    assert "itself the same as 'nmr'" in statuses["nmr800.json"].problems[0]
+
+
+def test_a_same_as_instrument_ingests_its_own_folder(data_root):
+    shutil.copytree(EXAMPLES_DIR / "data" / "DSC", data_root / "DSC room B")
+    _same_as("dsc_room_b", "dsc_mettler_toledo_v1", "DSC room B")
+    registry = Registry.from_frame(pd.DataFrame([{"name": "B_dsc_001", "instrument_name": "dsc_room_b",
+                                                  "raw_data_filename": "poly1", "sample_id": "S001"}]))
+    with open_local_stores() as stores:
+        result = ingest_experiment_dataset("B_dsc_001", registry=registry, stores=stores)
+        (row,) = stores.catalog.list_registered()
+    assert result["status"] == "persisted"
+    assert row["instrument_name"] == "dsc_room_b" and row["rows"] > 1000
+
+
+def test_moving_a_same_as_instrument_edits_its_file(data_root):
+    from mfethuls.instruments.configured import link_folder
+
+    path = _same_as("nmr600", "nmr", "NMR600")
+    link_folder(["nmr600"], "NMR 600 MHz")
+    assert json.loads(path.read_text(encoding="utf8"))["folder_name"] == "NMR 600 MHz"
+    assert not (lab_dir().parent / "folders.json").exists()
 
 
 def test_sample_check_reports_a_changed_reading(data_root, tmp_path):

@@ -346,16 +346,6 @@ def required_columns(instrument_type: str) -> List[Any]:
     return list(_load_instrument_schema(instrument_type).get("required_columns", []))
 
 
-def clash(data: Dict[str, Any]) -> Optional[str]:
-    """Why ``data`` cannot be added next to the current instruments, or None."""
-    name = str(data.get("name", "")).casefold()
-    for entry in instrument_entries():
-        if entry["name"] != name and (entry["type"], entry["model"]) == (data.get("type"), data.get("model")):
-            return (f"The instrument {entry['name']!r} already has type {entry['type']!r} and model "
-                    f"{entry['model']!r}. Give this one another model, e.g. the instrument's make or room.")
-    return None
-
-
 def usage(name: str, registry_frame: Optional[pd.DataFrame], datasets: List[Dict[str, Any]]) -> Tuple[int, int]:
     """(registry rows, ingested datasets) that use the instrument ``name``."""
     rows = 0
@@ -393,6 +383,8 @@ def open_requested_dialog(backend) -> None:
 def _read_by(entry: Dict[str, Any]) -> str:
     from mfethuls.instruments.definition import BUILTIN_DIR
 
+    if entry.get("same_as"):
+        return f"same as {entry['same_as']} (lab file)"
     source = entry.get("definition")
     if source is None:
         return "built-in code"
@@ -539,8 +531,10 @@ def _remove_row(backend, status, registry_path: str) -> None:
     left, edit, right = st.columns([3, 1, 1], vertical_alignment="center")
     left.markdown(f"`{label}` · {_plain(path.name)}" +("" if status.active else " *(not used)*"))
     if st.session_state.get(_REMOVING) != status.source:
-        if edit.button("Edit", key=f"edit-{path.name}", icon=":material/edit:", width="stretch",
-                       help="Change how its files are read: header, columns, values. Checked before saving."):
+        if status.same_as:  # read like another instrument: only its folder changes (above)
+            edit.caption(f"same as `{status.same_as}`")
+        elif edit.button("Edit", key=f"edit-{path.name}", icon=":material/edit:", width="stretch",
+                         help="Change how its files are read: header, columns, values. Checked before saving."):
             request_dialog(edit=status.source)
         right.button("Remove", key=f"remove-{path.name}", icon=":material/delete:", width="stretch",
                      on_click=_set_removing, args=(status.source,))
@@ -1036,12 +1030,6 @@ def _check_section(data: Dict[str, Any], sample: Path, file_columns: List[str], 
         where = f": see **Adjust details** below ({', '.join(places)})" if places else ""
         st.warning(f"{len(exc.problems)} problem(s) to fix{where}.", icon=":material/edit_note:")
         return False, list(exc.problems)
-    problem = clash(data)
-    if problem:
-        _show(slots["instrument"], [problem])
-        st.warning("1 problem to fix: see **Adjust details** below (Instrument).", icon=":material/edit_note:")
-        return False, [problem]
-
     with stored_tab if stored_tab is not None else st.container():
         st.markdown("**What will be stored**")
         st.dataframe(mapping_summary(layout_columns, file_columns, definition.type), hide_index=True,
@@ -1166,7 +1154,7 @@ def needs_fixing(seed: Dict[str, Any]) -> bool:
         return any(not p.startswith("'name'") for p in exc.problems)
     except Exception:  # noqa: BLE001
         return True
-    return clash(seed) is not None
+    return False
 
 
 def definition_form(backend, seed: Dict[str, Any], sample: Path, key: str, *, folder: Optional[str] = None,

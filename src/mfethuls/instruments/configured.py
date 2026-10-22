@@ -12,8 +12,13 @@ give a built-in instrument another folder (``DMA data`` instead of ``DMA``): the
 links are kept in ``PATH_TO_DATA/.mfethuls/folders.json`` (see :func:`link_folder`);
 a lab definition's folder is changed in its own file.
 
-A lab definition is skipped (and reported by :func:`definition_statuses`) when it
-is invalid or when its type and model are already read by another instrument.
+Each instrument is read by its own reader, looked up by its name (:func:`parser_for`):
+a definition's reader, or the code parser of its type and model. So two instruments
+may share a type and model (two identical DSCs in two folders). A lab file with
+``same_as`` adds another instrument of an existing kind under its own name and folder
+(``{"name": "nmr600", "same_as": "nmr", "folder_name": "NMR600"}``): a second Bruker
+NMR next to the first. A lab file is skipped (and reported by :func:`definition_statuses`)
+when it is invalid.
 Each lab definition keeps a copy of the file it was made from; whenever the
 definitions are loaded, the copy is read again and compared with what it gave
 when the definition was saved, so a change in how mfethuls reads files is
@@ -33,7 +38,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .definition import DefinitionError, InstrumentDefinition, builtin_definitions, load_definition, parse_definition
+from .definition import (
+    MAX_DEFINITION_BYTES,
+    DefinitionError,
+    InstrumentDefinition,
+    builtin_definitions,
+    load_definition,
+    parse_definition,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +67,45 @@ class DefinitionStatus:
     active: bool = False
     problems: List[str] = field(default_factory=list)  # why it is not used
     warnings: List[str] = field(default_factory=list)  # used, but needs a look
+    same_as: Optional[str] = None  # a "same_as" file: the instrument whose reader it uses
+
+
+@dataclass(frozen=True)
+class InstrumentAlias:
+    """Another instrument of an existing kind: the reader of ``same_as``, its own name and folder."""
+
+    name: str
+    same_as: str
+    folder_name: str
+    source: str
+    description: str = ""
+
+
+_ALIAS_KEYS = {"spec_version", "name", "same_as", "folder_name", "description"}
+
+
+def parse_alias(data: Any, source: str) -> InstrumentAlias:
+    """An :class:`InstrumentAlias` from a lab file's JSON; ``DefinitionError`` listing what is wrong."""
+    from mfethuls.naming import file_name_problem
+
+    from .definition import _NAME_RE
+
+    problems = []
+    unknown = sorted(set(data) - _ALIAS_KEYS)
+    if unknown:
+        problems.append(f"unknown keys {', '.join(map(repr, unknown))}: a 'same_as' file takes only "
+                        "name, same_as, folder_name and description")
+    name, same_as, folder = (str(data.get(key) or "").strip() for key in ("name", "same_as", "folder_name"))
+    if not _NAME_RE.match(name.casefold() or "-"):
+        problems.append("'name' must be lower-case letters, digits, '_' or '-'")
+    if not same_as:
+        problems.append("'same_as' must name an instrument")
+    if not folder or file_name_problem(folder):
+        problems.append(f"'folder_name' {file_name_problem(folder) or 'is missing'}")
+    if problems:
+        raise DefinitionError(problems, source)
+    return InstrumentAlias(name=name.casefold(), same_as=same_as.casefold(), folder_name=folder, source=source,
+                           description=str(data.get("description") or "")[:500])
 
 
 def _listed_instruments() -> List[Dict[str, Any]]:
@@ -148,18 +199,30 @@ def _dir_state(directory: Optional[Path]) -> Tuple:
 _lab_cache: Dict[str, Any] = {"key": None, "value": ([], [])}
 
 
-def _load_lab(directory: Optional[Path]) -> Tuple[List[InstrumentDefinition], List[DefinitionStatus]]:
-    """Valid lab definitions and the status of every file; cached until a file changes."""
+def _load_lab(directory: Optional[Path]) -> Tuple[List[InstrumentDefinition], List[InstrumentAlias],
+                                                  List[DefinitionStatus]]:
+    """Valid lab definitions, ``same_as`` files and the status of every file; cached until a file changes."""
+    from .definition import definition_json
+
     key = (str(directory), _dir_state(directory))
     if _lab_cache["key"] == key:
         return _lab_cache["value"]
     definitions: List[InstrumentDefinition] = []
+    aliases: List[InstrumentAlias] = []
     statuses: List[DefinitionStatus] = []
     if directory is not None and directory.is_dir():
         for path in sorted(directory.glob("*.json")):
             status = DefinitionStatus(source=str(path))
             statuses.append(status)
             try:
+                data = definition_json(path.read_text(encoding="utf8"), str(path)) \
+                    if path.stat().st_size <= MAX_DEFINITION_BYTES else None
+                if isinstance(data, dict) and "same_as" in data:
+                    status.same_as = str(data.get("same_as") or "").strip().casefold() or None
+                    alias = parse_alias(data, str(path))
+                    status.name = alias.name
+                    aliases.append(alias)
+                    continue
                 definition = load_definition(path)
             except DefinitionError as exc:
                 status.problems = list(exc.problems)
@@ -171,33 +234,50 @@ def _load_lab(directory: Optional[Path]) -> Tuple[List[InstrumentDefinition], Li
             status.name = definition.name
             status.warnings = verify_sample(definition)
             definitions.append(definition)
-    _lab_cache.update(key=key, value=(definitions, statuses))
-    return definitions, statuses
+    _lab_cache.update(key=key, value=(definitions, aliases, statuses))
+    return definitions, aliases, statuses
 
 
-# Registry entries a lab definition took over, restored when it goes away.
-_displaced: Dict[Tuple[str, str], Any] = {}
-_lab_keys: set = set()
-# The parser registry is shared by the app's sessions, which Streamlit runs in parallel threads.
+# The app's sessions run in parallel threads (Streamlit): resolving and the reader cache are locked.
 _lock = threading.RLock()
+# Readers of definitions, by the definition's fingerprint (its content, name included).
+_tabular_parsers: Dict[str, Any] = {}
 
 
-def _activate(definitions: List[InstrumentDefinition]) -> None:
+def _reader_of(definition: InstrumentDefinition):
+    """The reader of ``definition``: the registered one for a built-in, else one kept per definition."""
     from mfethuls.parsers.registry import _PARSER_REGISTRY
-    from mfethuls.parsers.tabular import register_definition
+    from mfethuls.parsers.tabular import TabularParser
 
-    wanted = {(d.type, d.model): d for d in definitions}
-    for key in list(_lab_keys - set(wanted)):
-        if key in _displaced:
-            _PARSER_REGISTRY[key] = _displaced.pop(key)
-        else:
-            _PARSER_REGISTRY.pop(key, None)
-        _lab_keys.discard(key)
-    for key, definition in wanted.items():
-        if key not in _lab_keys and key in _PARSER_REGISTRY:
-            _displaced[key] = _PARSER_REGISTRY[key]
-        register_definition(definition)
-        _lab_keys.add(key)
+    registered = _PARSER_REGISTRY.get((definition.type, definition.model))
+    if isinstance(registered, TabularParser) and registered.definition == definition:
+        return registered
+    with _lock:
+        parser = _tabular_parsers.get(definition.fingerprint)
+        if parser is None or parser.definition != definition:
+            parser = _tabular_parsers[definition.fingerprint] = TabularParser(definition)
+        return parser
+
+
+def parser_for(instrument_name: str, data_root: Optional[str] = None):
+    """The parser that reads the instrument ``instrument_name``; ``ValueError`` if there is none.
+
+    A definition's reader (built-in or the lab's), else the code parser of the instrument's
+    type and model. Instruments are looked up by name, so several may share a type and model.
+    """
+    from mfethuls.parsers.registry import _PARSER_REGISTRY
+
+    name = str(instrument_name or "").strip().casefold()
+    entries, used, _ = _resolve(data_root)
+    if name not in entries:
+        raise ValueError(f"Unknown instrument {instrument_name!r}")
+    if name in used:
+        return _reader_of(used[name])
+    entry = entries[name]
+    parser = _PARSER_REGISTRY.get((entry["type"], entry["model"]))
+    if parser is None:
+        raise ValueError(f"No parser for {entry['type']} {entry['model']} (instrument {name!r})")
+    return parser
 
 
 def _resolve(data_root: Optional[str]) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, InstrumentDefinition],
@@ -221,19 +301,12 @@ def _resolve_locked(data_root: Optional[str]) -> Tuple[Dict[str, Dict[str, Any]]
             entries[name]["default_folder"] = entries[name]["folder_name"]
             entries[name]["folder_name"] = folder
 
-    lab, statuses = _load_lab(lab_dir(data_root))
+    lab, aliases, statuses = _load_lab(lab_dir(data_root))
     by_source = {status.source: status for status in statuses}
     active: List[InstrumentDefinition] = []
     for definition in lab:
         status = by_source[definition.source]
         status.problems = []
-        others = {(e["type"], e["model"]): name for name, e in entries.items() if name != definition.name}
-        taken = others.get((definition.type, definition.model))
-        if taken is not None:
-            status.problems = [f"type {definition.type!r} and model {definition.model!r} are already read by "
-                               f"the instrument {taken!r}; give this one another model"]
-            status.active = False
-            continue
         if any(d.name == definition.name for d in active):
             status.problems = [f"another file already defines the instrument {definition.name!r}"]
             status.active = False
@@ -242,8 +315,38 @@ def _resolve_locked(data_root: Optional[str]) -> Tuple[Dict[str, Dict[str, Any]]
         entries[definition.name] = definition.instrument_entry()
         used[definition.name] = definition
         active.append(definition)
-    _activate(active)
+    for alias in aliases:
+        status = by_source[alias.source]
+        status.problems = _alias_problems(alias, entries)
+        status.active = not status.problems
+        if status.active:
+            entries[alias.name] = {**entries[alias.same_as], "name": alias.name, "folder_name": alias.folder_name,
+                                   "same_as": alias.same_as, "alias": alias.source}
+            entries[alias.name].pop("default_folder", None)
+            if alias.same_as in used:
+                used[alias.name] = used[alias.same_as]
     return entries, used, statuses
+
+
+def _alias_problems(alias: InstrumentAlias, entries: Dict[str, Dict[str, Any]]) -> List[str]:
+    """Why a ``same_as`` file cannot be used next to ``entries``; empty when it can."""
+    from difflib import get_close_matches
+
+    target = entries.get(alias.same_as)
+    if target is None:
+        close = get_close_matches(alias.same_as, list(entries), n=3, cutoff=0.6)
+        return [f"'same_as' names {alias.same_as!r}, which is not an instrument"
+                + (f" (did you mean {', '.join(close)}?)" if close else "")]
+    if target.get("alias"):
+        return [f"'same_as' must name an instrument with its own reader; {alias.same_as!r} is itself "
+                f"the same as {target['same_as']!r}"]
+    if alias.name in entries:
+        return [f"there is already an instrument called {alias.name!r}"]
+    for name, entry in entries.items():
+        if entry["folder_name"].casefold() == alias.folder_name.casefold() and entry["type"] != target["type"]:
+            return [f"{entry['folder_name']} is already the folder of {name} ({entry['type']} data). "
+                    "Keep one kind of measurement per folder."]
+    return []
 
 
 def instrument_entries(data_root: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -252,8 +355,8 @@ def instrument_entries(data_root: Optional[str] = None) -> List[Dict[str, Any]]:
 
 
 def instrument_definitions(data_root: Optional[str] = None) -> List[InstrumentDefinition]:
-    """Every instrument definition in use (built-in and the lab's), each with its parser registered."""
-    return list(_resolve(data_root)[1].values())
+    """Every instrument definition in use (built-in and the lab's); :func:`parser_for` gives their readers."""
+    return list({id(d): d for d in _resolve(data_root)[1].values()}.values())
 
 
 def definition_for(instrument_name: str, data_root: Optional[str] = None) -> Optional[InstrumentDefinition]:
@@ -351,7 +454,11 @@ def link_folder(names, folder: str, data_root: Optional[str] = None) -> None:
     lab = lab_dir(data_root).resolve()
     for name in names:
         definition = used.get(name)
-        if definition is not None and definition.source and Path(definition.source).resolve().parent == lab:
+        if entries[name].get("alias"):
+            data = json.loads(Path(entries[name]["alias"]).read_text(encoding="utf8"))
+            data["folder_name"] = folder
+            _write_json(Path(entries[name]["alias"]), data)
+        elif definition is not None and definition.source and Path(definition.source).resolve().parent == lab:
             data = json.loads(Path(definition.source).read_text(encoding="utf8"))
             data["folder_name"] = folder
             _write_json(Path(definition.source), data)

@@ -97,9 +97,12 @@ class RegistryValidator:
             )
             return False, errors
 
-        # 3. Check parser is registered
-        parser_key = (instr_type, instr_model)
-        if parser_key not in _PARSER_REGISTRY:
+        # 3. Check the instrument has a reader (looked up by its name)
+        from mfethuls.instruments.configured import parser_for
+
+        try:
+            parser_for(experiment.instrument_name)
+        except ValueError:
             errors.append(
                 f"No parser registered for ({instr_type}, {instr_model}). "
                 f"Available parsers: {self._list_available_parsers()}"

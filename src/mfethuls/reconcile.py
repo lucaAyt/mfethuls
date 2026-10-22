@@ -223,8 +223,8 @@ class _Readers:
 
     def current(self, instrument_name: Optional[str]) -> Optional[tuple]:
         """``(reader fingerprint, read by a definition)`` of the instrument, or None if it has no reader."""
-        from .instruments.configured import definition_for, instrument_entries
-        from .parsers.registry import get_parser, reader_fingerprint
+        from .instruments.configured import definition_for, instrument_entries, parser_for
+        from .parsers.registry import reader_fingerprint
 
         name = str(instrument_name or "").casefold()
         if name not in self._found:
@@ -233,7 +233,7 @@ class _Readers:
             entry, found = self._entries.get(name), None
             if entry is not None:
                 try:
-                    found = (reader_fingerprint(get_parser(entry["type"], entry["model"])),
+                    found = (reader_fingerprint(parser_for(name)),
                              definition_for(name) is not None)
                 except ValueError:
                     found = None

@@ -36,7 +36,8 @@ import pandas as pd
 from .experiments import Registry, _normalize_optional_str
 from .manifest import MANIFEST_FILENAME
 from .naming import stem_key
-from .parsers.registry import data_extensions, get_parser
+from .instruments.configured import parser_for
+from .parsers.registry import data_extensions
 from .registry_validator import _load_instrument_config
 from .settings import get_settings
 
@@ -144,7 +145,7 @@ def _scan_group(folder_name: str, entries: list[dict], data_root: str, registere
     file_layout = [e["name"] for e in entries if e["data_layout"] == "file"]
     folder_layout = [e["name"] for e in entries if e["data_layout"] == "folder"]
     every = [e["name"] for e in entries]
-    readable = {e["name"]: data_extensions(get_parser(e["type"], e["model"])) for e in entries}
+    readable = {e["name"]: data_extensions(parser_for(e["name"])) for e in entries}
     # Extensions of single-file instruments: what can be a run or a file experiment.
     extensions = set().union(*(readable[name] or set() for name in file_layout))
     # Extensions any instrument here reads (None: one of them reads every file).
@@ -395,7 +396,7 @@ def _probe_file(instrument_name: str, path: str, modified: float) -> Optional[st
     entry = next((e for e in _load_instrument_config() if e["name"] == instrument_name), None)
     if entry is None:
         return None  # unknown instruments are reported by the registry checks
-    parser = get_parser(entry["type"], entry["model"])
+    parser = parser_for(instrument_name)
     if not reads(parser, path):
         return f"{os.path.basename(path)} is not a {instrument_name} file type"
     try:
@@ -429,7 +430,7 @@ def probe_raw_data(instrument_name: str, raw_data_filename: str, data_root: Opti
         _, files = find_data_files(os.path.join(data_root, entry["folder_name"]), raw_data_filename)
     except (FileNotFoundError, ValueError):
         return None
-    parser = get_parser(entry["type"], entry["model"])
+    parser = parser_for(instrument_name)
     data = [f for f in files if reads(parser, f)] or files
     if not data:
         return None
