@@ -21,6 +21,21 @@ uv run --no-sync ruff check
 
 CI runs the same tests and lint on Ubuntu and Windows.
 
+### Testing on your own instrument files
+
+The tests use only the public examples. To also check that your lab's own exports still read the same after a
+change, point `MFETHULS_REAL_DATA` at a folder laid out like a data folder (one subfolder per instrument):
+
+```bash
+MFETHULS_REAL_DATA="/path/to/test-data" uv run --no-sync pytest tests/test_real_files.py
+```
+
+The first run records which instruments read each experiment, with row counts and columns, in
+`~/.mfethuls/real_data_expected.json` (or `MFETHULS_REAL_DATA_EXPECTED`); later runs report any difference.
+After a deliberate change, record again with `MFETHULS_REAL_DATA_UPDATE=1`. The test only reads the folder
+(nothing is ingested or written there), and it is skipped wherever the variable is not set, as in CI. Keep such
+files out of the repo: it is public.
+
 ## Pull requests
 
 - Keep each pull request to one change, with tests for new behaviour.
