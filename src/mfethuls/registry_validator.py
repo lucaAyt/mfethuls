@@ -15,6 +15,7 @@ import pandas as pd
 
 from mfethuls.parsers.registry import _PARSER_REGISTRY
 from mfethuls.schema_normalization import _load_instrument_schema
+from mfethuls.manifest import one_scan_per_folder
 from mfethuls.naming import file_name_problem, stem_key, view_key, view_name
 from mfethuls.settings import get_settings
 
@@ -281,6 +282,7 @@ def _table_errors(df: pd.DataFrame) -> List[List[Dict[str, str]]]:
     return errors
 
 
+@one_scan_per_folder()  # with check_data_paths, every row looks for its files: walk each folder once
 def validate_registry_dataframe(
     df: pd.DataFrame,
     *,

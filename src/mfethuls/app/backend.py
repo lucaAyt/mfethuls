@@ -163,11 +163,12 @@ class LocalBackend:
         """Ingest experiments into the local stores; returns ``(name, result)`` pairs."""
         from mfethuls.config.loader import ingest_experiment_dataset
         from mfethuls.experiments import Registry
+        from mfethuls.manifest import one_scan_per_folder
         from mfethuls.stores import open_local_stores
 
         registry = Registry.load(registry_path)
         results = []
-        with open_local_stores() as stores:
+        with open_local_stores() as stores, one_scan_per_folder():
             for name in names:
                 try:
                     result = ingest_experiment_dataset(name, refresh=refresh, registry=registry, stores=stores)

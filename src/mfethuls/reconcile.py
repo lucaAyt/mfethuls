@@ -45,7 +45,7 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Dict, List, Optional, Tuple
 
 from .experiments import Experiment, Registry, _normalize_optional_str
-from .manifest import content_hash
+from .manifest import content_hash, one_scan_per_folder
 from .naming import stem_key
 from .parsers.registry import reads
 from .storage.config import _dataset_basename
@@ -422,6 +422,11 @@ def apply(plan: Plan, registry: Registry, stores: Stores, *, force: bool = False
 
     if plan.blocked and not force:
         raise ReconcileBlocked(plan.blocked_reason)
+    with one_scan_per_folder():  # re-reading many experiments: each instrument folder walked once
+        return _apply_actions(plan, registry, stores)
+
+
+def _apply_actions(plan: Plan, registry: Registry, stores: Stores) -> List[Dict[str, Any]]:
 
     failed_refresh: set = set()
     results = []

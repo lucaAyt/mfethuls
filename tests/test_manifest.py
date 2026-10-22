@@ -417,3 +417,63 @@ def test_a_name_with_a_dot_that_is_not_an_extension(tmp_path):
     (sec / "LUB055.txt").write_text("x")
     (sec / "LUB055.csv").write_text("x")
     assert [os.path.basename(f) for f in find_data_files(str(sec), "LUB055.txt")[1]] == ["LUB055.csv", "LUB055.txt"]
+
+
+# ── one walk per folder (P1) ──────────────────────────────────────────────────
+
+
+def _lab_folder(root):
+    """An instrument folder with every kind of layout find_data_files knows."""
+    files = ["poly1.txt", "poly1.csv", "poly2.txt", "sub/chitosan_jan15.txt", "old.parquet",
+             "kinetics/poly3__10.txt", "kinetics/poly3__2.txt", "kinetics/.hidden/skip.txt",
+             "nmr/LUB055/1/fid", "nmr/LUB055/1/pdata/1/1r", "LUB056/LUB056.txt",
+             "a/twice.txt", "b/twice.txt", "both/sample_A/x.txt", "both/sample_A.txt",
+             "run01.dx_RID1A.CSV"]
+    for name in files:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(name)
+    return ["poly1", "poly2", "chitosan_jan15", "kinetics", "LUB055", "LUB056", "LUB056.txt",
+            "twice", "sample_A", "run01.dx_RID1A", "missing", "old"]
+
+
+def _outcome(folder, name):
+    try:
+        return find_data_files(str(folder), name)
+    except (FileNotFoundError, ValueError) as exc:
+        return type(exc).__name__, str(exc)
+
+
+def test_one_scan_gives_the_same_answers_with_one_walk(tmp_path, monkeypatch):
+    import os
+
+    from mfethuls import manifest
+    from mfethuls.manifest import one_scan_per_folder
+
+    names = _lab_folder(tmp_path)
+    expected = {name: _outcome(tmp_path, name) for name in names}
+    walks = []
+    real_walk = os.walk
+    monkeypatch.setattr(manifest.os, "walk", lambda top, *a, **k: walks.append(top) or real_walk(top, *a, **k))
+
+    with one_scan_per_folder():
+        found = {name: _outcome(tmp_path, name) for name in names}
+        with one_scan_per_folder():  # an inner block keeps using the outer one's walks
+            assert _outcome(tmp_path, "poly1") == expected["poly1"]
+
+    assert found == expected
+    assert walks == [str(tmp_path)]  # one walk for all of them, folder experiments included
+    assert expected["kinetics"][1][0].endswith("poly3__2.txt")  # numeric order kept
+    assert not any("skip.txt" in f for f in expected["kinetics"][1])  # hidden folders left out
+
+
+def test_outside_the_block_new_files_are_seen(tmp_path):
+    from mfethuls.manifest import one_scan_per_folder
+
+    with one_scan_per_folder():
+        with pytest.raises(FileNotFoundError):
+            find_data_files(str(tmp_path), "late")
+        (tmp_path / "late.txt").write_text("x")
+        with pytest.raises(FileNotFoundError):  # the kept walk does not know it yet
+            find_data_files(str(tmp_path), "late")
+    assert find_data_files(str(tmp_path), "late")[1] == [str(tmp_path / "late.txt")]

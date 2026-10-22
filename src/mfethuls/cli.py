@@ -102,6 +102,7 @@ def cmd_validate(args) -> int:
 def cmd_ingest(args) -> int:
     """Read the raw data of the chosen experiments and store them (cached ones are only registered)."""
     from .config.loader import ingest_experiment_dataset
+    from .manifest import one_scan_per_folder
     from .stores import open_local_stores
 
     registry = _registry()
@@ -120,7 +121,7 @@ def cmd_ingest(args) -> int:
     _unknown(names, registry)
 
     failed = 0
-    with open_local_stores() as stores:
+    with open_local_stores() as stores, one_scan_per_folder():
         for name in names:
             try:
                 result = ingest_experiment_dataset(name, refresh=args.refresh, registry=registry, stores=stores) or {}

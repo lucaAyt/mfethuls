@@ -19,9 +19,11 @@ import os
 import tempfile
 import uuid
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from filelock import FileLock
 
@@ -80,13 +82,63 @@ def content_hash(paths: list[str]) -> str:
     return hashlib.sha256("\n".join(sorted(file_hashes)).encode()).hexdigest()
 
 
-def _collect_files(directory: str) -> list[str]:
+# Folder walks kept for the current operation (see one_scan_per_folder); None outside one.
+_SCANS: ContextVar[Optional[Dict[str, list]]] = ContextVar("mfethuls_folder_scans", default=None)
+
+
+@contextmanager
+def one_scan_per_folder() -> Iterator[None]:
+    """Walk each instrument folder once for everything done inside this block.
+
+    Finding one experiment's files walks its whole instrument folder; ingesting or
+    checking many experiments would walk it again for each, which is slow on synced
+    folders (OneDrive). Inside the block the first walk of a folder is kept and later
+    lookups read it, with the same results. Files added during the block are not seen,
+    so keep it to one operation (an ingest run, a validation, a clean up).
+    """
+    token = _SCANS.set({}) if _SCANS.get() is None else None
+    try:
+        yield
+    finally:
+        if token is not None:
+            _SCANS.reset(token)
+
+
+def _walk(folder: str) -> list:
+    """``os.walk(folder)`` as a list of ``(root, dirs, files)``; kept within :func:`one_scan_per_folder`."""
+    scans = _SCANS.get()
+    if scans is None:
+        return list(os.walk(folder))
+    key = os.path.normcase(os.path.abspath(folder))
+    if key not in scans:
+        scans[key] = list(os.walk(folder))
+    return scans[key]
+
+
+def _walk_below(folder: str, within: str) -> list:
+    """The walk of ``folder``, taken from the kept walk of ``within`` (a folder above it) when there is one."""
+    scans = _SCANS.get()
+    if scans is None or os.path.normcase(os.path.abspath(within)) not in scans:
+        return list(os.walk(folder))
+    top = os.path.abspath(folder)
+    return [entry for entry in _walk(within)
+            if os.path.normcase(os.path.abspath(entry[0])) == os.path.normcase(top)
+            or os.path.normcase(os.path.abspath(entry[0])).startswith(os.path.normcase(top) + os.sep)]
+
+
+def _collect_files(directory: str, within: Optional[str] = None) -> list[str]:
     """Every file of a folder-per-experiment, also in its subfolders (Bruker NMR keeps the
     spectrum in ``<expno>/pdata/<procno>/``). Hidden folders, parquet files and the
-    manifest are left out. Numbers in names sort as numbers (a series' ``__2`` before ``__10``)."""
+    manifest are left out. Numbers in names sort as numbers (a series' ``__2`` before ``__10``).
+
+    ``within``: the instrument folder it is in, whose kept walk is used (see :func:`one_scan_per_folder`).
+    """
     found = []
-    for root, dirs, files in os.walk(directory):
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
+    top = os.path.abspath(directory)
+    for root, _dirs, files in (_walk_below(directory, within) if within else list(os.walk(directory))):
+        below = os.path.relpath(os.path.abspath(root), top)
+        if below != "." and any(part.startswith(".") for part in Path(below).parts):
+            continue
         found.extend(os.path.join(root, f) for f in files if not f.endswith(".parquet") and f != MANIFEST_FILENAME)
     return sorted(found, key=natural_key)
 
@@ -129,7 +181,7 @@ def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[
     file_matches: dict[str, list[str]] = {}
     dir_matched_folders: list[str] = []
 
-    for root, dirs, files in os.walk(instrument_data_path):
+    for root, dirs, files in _walk(instrument_data_path):
         for fname in files:
             fpath = Path(fname)
             if fpath.suffix.lower() == ".parquet":
@@ -168,7 +220,7 @@ def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[
     if file_matches and dir_matched_folders:
         folder = dir_matched_folders[0]
         if all(os.path.commonpath([root, folder]) == folder for root in file_matches):
-            files = _collect_files(folder)
+            files = _collect_files(folder, within=instrument_data_path)
             if files:
                 return folder, files
             parent_dir, matched = next(iter(file_matches.items()))
@@ -188,7 +240,7 @@ def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[
 
     if dir_matched_folders:
         folder = dir_matched_folders[0]
-        files = _collect_files(folder)
+        files = _collect_files(folder, within=instrument_data_path)
         if files:
             return folder, files
 
