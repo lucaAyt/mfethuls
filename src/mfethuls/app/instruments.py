@@ -1010,11 +1010,12 @@ def _check_others(definition, others: List[Path]) -> Tuple[List[str], List[str]]
 
 def _check_section(data: Dict[str, Any], sample: Path, file_columns: List[str], slots: Dict[str, Any],
                    layout_columns: List[Dict[str, Any]], others: Optional[List[Path]] = None, stored_tab=None
-                   ) -> Tuple[bool, List[str]]:
+                   ) -> Tuple[bool, List[str], List[str]]:
     """Validate and parse ``sample`` (and ``others``): the outcome here, each problem in its section
     of **Adjust details**, and the stored table in ``stored_tab``.
 
-    Returns (ok, problems or warnings).
+    Returns (ok, problems or warnings, other files it cannot read). ``ok`` is about ``sample``: other
+    files that fail are shown, and the user decides whether to save anyway.
     """
     from mfethuls.parsers.tabular import TabularParser, select_format, text_in_numbers
 
@@ -1030,7 +1031,7 @@ def _check_section(data: Dict[str, Any], sample: Path, file_columns: List[str], 
         places = [_TABS[section] for section in _TABS if routed[section]]
         where = f": see **Adjust details** below ({', '.join(places)})" if places else ""
         st.warning(f"{len(exc.problems)} problem(s) to fix{where}.", icon=":material/edit_note:")
-        return False, list(exc.problems)
+        return False, list(exc.problems), []
     with stored_tab if stored_tab is not None else st.container():
         st.markdown("**What will be stored**")
         st.dataframe(mapping_summary(layout_columns, file_columns, definition.type), hide_index=True,
@@ -1040,7 +1041,7 @@ def _check_section(data: Dict[str, Any], sample: Path, file_columns: List[str], 
     except Exception as exc:  # noqa: BLE001 - shown to the user
         message = f"The file cannot be read this way: {exc}"
         st.error(_plain(message))
-        return False, [message]
+        return False, [message], []
     frame = dataset.data.drop(columns=[c for c in _ID_COLUMNS if c in dataset.data.columns])
     warnings = range_warnings(frame, definition.type)
     info = text_in_numbers(sample, definition.formats[select_format(definition, sample)].file)
@@ -1081,13 +1082,14 @@ def _check_section(data: Dict[str, Any], sample: Path, file_columns: List[str], 
         fig.update_layout(height=260, margin=dict(l=10, r=10, t=10, b=10), xaxis_title=x, yaxis_title=y)
         st.plotly_chart(fig, width="stretch")
     other_problems, other_warnings = _check_others(definition, others or [])
-    if other_problems:
-        return False, other_problems + warnings + other_warnings
-    return True, warnings + other_warnings
+    # Other files it cannot read are shown above; whether to save anyway is the user's call (_save_controls).
+    return True, other_problems + warnings + other_warnings, other_problems
 
 
 def _save_controls(backend, data: Dict[str, Any], sample: Path, key: str, *,
-                   editing: Optional[str] = None) -> None:
+                   editing: Optional[str] = None, unread: Optional[List[str]] = None) -> None:
+    """Download and Save. ``unread``: other files of the folder it cannot read (shown above); saving
+    then needs a tick, since those files would fail at ingest."""
     name = data.get("name", "")
     # Compared as save_definition writes it: "TGA" replaces tga.json and the built-in tga.
     stored_name = str(name).strip().casefold()
@@ -1102,6 +1104,13 @@ def _save_controls(backend, data: Dict[str, Any], sample: Path, key: str, *,
                               "folder", key=f"{key}-replace-builtin")
     else:
         allowed = True
+    if unread:
+        count = len(unread)
+        allowed = st.checkbox(
+            f"Save anyway: it cannot read {count} of the other files checked (see above)",
+            key=f"{key}-save-anyway",
+            help="Those files will fail when they are ingested. Fine if they are not this instrument's data, "
+                 "or if you will add another layout for them later.") and allowed
     try:
         prepared = prepare_definition(data, sample)
     except Exception as exc:  # noqa: BLE001
@@ -1243,17 +1252,17 @@ def definition_form(backend, seed: Dict[str, Any], sample: Path, key: str, *, fo
         if not columns:
             st.info("Say what at least one column measures: see **Adjust details** below (Columns).")
             return
-        ok, problems = _check_section(data, sample, file_columns, slots, columns, others, stored_tab)
+        ok, problems, unread = _check_section(data, sample, file_columns, slots, columns, others, stored_tab)
         if problems:
             from mfethuls.instruments.spec import problems_prompt
 
-            title = "Copy the problems for the chatbot" if not ok else "Copy the warnings for the chatbot"
+            title = "Copy the problems for the chatbot" if not ok or unread else "Copy the warnings for the chatbot"
             with st.expander(f":material/chat: {title}", expanded=bool(origin) and not ok):
                 st.caption("Paste this into the chatbot, then paste its corrected answer in step 3; or fix "
                            "the details below.")
                 st.code(problems_prompt(problems, data), language="markdown", height=200)
         if ok:
-            _save_controls(backend, data, sample, key, editing=editing)
+            _save_controls(backend, data, sample, key, editing=editing, unread=unread)
 
 
 def _chatbot_flow(backend, sample: Path, others: List[Path], folder: Optional[str], key: str) -> None:

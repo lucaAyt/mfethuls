@@ -328,11 +328,18 @@ def test_the_folder_gives_the_file_and_the_others_of_its_type_to_check(data_root
     assert any("Also reads the 1 other file checked cleanly: kin2.dat" in c.value for c in at.caption)
 
 
-def test_an_other_file_that_cannot_be_read_blocks_saving(data_root):
+def test_an_other_file_that_cannot_be_read_needs_a_tick_to_save(data_root):
     (data_root / "Photometer" / "broken.dat").write_text("nothing; to read\n", encoding="utf-8")
     at = _paste(_run(DIALOG.format(writes=True)), json.dumps(ANSWER))
     assert any(_shown(e.value).startswith("broken.dat cannot be read") for e in at.error)
-    assert not [b for b in at.button if b.label == "Save instrument"]
+    (save,) = [b for b in at.button if b.label == "Save instrument"]
+    assert save.disabled  # shown, but the user decides
+
+    tick = next(c for c in at.checkbox if c.label.startswith("Save anyway: it cannot read 1 of the other files"))
+    tick.check().run()
+    assert not at.exception
+    _click(at, "Save instrument")
+    assert (data_root / ".mfethuls" / "instruments" / "photometer.json").is_file()
 
 
 def test_the_answer_is_read_with_a_button_and_details_open_only_when_needed(data_root):

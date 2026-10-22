@@ -18,7 +18,7 @@ Nothing in your files is thrown away. Every column, every row and the text aroun
    > The prompt contains the start of your file. Only send it if your data may be shared with that service: think of unpublished results and your institution's rules.
 
    Or choose **Fill in myself**: mfethuls fills in its own guesses instead.
-5. Either way you see the result first: the **Name**, how many rows and which columns were read, a plot, and whether the other files read cleanly. If it looks right, press **Save instrument**.
+5. Either way you see the result first: the **Name**, how many rows and which columns were read, a plot, and whether the other files read cleanly. If it looks right, press **Save instrument**. When some of the other files cannot be read, the reasons are shown and saving needs one more tick (**Save anyway**): your call, e.g. when those files are not this instrument's data, or another layout will be added for them later. They would fail when ingested.
 6. Everything else is under **Adjust details**, which opens by itself when something must be fixed. Its tabs:
    - **Instrument**: data folder, measurement type, model, whether one experiment is a file or a folder, notes. A known type (TGA, FTIR, UV-Vis, ...) gets mfethuls' plots and checks; for a new type you choose what to plot.
    - **Reading the file**: file endings, text encoding, separator, decimal mark, header lines, where the table starts and ends. For a workbook, the sheet replaces encoding, separator and decimal mark.
