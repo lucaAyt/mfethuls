@@ -114,7 +114,7 @@ fig = mfethuls.plot_experiments(cs, backend="plotly")    # interactive, every da
 mfethuls.set_plot_backend("plotly")                      # make Plotly the default
 ```
 
-Each instrument gets a suitable plot, with axis labels and units (*Temperature (°C)*, *Wavenumber (cm⁻¹)*). Experiments that share an x-axis are overlaid, otherwise each gets its own panel, and time-resolved spectra series are coloured by elapsed time. Matplotlib figures use a fixed publication style and save as vector SVG/PDF. See [docs/guides/plotting.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/plotting.md).
+Each instrument gets a suitable plot, with axis labels and units (*Temperature (°C)*, *Wavenumber (cm⁻¹)*). Experiments that share an x-axis are overlaid, otherwise each gets its own panel, and time-resolved spectra series are coloured by elapsed time. Several experiments can be laid out together, offset or in panels, and normalised (max, 0 to 1 or area; optionally within the x-axis limits) to compare their shapes. Matplotlib figures use a fixed publication style and save as vector SVG/PDF. See [docs/guides/plotting.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/plotting.md).
 
 ---
 
