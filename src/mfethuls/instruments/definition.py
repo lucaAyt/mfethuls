@@ -69,6 +69,7 @@ _TOP_KEYS = {
 NAME_FROM = ("file", "folder", "sheet")
 _FORMAT_KEYS = {"label", "file", "columns"}
 _FILE_KEYS = {"extensions", "encoding", "delimiter", "decimal", "header", "data_ends", "comment", "contains",
+              "not_contains",
               "segment_lines", "blocks", "sheet", "duplicate_rows"}
 DUPLICATE_ROWS = ("keep", "drop")
 _TABLE_KEYS = {"name", "starts_at", "ends_at", "columns", "sheet", "header"}
@@ -119,6 +120,8 @@ class FileFormat:
     data_ends: str = "end_of_file"
     comment: Optional[str] = None
     contains: Optional[str] = None
+    # Files with this text near the top are another layout's (e.g. an older export of the same instrument).
+    not_contains: Optional[str] = None
     # Text lines inside the table label the rows below them (column "segment").
     segment_lines: bool = False
     # Column names listed one per line before the table: the first group of this pattern.
@@ -621,6 +624,10 @@ def _parse_file(data: Dict[str, Any], where: str, problems: List[str]) -> FileFo
     if contains is not None and not (isinstance(contains, str) and contains.strip()):
         problems.append(f"{where}'file.contains' must be text found near the top of this layout's files")
         contains = None
+    not_contains = data.get("not_contains")
+    if not_contains is not None and not (isinstance(not_contains, str) and not_contains.strip()):
+        problems.append(f"{where}'file.not_contains' must be text found near the top of other layouts' files only")
+        not_contains = None
 
     blocks = data.get("blocks")
     if blocks is not None:
@@ -665,6 +672,7 @@ def _parse_file(data: Dict[str, Any], where: str, problems: List[str]) -> FileFo
         data_ends=data_ends,
         comment=comment,
         contains=contains,
+        not_contains=not_contains,
         segment_lines=segment_lines,
         names_from=names_from,
         blocks=blocks,

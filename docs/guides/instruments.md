@@ -185,6 +185,12 @@ When an instrument writes more than one layout (a newer software version, a CSV 
 }
 ```
 
+`not_contains` does the opposite: files with that text in their first 50 lines are *not* this layout. Use it when two
+layouts (or two instruments sharing a folder) differ by something only one of them has. The built-in Mettler DSC
+definitions do this: the older STARe report has a `Curve Values:` line, so `dsc_mettler_toledo_v0` has
+`"contains": "Curve Values:"` and `dsc_mettler_toledo_v1` has `"not_contains": "Curve Values:"`. Each file is then
+read by one of them only, and choosing the wrong one gives a clear message instead of other columns.
+
 ### Excel workbooks
 
 A workbook (`.xlsx`) is read sheet by sheet, each row as tab-separated cells, so the same `header` settings apply. Give `"extensions": [".xlsx"]` and leave out `encoding`, `delimiter` and `decimal`: cells already hold numbers. Cells hold what Excel saved (the results of formulas, not the formulas). The old binary `.xls` format is not read; save it as `.xlsx`.

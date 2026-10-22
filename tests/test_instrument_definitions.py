@@ -664,3 +664,30 @@ def test_duplicate_rows_and_tables_are_checked(change, problem):
     with pytest.raises(DefinitionError) as info:
         _definition(**change)
     assert any(problem in line for line in info.value.problems), info.value.problems
+
+
+def test_mettler_old_and_new_exports_are_each_read_by_their_own_definition(tmp_path):
+    from mfethuls.instruments.configured import parser_for
+
+    # A made-up file in the old STARe report layout (title block, "Curve Values:", per-gram values).
+    old = tmp_path / "old.txt"
+    old.write_text("Title                                    01.01.2024 10:00\n\nCurve Name:\n  sample\nCurve Values:\n"
+                   "          Index              t             Ts             Tr          Value\n"
+                   "                           [s]           [°C]           [°C]        [Wg^-1]\n"
+                   + "".join(f"{i:15d}{i:15d}{20 + i:15.3f}{20 + i:15.3f}{0.01 * i:15.6f}\n" for i in range(5))
+                   + "\nSample:\n  made-up, 5.000 mg\n", encoding="cp1252")
+    new = EXAMPLE_DATA / "DSC" / "poly1.txt"
+
+    v0, v1 = parser_for("dsc_mettler_toledo_v0"), parser_for("dsc_mettler_toledo_v1")
+    assert "heat_flow_W_g" in v0.parse({"x": [str(old)]}, experiment_id="e").data
+    assert len(v1.parse({"x": [str(new)]}, experiment_id="e").data) > 1000
+    with pytest.raises(Exception, match="no 'Curve Values:'"):
+        v1.parse({"x": [str(old)]}, experiment_id="e")
+    with pytest.raises(Exception, match="'Curve Values:'"):
+        v0.parse({"x": [str(new)]}, experiment_id="e")
+
+
+def test_not_contains_must_be_text():
+    with pytest.raises(DefinitionError, match="file.not_contains"):
+        _definition(file={"not_contains": ""})
+    assert _definition(file={"not_contains": "Curve Values:"}).formats[0].file.not_contains == "Curve Values:"

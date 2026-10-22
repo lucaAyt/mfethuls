@@ -70,6 +70,9 @@ def json_schema() -> Dict[str, Any]:
             "contains": {"type": "string",
                          "description": f"Text in the first {CONTAINS_LINES} lines that tells this layout apart "
                                         "from others with the same file ending."},
+            "not_contains": {"type": "string",
+                             "description": f"Text in the first {CONTAINS_LINES} lines of OTHER layouts only (e.g. an "
+                                            "older export of the same instrument): files with it are not this layout."},
             "blocks": {
                 "type": "object",
                 "required": ["starts_at"],

@@ -311,7 +311,7 @@ def layouts(seed: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def layout_for(seed_layouts: List[Dict[str, Any]], sample: Path) -> int:
-    """The layout whose file endings (and ``contains`` text) match ``sample``."""
+    """The layout whose file endings (and ``contains`` / ``not_contains`` text) match ``sample``."""
     suffix = sample.suffix.casefold()
     try:
         with sample.open(encoding="latin-1") as handle:
@@ -322,7 +322,8 @@ def layout_for(seed_layouts: List[Dict[str, Any]], sample: Path) -> int:
         extensions = layout["file"].get("extensions") or []
         extensions = [extensions] if isinstance(extensions, str) else extensions
         endings = {str(e).casefold() if str(e).startswith(".") else f".{str(e).casefold()}" for e in extensions}
-        if suffix in endings and (not layout["file"].get("contains") or layout["file"]["contains"] in head):
+        contains, excluded = layout["file"].get("contains"), layout["file"].get("not_contains")
+        if suffix in endings and (not contains or contains in head) and (not excluded or excluded not in head):
             return i
     return 0
 

@@ -9,6 +9,7 @@
   "file": {
     "extensions": [".txt"],
     "encoding": "auto",
+    "not_contains": "Curve Values:",
     "delimiter": "whitespace",
     "header": { "starts_at": "Index", "rows": 2 },
     "data_ends": "first_non_numeric_row"

@@ -568,14 +568,15 @@ def _to_numbers(column: pd.Series, fmt: FileFormat) -> pd.Series:
 
 
 def select_format(definition: InstrumentDefinition, path) -> int:
-    """Index of the first format that reads ``path``: its extension, then its ``contains`` text."""
+    """Index of the first format that reads ``path``: its extension, then its ``contains`` (and
+    ``not_contains``) text in the first lines."""
     extension = Path(path).suffix.casefold()
     candidates = [i for i, fmt in enumerate(definition.formats) if extension in fmt.file.extensions]
     if not candidates:
         raise ValueError(f"no format of {definition.name} reads {extension or 'files without an ending'}")
     for i in candidates:
-        contains = definition.formats[i].file.contains
-        if contains is None:
+        contains, excluded = definition.formats[i].file.contains, definition.formats[i].file.not_contains
+        if contains is None and excluded is None:
             return i
         try:
             if definition.formats[i].file.workbook:
@@ -587,12 +588,15 @@ def select_format(definition: InstrumentDefinition, path) -> int:
                     head = "".join(line for _, line in zip(range(CONTAINS_LINES), f))
         except (OSError, ValueError):
             continue
-        if contains in head:
+        if (contains is None or contains in head) and (excluded is None or excluded not in head):
             return i
-    expected = "; ".join(
-        f"{definition.formats[i].label or f'format {i + 1}'}: {definition.formats[i].file.contains!r}"
-        for i in candidates
-    )
+
+    def looked_for(file) -> str:
+        return " and ".join(part for part in (f"{file.contains!r}" if file.contains else "",
+                                               f"no {file.not_contains!r}" if file.not_contains else "") if part)
+
+    expected = "; ".join(f"{definition.formats[i].label or f'format {i + 1}'}: {looked_for(definition.formats[i].file)}"
+                         for i in candidates)
     raise ValueError(f"the file matches none of the {definition.name} formats (looked for {expected})")
 
 
