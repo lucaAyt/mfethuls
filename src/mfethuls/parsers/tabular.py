@@ -777,6 +777,12 @@ class TabularParser:
             df["name"] = df["sheet"]  # one test per sheet, named after the specimen; a single test keeps the file name
         for value in definition.from_file_name:
             df[value.column] = _stored(value, _capture(value.pattern, Path(path).stem), fmt.decimal, df.index)
+        if "sheet" in df.columns:
+            for value in definition.from_sheet_name:
+                # One value per test sheet, from its name (Excel cuts long names: 'LUBxxx_80C_DCMGel...').
+                parts = [_stored(value, _capture(value.pattern, str(name)), fmt.decimal, df.index[df["sheet"] == name])
+                         for name in df["sheet"].unique()]
+                df[value.column] = pd.concat(parts).reindex(df.index)
         df.attrs[_FORMAT_ATTR] = index
         df.attrs[_TEXT_ATTR] = text
         return df

@@ -502,3 +502,13 @@ def test_edit_without_its_sample_file_asks_for_one(data_root):
     assert any("not next to it any more" in i.value for i in at.info)
     assert _by_key(at.selectbox, "-folder").value == "Photometer"
     assert any("Read **3** rows" in c.value for c in at.caption)
+
+
+def test_values_from_the_sheet_name_round_trip_through_the_form():
+    from mfethuls.app.instruments import captured_from_rows, captured_rows
+
+    seed = {"from_sheet_name": [{"column": "sample", "pattern": r"^(.+?)(?:_\d+)?$"}],
+            "from_header": [{"column": "test_date", "pattern": "^{sheet}\t([0-9.]+)", "type": "datetime"}]}
+    rows = captured_rows(seed)
+    assert list(rows["from"]) == ["sheet name", "header"]
+    assert captured_from_rows(rows) == seed

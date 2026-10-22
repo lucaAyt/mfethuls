@@ -210,23 +210,47 @@ def _stale_catalog_fields(row: Dict[str, Any], exp: Experiment) -> List[str]:
     return [name for name in _CATALOG_FIELDS if _normalize_optional_str(row.get(name)) != _normalize_optional_str(wanted[name])]
 
 
-def _reader_change(rows: List[Dict[str, Any]], exp: Experiment) -> Optional[str]:
-    """Why the experiment's raw data must be read again: its reader changed since it was read."""
-    from .instruments.configured import definition_for, instrument_entries
-    from .parsers.registry import get_parser, reader_fingerprint
+class _Readers:
+    """Each instrument's current reader, resolved once per plan.
 
-    entry = next((e for e in instrument_entries() if e["name"] == str(exp.instrument_name or "").casefold()), None)
-    if entry is None:
+    Resolving reads the lab's instrument folder and rebuilds the parsers; doing it for every
+    experiment made Clean up slow on a large registry in a synced folder.
+    """
+
+    def __init__(self) -> None:
+        self._entries: Optional[Dict[str, Dict[str, Any]]] = None
+        self._found: Dict[str, Optional[tuple]] = {}
+
+    def current(self, instrument_name: Optional[str]) -> Optional[tuple]:
+        """``(reader fingerprint, read by a definition)`` of the instrument, or None if it has no reader."""
+        from .instruments.configured import definition_for, instrument_entries
+        from .parsers.registry import get_parser, reader_fingerprint
+
+        name = str(instrument_name or "").casefold()
+        if name not in self._found:
+            if self._entries is None:
+                self._entries = {entry["name"]: entry for entry in instrument_entries()}
+            entry, found = self._entries.get(name), None
+            if entry is not None:
+                try:
+                    found = (reader_fingerprint(get_parser(entry["type"], entry["model"])),
+                             definition_for(name) is not None)
+                except ValueError:
+                    found = None
+            self._found[name] = found
+        return self._found[name]
+
+
+def _reader_change(rows: List[Dict[str, Any]], exp: Experiment, readers: Optional[_Readers] = None) -> Optional[str]:
+    """Why the experiment's raw data must be read again: its reader changed since it was read."""
+    found = (readers or _Readers()).current(exp.instrument_name)
+    if found is None:
         return None
-    try:
-        current = reader_fingerprint(get_parser(entry["type"], entry["model"]))
-    except ValueError:
-        return None
+    current, by_definition = found
     stored = {_normalize_optional_str(row.get("reader_fingerprint")) for row in rows}
     if stored == {current}:
         return None
-    definition = definition_for(exp.instrument_name)
-    if definition is None:
+    if not by_definition:
         before = ", ".join(sorted(value for value in stored if value)) or "an older reader"
         return f"read by another version of mfethuls' {exp.instrument_name} reader ({before} -> {current})"
     if stored <= {None} or any(value and "-v" in value for value in stored):
@@ -255,6 +279,7 @@ def plan(registry: Registry, stores: Stores, *, max_forget: Optional[int] = None
     experiments = list(registry)
     unmatched = [exp for exp in experiments if _experiment_key(exp) not in by_key]
     actions: List[Action] = []
+    readers = _Readers()  # each instrument resolved once, not once per experiment
 
     # Renamed raw data: an unmatched row with the same content as exactly one forgotten entry.
     forgotten_by_hash: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
@@ -314,7 +339,7 @@ def plan(registry: Registry, stores: Stores, *, max_forget: Optional[int] = None
         else:
             changed = sorted({f for row in rows for f in _stale_catalog_fields(row, exp)})
             reason = f"changed in the registry: {', '.join(changed)}" if changed else None
-        reread = _reader_change(rows, exp) if rows else None
+        reread = _reader_change(rows, exp, readers) if rows else None
         if reread:
             actions.append(Action("reparse", reread, name=exp.name, experiment_id=experiment_id,
                                   instrument_name=exp.instrument_name))
