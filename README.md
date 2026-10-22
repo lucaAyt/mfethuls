@@ -6,6 +6,9 @@ From scattered instrument files to analysis-ready data. mfethuls is a Python fra
 [![Python](https://img.shields.io/pypi/pyversions/mfethuls)](https://pypi.org/project/mfethuls/)
 [![Tests](https://github.com/lucaAyt/mfethuls/actions/workflows/tests.yml/badge.svg)](https://github.com/lucaAyt/mfethuls/actions/workflows/tests.yml)
 [![License](https://img.shields.io/pypi/l/mfethuls)](https://github.com/lucaAyt/mfethuls/blob/master/LICENSE)
+
+![The mfethuls app: two DSC runs from the example data plotted together, filtered to the second heating and zoomed into the transition](https://raw.githubusercontent.com/lucaAyt/mfethuls/master/docs/media/hero.webp)
+
 ---
 
 ## Instrument support
