@@ -326,7 +326,9 @@ def compact_text(df: pd.DataFrame) -> pd.DataFrame:
     repeat on every row (a 1.5 M-row in-situ series: 506 MB as text, 83 MB as categories). Columns
     whose values are mostly different stay as they are."""
     for column in df.columns:
-        if df[column].dtype == object and len(df) and df[column].nunique(dropna=True) <= len(df) // 2:
+        # Text is object (pandas 2) or its string type (pandas 3).
+        text = df[column].dtype == object or isinstance(df[column].dtype, pd.StringDtype)
+        if text and len(df) and df[column].nunique(dropna=True) <= len(df) // 2:
             df[column] = df[column].astype("category")
     return df
 

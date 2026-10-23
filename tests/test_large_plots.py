@@ -99,7 +99,10 @@ def test_repetitive_text_columns_become_categories_and_group_without_empty_group
     frame["note"] = [f"unique {i}" for i in range(len(frame))]  # every value different: stays text
     before = frame.memory_usage(deep=True).sum()
     compact = compact_text(frame.copy())
-    assert str(compact["source_file"].dtype) == "category" and compact["note"].dtype == object
-    assert compact.memory_usage(deep=True).sum() < before / 2
+    assert str(compact["source_file"].dtype) == "category" and str(compact["note"].dtype) != "category"
+    # Smaller: much smaller from pandas 2's text objects (506 -> 83 MB for an in-situ series),
+    # less from pandas 3's compact strings.
+    assert compact.memory_usage(deep=True).sum() < before
+    assert compact["source_file"].memory_usage(deep=True) < frame["source_file"].memory_usage(deep=True) / 2
     kept = compact[compact["source_file"].isin(["s1.txt", "s2.txt"])]
     assert kept.groupby("source_file", observed=True).ngroups == 2
