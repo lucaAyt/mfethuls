@@ -387,3 +387,34 @@ def test_save_and_ingest_hands_over_to_the_data_unless_something_failed(new_user
     else:  # the errors stay in Ingest, where they are fixed
         assert "just_ingested" not in at.session_state
         assert "Failed: a, b" in at.session_state["register_message"]
+
+
+def test_a_series_of_spectra_can_be_drawn_as_a_waterfall(new_user):
+    import pandas as pd
+
+    from mfethuls.experiments import append_rows
+
+    at = _app()
+    _click(at, "Try the example")
+    append_rows(str(new_user / "mfethuls-example" / "experiments_registry.csv"), pd.DataFrame([
+        {"name": "poly3", "instrument_name": "fluorescence", "raw_data_filename": "poly3"}]))
+    at.run()
+    [c for c in at.checkbox if c.label == "Select all"][0].check().run()
+    _click(at, "Ingest")
+    [m for m in at.multiselect if m.label == "Select experiments to plot"][0].select("poly3").run()
+    [t for t in at.toggle if t.label == "Built-in instrument plot"][0].set_value(False).run()
+    [s for s in at.selectbox if s.label == "X axis"][0].select("wavelength_nm").run()
+    [s for s in at.selectbox if s.label == "Colour by"][0].select("time_s").run()
+    assert not at.exception, at.exception
+    (layout,) = [s for s in at.get("button_group") if s.proto.label == "Layout"]
+    assert [o.content for o in layout.proto.options] == ["Together", "Waterfall"]  # one experiment
+
+    at.session_state["plot_layout"] = "Waterfall"
+    at.run()
+    assert not at.exception, at.exception
+    assert [s for s in at.slider if s.label == "Spacing"]
+    # Coloured by experiment again: no numbers to order the lines by, so no Waterfall.
+    [s for s in at.selectbox if s.label == "Colour by"][0].select("_experiment").run()
+    assert not at.exception, at.exception
+    (layout,) = [s for s in at.get("button_group") if s.proto.label == "Layout"] or [None]
+    assert layout is None
