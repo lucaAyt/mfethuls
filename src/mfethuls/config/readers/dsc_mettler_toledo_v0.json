@@ -3,12 +3,12 @@
   "name": "dsc_mettler_toledo_v0",
   "type": "dsc",
   "model": "mettler_toledo_v0",
-  "folder_name": "DSC",
   "data_layout": "file",
   "description": "Mettler Toledo DSC, older STARe export (replaced by dsc_mettler_toledo_v1), heat flow per gram: a title block, an 'Index' header line, a line of units (none under Index), the table, then the sample, method and adjustment text.",
   "file": {
     "extensions": [".txt"],
     "encoding": "auto",
+    "contains": "Curve Values:",
     "delimiter": "whitespace",
     "header": { "starts_at": "Index", "rows": 2 },
     "data_ends": "first_non_numeric_row"

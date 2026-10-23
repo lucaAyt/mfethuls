@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Literal, Sequence
 
+import numpy as np
+
 from ..dataset import Dataset
 from ..comparison import ComparisonSet
 from .backend import Backend, render
@@ -12,12 +14,16 @@ from .core import PlotError, _definition_with_plot, _resolve_plot_kind, build_da
 from .dsc import dsc_overlay_legends, experiment_legend, experiment_legend_group, experiment_linestyle
 from .labels import axis_label
 from .nmr import nuclei, nucleus_axis_label, sort_nuclei, split_by_nucleus
+from .normalise import LOG_MINMAX_NOTE, NORMALISE_METHODS, normalise_traces, normalised_label, window_text
 from .spec import Colorbar, Panel, PlotSpec
 
 
 LOGGER = logging.getLogger(__name__)
 
 ComparisonMode = Literal["auto", "overlay", "stacked", "facet"]
+
+# Stacked curves are shifted apart by this many times the tallest curve, so they don't touch.
+STACK_GAP = 1.1
 
 
 def _label_for_dataset(dataset: Dataset, index: int) -> str:
@@ -44,13 +50,12 @@ def _coerce_comparison_set(comparison: ComparisonSet | Sequence[Dataset]) -> Com
 
 
 def _resolve_x_column(dataset: Dataset, resolved_kind: str) -> str | None:
-    """Resolve the x-axis column for a dataset based on instrument type and measurement profile.
-    
+    """Resolve the x-axis column for a dataset from its instrument type.
+
     Strategy:
     1. For simple instrument types, use fixed x-column
-    2. For profile-dependent types (DMA, rheology), use canonical measurement_profile to select x-column
-    3. Fall back to generic candidates if profile not recognized or missing
-    4. Return None if no suitable column found
+    2. For DMA and rheology, the quantity the run swept (see ``sweeps.sweep_axis``)
+    3. Return None if no suitable column found
     """
     columns = set(dataset.data.columns)
 
@@ -73,47 +78,12 @@ def _resolve_x_column(dataset: Dataset, resolved_kind: str) -> str | None:
         candidate = definition.plot["x"] if definition is not None else None
         return candidate if candidate in columns else None
 
-    if resolved_kind == "dma":
-        from .dma import _PROFILE_MAP as _DMA_PROFILE_MAP
+    if resolved_kind in ("dma", "rheology"):
+        from .dma import DMA_AXES
+        from .rheology import RHEOLOGY_AXES
+        from .sweeps import sweep_axis
 
-        profile = str(dataset.metadata.get("measurement_profile") or "").strip()
-        if profile and profile in _DMA_PROFILE_MAP:
-            candidate = _DMA_PROFILE_MAP[profile][0]
-            if candidate in columns:
-                return candidate
-        
-        # Fall back to generic candidates when profile not recognized
-        if profile:
-            LOGGER.debug(
-                "DMA x-column: canonical profile '%s' not in profile map, using fallback candidates",
-                profile,
-            )
-        
-        for candidate in ("frequency_hz", "temperature_C", "strain_pct", "time_s"):
-            if candidate in columns:
-                return candidate
-        return None
-
-    if resolved_kind == "rheology":
-        from .rheology import _PROFILE_MAP as _RHEOLOGY_PROFILE_MAP
-
-        profile = str(dataset.metadata.get("measurement_profile") or "").strip()
-        if profile and profile in _RHEOLOGY_PROFILE_MAP:
-            candidate = _RHEOLOGY_PROFILE_MAP[profile][0]
-            if candidate in columns:
-                return candidate
-        
-        # Fall back to generic candidates when profile not recognized
-        if profile:
-            LOGGER.debug(
-                "Rheology x-column: canonical profile '%s' not in profile map, using fallback candidates",
-                profile,
-            )
-
-        for candidate in ("angular_frequency_rad_s", "strain_pct", "time_s", "shear_rate_s_inv"):
-            if candidate in columns:
-                return candidate
-        return None
+        return sweep_axis(dataset.data, DMA_AXES if resolved_kind == "dma" else RHEOLOGY_AXES)
 
     return None
 
@@ -153,11 +123,28 @@ def build_experiments_spec(
     signal: str | None = None,
     group_by: str | None = None,
     max_groups: int = 50,
-    stacked_offset: float = 0.0,
+    stacked_offset: float | Literal["auto"] = "auto",
+    spacing: float = 1.0,
+    normalise: str | None = None,
+    normalise_x: tuple[float | None, float | None] | None = None,
     title: str | None = None,
     strict: bool = True,
 ) -> PlotSpec:
-    """Build the backend-neutral spec that :func:`plot_experiments` renders."""
+    """Build the backend-neutral spec that :func:`plot_experiments` renders.
+
+    ``mode="stacked"`` shifts each experiment up from the one before: by ``stacked_offset``
+    in y units (decades on a log y-axis), or with ``"auto"`` by ``spacing`` times 1.1 times
+    the tallest experiment's y range. ``mode="facet"`` draws one panel per experiment; they
+    share one x-axis when the experiments have the same x quantity.
+
+    ``normalise`` (``"max"``, ``"minmax"`` or ``"area"``, see :mod:`~mfethuls.plotting.normalise`)
+    scales each experiment's curves, before they are offset; the data is not changed. With
+    ``normalise_x`` (``(low, high)`` in x units) only the points in that x range set the scale.
+    Experiments that cannot be normalised are drawn as they are and listed in ``notes``.
+    """
+    if normalise is not None and normalise not in NORMALISE_METHODS:
+        raise PlotError(f"Unknown normalise={normalise!r}; use one of {', '.join(NORMALISE_METHODS)}.")
+    notes: list[str] = []
 
     comparison_set = _coerce_comparison_set(comparison)
     datasets = comparison_set.datasets
@@ -199,15 +186,18 @@ def build_experiments_spec(
                 parts, part_labels = split[nucleus]
                 panel = build_experiments_spec(
                     ComparisonSet(datasets=parts, labels=part_labels), kind=kind, mode=mode, signal=signal,
-                    group_by=group_by, max_groups=max_groups, stacked_offset=stacked_offset, strict=strict,
-                ).panel
+                    group_by=group_by, max_groups=max_groups, stacked_offset=stacked_offset, spacing=spacing,
+                    normalise=normalise, normalise_x=normalise_x, strict=strict,
+                )
+                notes.extend(n for n in panel.notes if n not in notes)
+                panel = panel.panel
                 panel.title = None
                 panel.xlabel = nucleus_axis_label(nucleus)
                 if len(datasets) > 1:
                     for trace in panel.traces:
                         trace.color = colours.get(str(trace.label).split(" | ")[0], trace.color)
                 panels.append(panel)
-            return PlotSpec(panels, layout="facet", title=title)
+            return PlotSpec(panels, layout="facet", title=title, notes=notes)
 
     x_compatible, shared_x = _is_x_axis_compatible(datasets, resolved_kinds)
 
@@ -228,17 +218,21 @@ def build_experiments_spec(
             "Comparison mode requires x-axis compatible datasets, but canonical x-axis could not be shared."
         )
 
-    if resolved_mode == "stacked" and stacked_offset <= 0:
-        raise PlotError("plot_experiments in stacked mode requires stacked_offset > 0.")
+    if resolved_mode == "stacked" and stacked_offset != "auto" and not float(stacked_offset) > 0:
+        raise PlotError("plot_experiments in stacked mode requires stacked_offset > 0 (or 'auto').")
+    if resolved_mode == "stacked" and not spacing > 0:
+        raise PlotError("plot_experiments in stacked mode requires spacing > 0.")
 
     if resolved_mode == "facet":
         panels = []
-        for dataset in datasets:
-            # Every panel of the dataset's plot (an NMR dataset has one per nucleus).
+        for dataset, label in zip(datasets, labels):
+            # Every panel of the dataset's plot (an NMR dataset has one per nucleus), named after it.
             for panel in build_dataset_spec(dataset, **dataset_kwargs).panels:
-                panel.title = None
+                panel.title = label
+                if normalise:
+                    _normalise_panel(panel, normalise, label, notes, normalise_x)
                 panels.append(panel)
-        return PlotSpec(panels, layout="facet", title=title)
+        return PlotSpec(panels, layout="facet", title=title, shared_x=x_compatible, notes=notes)
 
     all_dsc = all(resolved == "dsc" for resolved in resolved_kinds)
     panels = []
@@ -251,11 +245,16 @@ def build_experiments_spec(
 
     # Colour-bar overlays (e.g. spectra coloured by time_s): colour shows the value,
     # line style shows the experiment.
+    if normalise:
+        for panel, label in zip(panels, labels):
+            _normalise_panel(panel, normalise, label, notes, normalise_x)
     colorbar = _shared_colorbar([panel.colorbar for panel in panels])
     by_experiment = all_dsc or colorbar is not None
+    log_y = bool(panels) and panels[0].yscale == "log"
+    step = stack_step(panels, stacked_offset, spacing, log=log_y) if resolved_mode == "stacked" else 0.0
 
     overlay = Panel(
-        title=title or ("Comparison Stacked" if resolved_mode == "stacked" else "Comparison Overlay"),
+        title=title or ("Comparison Offset" if resolved_mode == "stacked" else "Comparison Overlay"),
         xlabel=axis_label(shared_x),
         legend=colorbar is None,
         colorbar=colorbar,
@@ -284,19 +283,66 @@ def build_experiments_spec(
             if recolour:
                 trace.color = EXPERIMENT_COLOURS[idx % len(EXPERIMENT_COLOURS)]
             if resolved_mode == "stacked":
-                trace.y = trace.y + (idx * stacked_offset)
+                # On a log axis a shift is a factor: decades.
+                trace.y = trace.y * 10 ** (idx * step) if log_y else trace.y + idx * step
             if colorbar is not None:
                 trace.linestyle = experiment_linestyle(idx)
             if by_experiment:
                 trace.legend_group = experiment_legend_group(idx)
             overlay.traces.append(trace)
 
+    if resolved_mode == "stacked":
+        # Shifted values are not the data's: the axis says so and shows no numbers.
+        overlay.ylabel = f"{overlay.ylabel} (offset)" if overlay.ylabel else "Offset"
+        overlay.y_ticks = False
+
     if all_dsc and overlay.traces:
         overlay.legends = dsc_overlay_legends(segment_colors, labels)
     elif colorbar is not None and len(datasets) > 1:
         overlay.legends = [experiment_legend(labels)]
 
-    return PlotSpec([overlay])
+    return PlotSpec([overlay], notes=notes)
+
+
+def _normalise_panel(panel: Panel, method: str, label: str, notes: list[str],
+                     x_range: tuple[float | None, float | None] | None = None) -> None:
+    """Normalise one experiment's curves together (over ``x_range``); say so on the y-axis, or note why not."""
+    if normalise_traces(panel.traces, method, x_range):
+        panel.ylabel = normalised_label(panel.ylabel)
+        if method == "minmax" and panel.yscale == "log" and LOG_MINMAX_NOTE not in notes:
+            notes.append(LOG_MINMAX_NOTE)
+    else:
+        where = f" over x {window_text(x_range)}" if x_range else ""
+        notes.append(f"{label} is drawn as it is: it cannot be normalised ({NORMALISE_METHODS[method]}){where}.")
+
+
+def stack_step(panels: Sequence[Panel], offset: float | str, spacing: float = 1.0, *, log: bool = False) -> float:
+    """How far each stacked experiment is shifted from the one before.
+
+    A number is used as it is. ``"auto"``: ``spacing`` times :data:`STACK_GAP` times the
+    largest y range of one experiment (in decades on a log axis), so the curves don't overlap.
+    """
+    if offset != "auto":
+        return float(offset)
+    spans = []
+    for panel in panels:
+        values = [np.asarray(trace.y, dtype=float) for trace in panel.traces]
+        values = np.concatenate(values) if values else np.array([])
+        values = values[np.isfinite(values) & (values > 0)] if log else values[np.isfinite(values)]
+        if values.size:
+            low, high = (np.log10(values.min()), np.log10(values.max())) if log else (values.min(), values.max())
+            spans.append(float(high - low))
+    span = max(spans, default=0.0) or 1.0
+    return STACK_GAP * spacing * span
+
+
+def shares_x_axis(comparison: ComparisonSet | Sequence[Dataset], *, kind: str | None = None) -> bool:
+    """True when the experiments can be drawn on one x-axis (together or stacked)."""
+    datasets = _coerce_comparison_set(comparison).datasets
+    kinds = [_resolve_plot_kind(dataset, kind) for dataset in datasets]
+    if not datasets or not all(kinds):
+        return False
+    return _is_x_axis_compatible(datasets, kinds)[0]
 
 
 # Matplotlib's default cycle (tab10), one colour per experiment in overlays.
@@ -324,7 +370,10 @@ def plot_experiments(
     signal: str | None = None,
     group_by: str | None = None,
     max_groups: int = 50,
-    stacked_offset: float = 0.0,
+    stacked_offset: float | Literal["auto"] = "auto",
+    spacing: float = 1.0,
+    normalise: str | None = None,
+    normalise_x: tuple[float | None, float | None] | None = None,
     ax=None,
     title: str | None = None,
     strict: bool = True,
@@ -345,6 +394,9 @@ def plot_experiments(
         group_by=group_by,
         max_groups=max_groups,
         stacked_offset=stacked_offset,
+        spacing=spacing,
+        normalise=normalise,
+        normalise_x=normalise_x,
         title=title,
         strict=strict,
     )

@@ -319,7 +319,9 @@ def read_file(path, fmt: FileFormat, from_header: Tuple[CapturedValue, ...] = ()
         pattern = value.pattern.replace(SHEET_PLACEHOLDER, ".*")
         found = next((m for line in around if (m := _capture(pattern, line)) is not None), None)
         df[value.column] = _stored(value, found, fmt.decimal, df.index)
-    found_tables = {table.name: rows for table in tables if (rows := text_table(around, table, fmt))}
+    found_tables = {table.name: rows for table in tables
+                    if (rows := text_table(text.get(f"sheet: {table.sheet}", []) if table.sheet else around,
+                                           table, fmt))}
     if found_tables:
         df.attrs[_TABLES_ATTR] = found_tables
     return df, text
@@ -328,8 +330,11 @@ def read_file(path, fmt: FileFormat, from_header: Tuple[CapturedValue, ...] = ()
 def text_table(lines: List[str], table: TextTable, fmt: FileFormat) -> List[Dict[str, object]]:
     """The rows of ``table`` in ``lines``: after its ``starts_at`` line, up to its ``ends_at`` line.
 
-    Only rows starting with a number are rows; numbers are stored as numbers.
+    Only rows starting with a number are rows; numbers are stored as numbers. A table
+    with ``header_rows`` is read with its own header lines instead (see :func:`_headed_table`).
     """
+    if table.header_rows:
+        return _headed_table(lines, table, fmt)
     start = next((i for i, line in enumerate(lines) if table.starts_at in line), None)
     if start is None:
         return []
@@ -343,6 +348,35 @@ def text_table(lines: List[str], table: TextTable, fmt: FileFormat) -> List[Dict
         rows.append({(table.columns[i] if i < len(table.columns) else f"column_{i + 1}"): _number_or_text(f, fmt)
                      for i, f in enumerate(fields)})
     return rows
+
+
+def _headed_table(lines: List[str], table: TextTable, fmt: FileFormat) -> List[Dict[str, object]]:
+    """A table with its own header lines (names, then units): every non-empty line below them
+    is a row, e.g. one per specimen in a workbook's results sheet, up to its ``ends_at`` line.
+
+    Fields are named as the data's columns are, name and unit joined (``"sM kPa"``); fields
+    without a header take the ``columns`` names in order, then ``column_<n>``. Empty
+    cells are left out of a row.
+    """
+    if table.starts_at is None:
+        start = next((i for i, line in enumerate(lines) if line.strip()), None)
+    else:
+        start = next((i for i, line in enumerate(lines) if table.starts_at in line), None)
+    if start is None:
+        return []
+    header = [_split(line, fmt) for line in lines[start:start + table.header_rows]]
+    body = []
+    for line in lines[start + table.header_rows:]:
+        if table.ends_at is not None and table.ends_at in line:
+            break
+        if line.strip():
+            body.append(_split(line, fmt))
+    width = max([len(fields) for fields in header + body], default=0)
+    named = [" ".join(part[i] for part in header if i < len(part) and part[i]).strip() for i in range(width)]
+    spare = iter(table.columns)
+    names = _unique([name or next(spare, f"column_{i + 1}") for i, name in enumerate(named)])
+    return [{names[i]: _number_or_text(field, fmt) for i, field in enumerate(fields) if field.strip()}
+            for fields in body]
 
 
 def _number_or_text(text: str, fmt: FileFormat):
@@ -533,32 +567,69 @@ def _to_numbers(column: pd.Series, fmt: FileFormat) -> pd.Series:
     return column.astype(object).where(filled, None)  # empty cells are missing, not ""
 
 
+# Lines searched for a format's header marker when telling which of several readers a file is.
+MARKER_LINES = 500
+
+
+def _head(file: FileFormat, path, lines: int) -> Optional[str]:
+    """The first ``lines`` lines of ``path`` as ``file`` reads it (a workbook: of each sheet); None if unreadable."""
+    try:
+        if file.workbook:
+            return "\n".join(line for heads in workbook.sheet_heads(path, lines).values() for line in heads)
+        with open(path, encoding="cp1252" if file.encoding == AUTO_ENCODING else file.encoding, errors="replace") as f:
+            return "".join(line for _, line in zip(range(lines), f))
+    except (OSError, ValueError):
+        return None
+
+
+def recognised_format(definition: InstrumentDefinition, path) -> Optional[int]:
+    """Index of the first format that recognises ``path``, or None.
+
+    Stricter than :func:`select_format`, to tell which of several readers a file is: the extension,
+    the ``contains`` / ``not_contains`` text, and the header marker (``header.starts_at``) in the
+    first lines. A format with neither text nor marker recognises every file with its extension.
+    """
+    extension = Path(path).suffix.casefold()
+    for i, fmt in enumerate(definition.formats):
+        file = fmt.file
+        if extension not in file.extensions:
+            continue
+        if file.contains is None and file.not_contains is None and not file.header_starts_at:
+            return i
+        head = _head(file, path, MARKER_LINES)
+        if head is None:
+            continue
+        # The text is looked for where select_format (ingest) looks: the first lines (of each sheet).
+        top = _head(file, path, CONTAINS_LINES) if file.workbook else "".join(head.splitlines(keepends=True)[:CONTAINS_LINES])
+        if top is None:
+            continue
+        if ((file.contains is None or file.contains in top) and (file.not_contains is None or file.not_contains not in top)
+                and (not file.header_starts_at or file.header_starts_at in head)):
+            return i
+    return None
+
+
 def select_format(definition: InstrumentDefinition, path) -> int:
-    """Index of the first format that reads ``path``: its extension, then its ``contains`` text."""
+    """Index of the first format that reads ``path``: its extension, then its ``contains`` (and
+    ``not_contains``) text in the first lines."""
     extension = Path(path).suffix.casefold()
     candidates = [i for i, fmt in enumerate(definition.formats) if extension in fmt.file.extensions]
     if not candidates:
         raise ValueError(f"no format of {definition.name} reads {extension or 'files without an ending'}")
     for i in candidates:
-        contains = definition.formats[i].file.contains
-        if contains is None:
+        contains, excluded = definition.formats[i].file.contains, definition.formats[i].file.not_contains
+        if contains is None and excluded is None:
             return i
-        try:
-            if definition.formats[i].file.workbook:
-                head = "\n".join(line for lines in workbook.sheets(path).values() for line in lines[:CONTAINS_LINES])
-            else:
-                encoding = definition.formats[i].file.encoding
-                with open(path, encoding="cp1252" if encoding == AUTO_ENCODING else encoding,
-                          errors="replace") as f:
-                    head = "".join(line for _, line in zip(range(CONTAINS_LINES), f))
-        except (OSError, ValueError):
-            continue
-        if contains in head:
+        head = _head(definition.formats[i].file, path, CONTAINS_LINES)
+        if head is not None and (contains is None or contains in head) and (excluded is None or excluded not in head):
             return i
-    expected = "; ".join(
-        f"{definition.formats[i].label or f'format {i + 1}'}: {definition.formats[i].file.contains!r}"
-        for i in candidates
-    )
+
+    def looked_for(file) -> str:
+        return " and ".join(part for part in (f"{file.contains!r}" if file.contains else "",
+                                               f"no {file.not_contains!r}" if file.not_contains else "") if part)
+
+    expected = "; ".join(f"{definition.formats[i].label or f'format {i + 1}'}: {looked_for(definition.formats[i].file)}"
+                         for i in candidates)
     raise ValueError(f"the file matches none of the {definition.name} formats (looked for {expected})")
 
 
@@ -743,11 +814,17 @@ class TabularParser:
             df["name"] = df["sheet"]  # one test per sheet, named after the specimen; a single test keeps the file name
         for value in definition.from_file_name:
             df[value.column] = _stored(value, _capture(value.pattern, Path(path).stem), fmt.decimal, df.index)
+        if "sheet" in df.columns:
+            for value in definition.from_sheet_name:
+                # One value per test sheet, from its name (Excel cuts long names: 'LUBxxx_80C_DCMGel...').
+                parts = [_stored(value, _capture(value.pattern, str(name)), fmt.decimal, df.index[df["sheet"] == name])
+                         for name in df["sheet"].unique()]
+                df[value.column] = pd.concat(parts).reindex(df.index)
         df.attrs[_FORMAT_ATTR] = index
         df.attrs[_TEXT_ATTR] = text
         return df
 
-    def parse(self, dict_paths, *, instrument_model: Optional[str] = None, measurement_profile=None, **context):
+    def parse(self, dict_paths, *, instrument_model: Optional[str] = None, **context):
         definition = self.definition
         _refuse_same_names(dict_paths, lambda path: reads(self, path))
         renamed: Dict[str, str] = {}
@@ -787,20 +864,11 @@ class TabularParser:
             should_parse_raw=lambda path: reads(self, path),
         )
         df, derived_warnings = apply_derived(df, definition)
-        # The registry's measurement profile ("time sweep") as the type's schema names it, for its plot.
         metadata = dict(context.pop("metadata", None) or {})
-        registry_profile = measurement_profile or metadata.get("registry_measurement_profile")
-        if registry_profile:
-            from mfethuls.registry_validator import infer_canonical_profile_from_registry_profile
-
-            measurement_profile = infer_canonical_profile_from_registry_profile(
-                definition.type, registry_profile, instrument_model or definition.model)
-            metadata.update(registry_measurement_profile=registry_profile, measurement_profile=measurement_profile)
         df, schema_report = apply_dataframe_schema(
             df,
             instrument_type=definition.type,
             instrument_model=instrument_model or definition.model,
-            measurement_profile=measurement_profile,
         )
         schema_report["renamed_columns"] = {**renamed, **schema_report.get("renamed_columns", {})}
         schema_report["warnings"] = [*schema_report.get("warnings", []), *derived_warnings, *stored_as_missing]

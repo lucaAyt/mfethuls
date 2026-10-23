@@ -7,7 +7,7 @@ def test_valid_row_builds_experiment():
     result = experiment_from_registry_record(
         {
             "name": "ok",
-            "instrument_name": "dsc_mettler_toledo_v1",
+            "instrument_name": "dsc",
             "raw_data_filename": "my_data_file",
             "sample_id": "S001",
         }
@@ -16,7 +16,7 @@ def test_valid_row_builds_experiment():
     assert result.experiment is not None
     assert result.experiment.name == "ok"
     assert result.experiment.raw_data_filename == "my_data_file"
-    assert result.experiment.instrument_name == "dsc_mettler_toledo_v1"
+    assert result.experiment.instrument_name == "dsc"
     assert result.experiment.experiment_id is None
 
 
@@ -24,7 +24,7 @@ def test_raw_data_filename_defaults_to_name_when_absent():
     result = experiment_from_registry_record(
         {
             "name": "CL_dsc_001",
-            "instrument_name": "dsc_mettler_toledo_v1",
+            "instrument_name": "dsc",
         }
     )
     assert result.errors == []
@@ -35,7 +35,7 @@ def test_raw_data_filename_defaults_to_name_when_absent():
 def test_missing_name_returns_error():
     result = experiment_from_registry_record(
         {
-            "instrument_name": "dsc_mettler_toledo_v1",
+            "instrument_name": "dsc",
         }
     )
     assert result.experiment is None

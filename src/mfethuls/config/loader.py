@@ -3,74 +3,20 @@
 import os
 import logging
 
-from collections import namedtuple
 from dataclasses import replace
 from typing import Any, Optional, Tuple
 
 from mfethuls.dataset import Dataset
-from mfethuls.factory import (
-    get_data_root_path,
-    instrument_data_path_constructor,
-    create_instrument,
-    create_characterizer,
-    parse_experiment as _parse_experiment,
-)
+from mfethuls.factory import parse_experiment as _parse_experiment, prepare_experiment
 from mfethuls.experiments import Experiment, Registry
-from mfethuls.instruments.configured import instrument_entries
 from mfethuls.manifest import content_hash
 from mfethuls.parsers.ingestion import ParseError
-from mfethuls.parsers.registry import reads
 from mfethuls.schema_normalization import add_elapsed_time
 from mfethuls.storage.catalog import CatalogRecord
 from mfethuls.storage.manager import StorageManager
 from mfethuls.stores import Stores, local_stores
 
 logger = logging.getLogger(__name__)
-
-
-def instrument_config():
-    """Every instrument entry (listed and defined), names normalised to lower case."""
-    entries = instrument_entries()
-    for entry in entries:
-        if isinstance(entry.get("name"), str):
-            entry["name"] = entry["name"].strip().casefold()
-    return entries
-
-InstrumentBundle = namedtuple("InstrumentBundle", ["instruments", "data_paths"])
-
-
-def prepare_instruments(filters=None, experiments=None):
-    instruments = {}
-    dict_data_paths = {}
-
-    for entry in filter_entries(filters):
-        type_ = entry.get("type")
-        model = entry.get("model")
-        name = entry.get("name")
-        folder_name = entry["folder_name"]  # required; see tests/test_instrument_config.py
-        characterizer = None
-
-        if "characterizer" in entry:
-            characterizer = create_characterizer(type_, entry["characterizer"])
-
-        data_path = get_data_root_path(folder_name)
-        instr = create_instrument(type_, name, model, characterizer, data_path)
-        instruments[name] = instr
-
-        # Load data paths assoc. with instrument and experiments specified
-        dict_data_paths[name] = instrument_data_path_constructor(data_path, experiments or [])
-
-    return InstrumentBundle(instruments, dict_data_paths)
-
-
-def filter_entries(filters):
-    config = instrument_config()
-    if not filters:
-        return config
-    return [
-        entry for entry in config
-        if any(entry.get(k) in v for k, v in filters.items() if k in entry)
-    ]
 
 
 # Identifier columns parsers write into every data row.
@@ -192,39 +138,27 @@ def _assign_experiment_id(exp, stores: Stores, registry: Optional[Registry] = No
     )
 
 
-def _data_files(instrument, files: list[str], experiment_name: str) -> list[str]:
-    """The files the instrument's parser reads; others next to the data (plots, notes) are skipped."""
-    data = [f for f in files if reads(instrument.parser, f)]
-    skipped = [os.path.basename(f) for f in files if f not in data]
-    if skipped:
-        logger.warning("Experiment %r: not reading %s (not data for %s).",
-                       experiment_name, ", ".join(skipped), instrument.name)
-    return data
-
-
 def _parse_raw(exp, stores: Stores) -> Dataset:
-    """Parse the raw data files of ``exp`` and record their content hash in the manifest."""
+    """Parse the raw data files of ``exp`` and record their content hash in the manifest.
+
+    Files next to the data that its reader does not read (plots, notes) are skipped.
+    """
 
     raw_filename = exp.raw_data_filename or exp.name
-    bundle = prepare_instruments(filters={"name": [exp.instrument_name]}, experiments=[raw_filename])
     try:
-        instrument = bundle.instruments[exp.instrument_name]
-        raw_dict = bundle.data_paths[exp.instrument_name]
-    except KeyError as exc:
-        raise KeyError(
-            f"Instrument {exp.instrument_name!r} for experiment {exp.name!r} "
-            f"is not present in the current instrument configuration."
-        ) from exc
-
-    files = _data_files(instrument, raw_dict.get(raw_filename, []), exp.name)
+        instrument, files, skipped = prepare_experiment(exp.instrument_name, raw_filename)
+    except ValueError as exc:
+        raise ParseError(f"Experiment {exp.name!r} ({raw_filename}): {exc}") from exc
+    if skipped:
+        logger.warning("Experiment %r: not reading %s (not data for %s).",
+                       exp.name, ", ".join(os.path.basename(f) for f in skipped), instrument.reader)
     if not files:
         raise ParseError(f"No {instrument.name} data files found for {exp.name!r} ({raw_filename}).")
     dataset = _parse_experiment(exp, {exp.experiment_id: files}, instrument)
     check_parsed(dataset, instrument.name)
-    if files:
-        stores.manifest.record_content_hash(
-            instrument_name=exp.instrument_name, raw_data_filename=raw_filename, content_hash=content_hash(files)
-        )
+    stores.manifest.record_content_hash(
+        instrument_name=exp.instrument_name, raw_data_filename=raw_filename, content_hash=content_hash(files)
+    )
     return dataset
 
 

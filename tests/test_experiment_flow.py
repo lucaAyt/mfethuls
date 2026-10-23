@@ -22,7 +22,7 @@ def _write_registry(tmpdir: str) -> str:
         [
             {
                 "name": "dsc_test_1",
-                "instrument_name": "dsc_mettler_toledo_v1",
+                "instrument_name": "dsc",
                 "raw_data_filename": "dsc_test_1_data",
                 "sample_id": "S001",
                 "run_id": "R001",
@@ -30,7 +30,7 @@ def _write_registry(tmpdir: str) -> str:
             },
             {
                 "name": "dsc_test_2",
-                "instrument_name": "dsc_mettler_toledo_v1",
+                "instrument_name": "dsc",
                 "raw_data_filename": "dsc_test_2_data",
                 "sample_id": "S002",
                 "run_id": "R001",
@@ -38,7 +38,7 @@ def _write_registry(tmpdir: str) -> str:
             },
             {
                 "name": "dsc_test_3",
-                "instrument_name": "dsc_perkin_elmer",
+                "instrument_name": "dsc",
                 "raw_data_filename": "dsc_test_3_data",
                 "sample_id": "S003",
                 "run_id": "R001",
@@ -150,50 +150,24 @@ def test_registry_load_defaults_from_path_to_registry(monkeypatch):
         assert "dsc_test_1" in set(df_registry["name"])
 
 
-def test_registry_load_infers_measurement_profile_from_description():
+def test_a_description_is_only_a_description():
+    """No measurement profile is guessed from it any more: plots read the sweep from the data."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        registry_path = _write_registry(tmpdir)
-        registry = Registry.load(registry_path)
-
+        registry = Registry.load(_write_registry(tmpdir))
         exp = registry.get("rheometer_test_1")
         assert exp.metadata.get("description") == "Oscillatory frequency sweep rheology run"
-        assert exp.metadata.get("registry_measurement_profile") == "oscillatory_frequency_sweep"
-        assert "measurement_profile" not in exp.metadata
-        assert exp.metadata.get("measurement_profile") is None
+        assert not any("profile" in key for key in exp.metadata)
 
 
-def test_registry_load_infers_dma_measurement_profile_from_description():
+def test_an_old_measurement_profile_column_is_kept_as_a_plain_column():
     with tempfile.TemporaryDirectory() as tmpdir:
-        registry_path = _write_registry(tmpdir)
-        registry = Registry.load(registry_path)
-
-        exp = registry.get("dma_test_1")
-        assert exp.metadata.get("description") == "DMA temperature sweep run"
-        assert exp.metadata.get("registry_measurement_profile") == "oscillatory_temperature_sweep"
-        assert "measurement_profile" not in exp.metadata
-
-
-def test_registry_load_explicit_measurement_profile_trumps_inference():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        registry_path = os.path.join(tmpdir, "experiments_profile_priority.csv")
-        pd.DataFrame(
-            [
-                {
-                    "name": "dma_profile_priority",
-                    "instrument_name": "dma",
-                    "raw_data_filename": "dma_profile_priority_data",
-                    "sample_id": "S001",
-                    "run_id": "R001",
-                    "description": "temperature sweep run",
-                    "measurement_profile": "oscillatory_frequency_sweep",
-                }
-            ]
-        ).to_csv(registry_path, index=False)
-
-        registry = Registry.load(registry_path)
-        exp = registry.get("dma_profile_priority")
-        assert exp.metadata.get("registry_measurement_profile") == "oscillatory_frequency_sweep"
-        assert "measurement_profile" not in exp.metadata
+        registry_path = os.path.join(tmpdir, "experiments_profile.csv")
+        pd.DataFrame([{"name": "dma_1", "instrument_name": "dma", "raw_data_filename": "dma_1_data",
+                       "sample_id": "S001", "run_id": "R001",
+                       "measurement_profile": "oscillatory_frequency_sweep"}]).to_csv(registry_path, index=False)
+        exp = Registry.load(registry_path).get("dma_1")
+        assert exp.metadata["measurement_profile"] == "oscillatory_frequency_sweep"
+        assert "registry_measurement_profile" not in exp.metadata
 
 
 def test_load_experiment_dataset_returns_dataset_even_when_missing_files(monkeypatch):
@@ -284,7 +258,7 @@ def test_registry_load_normalizes_instrument_name_case():
             [
                 {
                     "name": "case_test_1",
-                    "instrument_name": "DSC_METTLER_TOLEDO_V1",
+                    "instrument_name": "DSC",
                     "sample_id": "S001",
                     "run_id": "R001",
                 }
@@ -293,7 +267,7 @@ def test_registry_load_normalizes_instrument_name_case():
 
         registry = Registry.load(registry_path)
         exp = registry.get("case_test_1")
-        assert exp.instrument_name == "dsc_mettler_toledo_v1"
+        assert exp.instrument_name == "dsc"
 
 
 def test_registry_load_keeps_placeholder_experiments_without_instrument_data(caplog):
@@ -331,7 +305,7 @@ def test_registry_load_raw_data_filename_defaults_to_name(caplog):
             [
                 {
                     "name": "exp_no_filename",
-                    "instrument_name": "dsc_mettler_toledo_v1",
+                    "instrument_name": "dsc",
                     "sample_id": "S001",
                     "run_id": "R001",
                 }
@@ -366,14 +340,14 @@ def test_parse_experiment_applies_characterizer_for_dataset_parser_output():
     class _FakeInstrument:
         type_ = "dsc"
         model = "mettler_toledo_v1"
-        name = "dsc_mettler_toledo_v1"
+        name = "dsc"
         parser = _FakeParser()
         characterizer = _FakeCharacterizer()
 
     exp = Experiment(
         name="dsc_char_test",
         experiment_id="abc123def456",
-        instrument_name="dsc_mettler_toledo_v1",
+        instrument_name="dsc",
         sample_id="S001",
         run_id="R001",
     )

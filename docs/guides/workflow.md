@@ -31,8 +31,8 @@ Open `experiments_template.csv` (included in the repo root) in Excel. Delete the
 
 ```
 name,instrument_name,sample_id,run_id,raw_data_filename,description,operator
-LB_dsc_001,dsc_mettler_toledo_v1,S001,R001,poly1,DSC run — polymer 1,LB
-LB_dsc_002,dsc_mettler_toledo_v1,S002,R001,poly2,DSC run — polymer 2,LB
+LB_dsc_001,dsc,S001,R001,poly1,DSC run — polymer 1,LB
+LB_dsc_002,dsc,S002,R001,poly2,DSC run — polymer 2,LB
 ```
 
 Key points:
@@ -66,7 +66,7 @@ Select `LB_dsc_001` and `LB_dsc_002` from the multiselect (or tick **"Select all
 If an experiment cannot be ingested (unknown instrument name, file not found, files that do not read as that instrument's data, …), it is listed with the reason and nothing is stored for it. Fix the registry and ingest again. **Ingest** in the app always reads the files again, so a corrected file or instrument is picked up (in Python, pass `refresh=True`).
 
 When it finishes:
-- Two Parquet files exist under `PATH_TO_LOCAL_STORAGE/dsc_mettler_toledo_v1/<hex_id>/`
+- Two Parquet files exist under `PATH_TO_LOCAL_STORAGE/dsc/<hex_id>/`
 - Two views are registered in the DuckDB catalog: `LB_dsc_001_S001_R001`, `LB_dsc_002_S002_R001`
 
 ---
@@ -77,7 +77,7 @@ In the sidebar, expand **Datasets** and pick `LB_dsc_001` and `LB_dsc_002` in **
 
 - Choose the **X axis** (`temperature_C`) and **Y axis** (`heat_flow_mW`). Lines are coloured by experiment, and every data point is drawn. **Style by** next to **Colour by** tells a second column apart by line style (or marker shape in a scatter plot), e.g. colour by experiment and style by sample.
 - Or switch on **Built-in instrument plot**: the DSC plot with one colour per heating/cooling segment and one line style per experiment.
-- **Filter**, at the top of **Plot** next to the built-in plot toggle, plots only some rows: choose a column (those worth filtering on, such as the DSC segments `Heating_1`, `Cooling_1`, …, come first, and the button names the first, e.g. **Filter by profile**) and the values to keep. While it is on, the button is coloured and names what is kept (**Filter: Heating_1**), and a line under the chart says how many rows are shown, with **Clear**. **Log X**, **Log Y** and **Invert X** sit next to **Axis limits** above the chart.
+- **Filter**, at the top of **Plot** next to the built-in plot toggle, plots only some rows: choose a column (those worth filtering on, such as the DSC segments `Heating_1`, `Cooling_1`, …, come first, and the button names the first, e.g. **Filter by profile**) and the values to keep. While it is on, the button is coloured and names what is kept (**Filter: Heating_1**), and a line under the chart says how many rows are shown, with **Clear**. **Log X**, **Log Y** and **Invert X** sit next to **Axis limits** above the chart, and with several experiments **Layout** draws them **Together**, **Offset** (shifted apart, with a spacing slider) or in **Panels** that share the x-axis, in both plots. **Normalise**, next to **Filter**, scales each experiment (max = 1, 0 to 1 or area = 1) to compare curves by their shape; the data itself is not changed.
 - Zoom by dragging a box, and double-click to reset.
 
 The toolbar above the chart has an **Axis limits** toggle (it opens min/max fields above the chart, so the axes stay visible) and a **Download** menu on the right for the figure as a vector **SVG** (publication style, editable in Inkscape, using your axis limits) or as interactive **HTML**. See the [plotting guide](plotting.md#streamlit-dashboard) for colour scales and data size.

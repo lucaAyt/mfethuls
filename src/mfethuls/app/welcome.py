@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -26,7 +25,6 @@ import streamlit as st
 from mfethuls.app.register import clear_registry_caches, count_new_data, registry_frame
 from mfethuls.discovery import REGISTRY_COLUMNS
 from mfethuls.examples import DEFAULT_WORKSPACE, create_workspace
-from mfethuls.registry_validator import _load_instrument_config
 from mfethuls.settings import DEFAULT_REGISTRY_NAME, configure, get_settings, save_settings, settings_file
 
 _EXAMPLE_KEY = "example_workspace"
@@ -229,13 +227,6 @@ def render_landing(backend) -> None:
 # -- setup --------------------------------------------------------------------------
 
 
-def _instrument_folders() -> Dict[str, List[Dict[str, Any]]]:
-    folders: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for entry in _load_instrument_config():
-        folders[entry["folder_name"]].append(entry)
-    return dict(sorted(folders.items()))
-
-
 def render_folder_layout() -> None:
     """The expected layout of the data folder, and the instrument folder names mfethuls knows."""
     st.code(
@@ -253,15 +244,17 @@ def render_folder_layout() -> None:
         "registry.xlsx                  ← registry: one row per experiment, made for you",
         language=None,
     )
+    from mfethuls.instruments.configured import instruments, readers_of
+
     rows = [
         {
-            "Folder": f"{folder}/",
-            "Instruments": ", ".join(entry["name"] for entry in entries),
+            "Folder": f"{instrument.folder_name}/",
+            "Instrument": instrument.name,
             "An experiment is": " or ".join(sorted({
-                "a folder of files" if entry.get("data_layout") == "folder" else "a file" for entry in entries
+                "a folder of files" if reader.layout == "folder" else "a file" for reader in readers_of(instrument)
             })),
         }
-        for folder, entries in _instrument_folders().items()
+        for instrument in sorted(instruments(), key=lambda i: i.folder_name.casefold())
     ]
     with st.expander("Instrument folder names"):
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
@@ -273,7 +266,9 @@ def _check_data_folder(path: str) -> None:
     if not os.path.isdir(path):
         st.warning("This folder does not exist.", icon=":material/folder_off:")
         return
-    known = set(_instrument_folders())
+    from mfethuls.instruments.configured import instruments
+
+    known = {instrument.folder_name for instrument in instruments(data_root=path)}
     children = sorted(d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d)) and not d.startswith("."))
     found = [d for d in children if d in known]
     other = [d for d in children if d not in known and not d.startswith("_")]

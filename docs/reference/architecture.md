@@ -12,7 +12,7 @@ flowchart TD
   B -->|structural error| X[skip — logged as warning]
   B -->|ok| C[Assign experiment_id via the manifest\nauto-generate hex ID on first ingest]
   C --> D[Find raw files via os.walk\nmatches raw_data_filename]
-  D --> E[Select parser by instrument + model\nkeep only files it reads]
+  D --> E[Reader of the instrument's type that recognises the files\nkeep only files it reads]
   E --> F[collect_dataframe_from_paths\nper-file error isolation]
   F --> G[apply_dataframe_schema\nalias mapping + dtype coercion]
   G --> H[Dataset: data + metadata]
@@ -109,10 +109,10 @@ Each kind of fact about an experiment has one owner. Everything else is derived 
 
 | Owner | Holds |
 |---|---|
-| Registry CSV/XLSX | Descriptive fields: name, instrument, sample, run, measurement profile, description, extra columns |
+| Registry CSV/XLSX | Descriptive fields: name, instrument, sample, run, description, extra columns |
 | Manifest (`.mfethuls_manifest.json`) | Identity: `experiment_id` ↔ (instrument, raw file), the latest name, and a `content_hash` of the raw data files. The file is changed under a lock and replaced atomically; an unreadable manifest stops ingest instead of starting over. |
 | Parquet + `.metadata.json` sidecar | Measurements; the sidecar records what was true at parse time (parser, schema version, schema report) |
-| **DuckDB `dataset_registry` (the catalog)** | One row per dataset, written on each ingest from a single `CatalogRecord` (`storage/catalog.py`): experiment, instrument name/type/model, sample, run, canonical measurement profile, row count, storage path. The app and `storage.notebook.list_datasets()` read only the catalog. |
+| **DuckDB `dataset_registry` (the catalog)** | One row per dataset, written on each ingest from a single `CatalogRecord` (`storage/catalog.py`): experiment, instrument name/type/model, the reader that read it, sample, run, row count, storage path. The app and `storage.notebook.list_datasets()` read only the catalog. |
 
 Catalogs created before this layout get the new columns automatically. Rows without an `experiment_id` are filled from their sidecars the next time the database is opened (any open, read-only included). The registry is read fresh wherever it is needed (nothing is kept between calls), and when a stored dataset is loaded its descriptive fields (description, extra columns, sample/run ids in the data) are taken from the current registry, not the ingest snapshot. Correcting a sample or run id registers the experiment under a new view name; the old catalog row and view are removed, and the old Parquet file is named in a warning but kept on disk. `reconcile.py` (the app's **Clean up**) removes such leftovers, and the derived records of experiments removed from the registry; see [Cleaning up after registry changes](registry.md#cleaning-up-after-registry-changes).
 
@@ -142,7 +142,7 @@ src/mfethuls/
   stores.py               # Stores: manifest, storage, catalog, metadata sink; local_stores()
   discovery.py            # Raw data the registry does not describe yet; proposed registry rows
   reconcile.py            # plan/apply: bring manifest, catalog and storage in line with the registry
-  factory.py              # parse_experiment + instrument_data_path_constructor
+  factory.py              # prepare_experiment (instrument, files, reader) + parse_experiment
   schema_normalization.py # Column aliasing + dtype coercion
   dataset.py              # Dataset dataclass
   comparison.py           # ComparisonSet for multi-experiment analysis
@@ -155,13 +155,14 @@ src/mfethuls/
     tga.py                # TGA mass_pct computation from mass_mg
   config/
     loader.py             # Ingest orchestration — ingest_experiment_dataset, load_experiment_dataset
-    instrument_params.json  # Instruments read by code parsers (NMR)
-    instruments/          # Built-in instrument definitions (FTIR, TGA, MS, ...); labs add theirs in PATH_TO_DATA/.mfethuls/instruments
+    instruments.json      # Built-in instruments: one per measurement type, with its folder (dsc -> DSC/)
+    code_readers.json     # Readers that are code parsers (Bruker NMR)
+    readers/              # Built-in readers: definitions (FTIR, TGA, MS, ...); labs add theirs in PATH_TO_DATA/.mfethuls/readers
     schemas/              # Per-instrument JSON schema files
   instruments/
     definition.py         # InstrumentDefinition: parse/validate the JSON format
     units.py              # Quantities, standard columns and unit conversions
-    configured.py         # All instruments: params + built-in + lab definitions; save_definition, sample checks
+    configured.py         # Instruments (folder, type) and readers (export formats): built-in + the lab's; reader_for picks each experiment's reader
     detect.py             # Guess a definition from a sample file (no AI)
     spec.py               # JSON Schema and the chatbot prompt (spec_card)
     workbook.py           # Excel workbooks as text: each sheet's rows as tab-separated lines

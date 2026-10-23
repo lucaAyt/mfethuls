@@ -1,0 +1,9 @@
+[
+  {
+    "type": "nmr",
+    "model": "bruker_nmr",
+    "name": "nmr",
+    "data_layout": "folder",
+    "description": "Bruker NMR experiment folder (fid or 1r/1i with acqus and procs), read with nmrglue."
+  }
+]

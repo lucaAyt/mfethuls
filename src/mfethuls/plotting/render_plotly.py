@@ -85,13 +85,24 @@ def _add_colorbar(fig, colorbar: Colorbar, *, row: Optional[int]) -> None:
     )
 
 
-def _add_panel_traces(fig, panel: Panel, *, row: Optional[int]) -> None:
+def _add_panel_traces(fig, panel: Panel, *, row: Optional[int], shown: Optional[set] = None) -> None:
+    """Add ``panel``'s traces (to subplot ``row`` of a facet).
+
+    ``shown`` collects the legend entries of a facet's earlier panels: a label already in
+    the legend is not listed again, and its curves in every panel toggle together.
+    """
     import plotly.graph_objects as go
 
     position = {"row": row, "col": 1} if row is not None else {}
 
     for trace in panel.traces:
         color = panel.trace_color(trace)
+        in_legend = bool(trace.label) and panel.legend and not panel.legends
+        group = trace.legend_group
+        if shown is not None and in_legend:
+            group = group or f"label:{trace.label}"
+            in_legend = group not in shown
+            shown.add(group)
         fig.add_trace(
             go.Scattergl(
                 x=trace.x,
@@ -100,8 +111,8 @@ def _add_panel_traces(fig, panel: Panel, *, row: Optional[int]) -> None:
                 name=_text(trace.label) or "",
                 line=_line(color, trace.linestyle),
                 marker={"size": 5, "color": _color(color), "symbol": _SYMBOLS.get(trace.marker, "circle")},
-                legendgroup=trace.legend_group,
-                showlegend=bool(trace.label) and panel.legend and not panel.legends,
+                legendgroup=group,
+                showlegend=in_legend,
             ),
             **position,
         )
@@ -140,6 +151,11 @@ def _add_panel_traces(fig, panel: Panel, *, row: Optional[int]) -> None:
                 "y": 1.02 + 0.08 * (idx - 1),
                 "yanchor": "bottom",
             }
+        # Plotly gives a curve one legend group: entries no curve belongs to (the line styles,
+        # when the curves are grouped by colour) would hide only themselves, so they don't react.
+        groups = {trace.legend_group for trace in panel.traces}
+        if not any(entry.group and entry.group in groups for entry in spec_legend.entries):
+            placement.update(itemclick=False, itemdoubleclick=False)
         fig.update_layout({legend_id: {"title": {"text": _text(spec_legend.title)}, "font": {"size": FONT_SIZE - 2}, **placement}})
 
 
@@ -163,6 +179,8 @@ def _axis_options(panel: Panel) -> tuple[dict, dict]:
     elif panel.x_reversed:
         xaxis["autorange"] = "reversed"
     yaxis: dict[str, Any] = {"title": {"text": _text(panel.ylabel)}, "type": panel.yscale}
+    if not panel.y_ticks:
+        yaxis["showticklabels"] = False
     if panel.ylim is not None:
         yaxis["range"] = _axis_range(panel.ylim, panel.yscale)
     for axis, scale in ((xaxis, panel.xscale), (yaxis, panel.yscale)):
@@ -180,13 +198,24 @@ def render(spec: PlotSpec):
     if spec.layout == "facet":
         count = len(spec.panels)
         spacing = min(0.08, 0.5 / (count - 1)) if count > 1 else 0.0
-        fig = make_subplots(rows=count, cols=1, vertical_spacing=spacing)
+        if spec.shared_x:
+            spacing = min(0.03, 0.3 / (count - 1)) if count > 1 else 0.0
+        titles = [_text(panel.title) or "" for panel in spec.panels]
+        if any(titles) and spec.shared_x:
+            spacing = max(spacing, min(0.06, 0.3 / (count - 1)) if count > 1 else 0.0)  # room for the names
+        fig = make_subplots(rows=count, cols=1, vertical_spacing=spacing, shared_xaxes=spec.shared_x,
+                            subplot_titles=titles if any(titles) else None)
+        # Each panel is named after its experiment, small and on the left, like a legend.
+        fig.update_annotations(font={"size": FONT_SIZE}, x=0, xanchor="left")
+        shown: set = set()
         for row, panel in enumerate(spec.panels, start=1):
-            _add_panel_traces(fig, panel, row=row)
+            _add_panel_traces(fig, panel, row=row, shown=shown)
             xaxis, yaxis = _axis_options(panel)
+            if spec.shared_x and row < count:
+                xaxis["title"] = {"text": None}  # one x-axis: named under the last panel
             fig.update_xaxes(xaxis, row=row, col=1)
             fig.update_yaxes(yaxis, row=row, col=1)
-        fig.update_layout(height=FACET_PANEL_HEIGHT_PX * count + 80, title={"text": _text(spec.title)})
+        fig.update_layout(height=FACET_PANEL_HEIGHT_PX * count + 80, title={"text": _text(spec.title) or ""})
     else:
         panel = spec.panel
         fig = go.Figure()

@@ -62,25 +62,26 @@ CHARACTERIZERS = {"dsc_profiling": ("dsc", {"sensitivity"}), "tga": ("tga", set(
 _PLOT_KEYS = {"x", "y", "group_by"}
 
 _TOP_KEYS = {
-    "spec_version", "name", "type", "model", "folder_name", "data_layout", "description",
-    "file", "columns", "formats", "derived", "characterizer", "plot", "check", "name_from", "from_file_name",
+    "spec_version", "name", "type", "model", "data_layout", "description",
+    "file", "columns", "formats", "derived", "characterizer", "plot", "check", "name_from", "from_file_name", "from_sheet_name",
     "from_header", "tables",
 }
 NAME_FROM = ("file", "folder", "sheet")
 _FORMAT_KEYS = {"label", "file", "columns"}
 _FILE_KEYS = {"extensions", "encoding", "delimiter", "decimal", "header", "data_ends", "comment", "contains",
+              "not_contains",
               "segment_lines", "blocks", "sheet", "duplicate_rows"}
 DUPLICATE_ROWS = ("keep", "drop")
-_TABLE_KEYS = {"name", "starts_at", "ends_at", "columns"}
+_TABLE_KEYS = {"name", "starts_at", "ends_at", "columns", "sheet", "header"}
 _BLOCK_KEYS = {"starts_at", "label", "column"}
 # "auto": UTF-8, else Windows cp1252 (what most instrument software writes).
 AUTO_ENCODING = "auto"
 _HEADER_KEYS = {"starts_at", "skip_lines", "rows", "names_from"}
 _VALUE_KEYS = {"column", "pattern", "type", "values", "timezone"}
 
-# Keys that do not change how files are read (left out of the fingerprint): renaming an
-# instrument or its folder does not ask for its data to be read again.
-_NOT_READING = {"description", "check", "name", "folder_name", "data_layout"}
+# Keys that do not change how files are read (left out of the fingerprint): renaming a
+# reader does not ask for its data to be read again.
+_NOT_READING = {"description", "check", "name", "data_layout"}
 
 
 class DefinitionError(ValueError):
@@ -119,6 +120,8 @@ class FileFormat:
     data_ends: str = "end_of_file"
     comment: Optional[str] = None
     contains: Optional[str] = None
+    # Files with this text near the top are another layout's (e.g. an older export of the same instrument).
+    not_contains: Optional[str] = None
     # Text lines inside the table label the rows below them (column "segment").
     segment_lines: bool = False
     # Column names listed one per line before the table: the first group of this pattern.
@@ -185,12 +188,21 @@ class TextTable:
     containing ``ends_at`` (or the end of that text), that start with a number. They
     are stored in the dataset's metadata ``tables[name][file]`` as records named by
     ``columns`` (further fields: ``column_3``, ...). The lines also stay in the file text.
+
+    With ``header_rows``, the table has its own header lines (names, then units),
+    starting at the ``starts_at`` line (or the first line), and every line below
+    them is a row, whatever its first field: a workbook's results sheet with one row
+    per specimen. Fields are named as the data's columns are (``"sM kPa"``);
+    ``columns`` names those without a header, in order. ``sheet`` (workbooks) looks
+    only in that sheet.
     """
 
     name: str
-    starts_at: str
+    starts_at: Optional[str] = None
     columns: Tuple[str, ...] = ()
     ends_at: Optional[str] = None
+    sheet: Optional[str] = None
+    header_rows: int = 0
 
 
 @dataclass(frozen=True)
@@ -210,7 +222,6 @@ class InstrumentDefinition:
     name: str
     type: str
     model: str
-    folder_name: str
     data_layout: str
     formats: Tuple[Format, ...]
     derived: Tuple[Derived, ...] = ()
@@ -220,6 +231,8 @@ class InstrumentDefinition:
     check: Optional[Dict[str, Any]] = None
     name_from: str = "file"  # each file's rows are named after the file, or its folder
     from_file_name: Tuple[CapturedValue, ...] = ()
+    # Workbooks: columns filled from each test sheet's name (e.g. the sample: LUB640_1 -> LUB640).
+    from_sheet_name: Tuple[CapturedValue, ...] = ()
     from_header: Tuple[CapturedValue, ...] = ()
     tables: Tuple[TextTable, ...] = ()
     spec_version: int = SPEC_VERSION
@@ -236,26 +249,11 @@ class InstrumentDefinition:
         """Short hash of everything that decides how files are read.
 
         Changes when the definition is edited in a way that can change the data
-        (not for its ``description``, ``check``, ``name``, ``folder_name`` or
-        ``data_layout``).
+        (not for its ``description``, ``check``, ``name`` or ``data_layout``).
         """
         reading = {k: v for k, v in self.raw.items() if k not in _NOT_READING}
         text = json.dumps(reading, sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(text.encode("utf8")).hexdigest()[:12]
-
-    def instrument_entry(self) -> Dict[str, Any]:
-        """The instrument's entry in the instrument list (as in ``instrument_params.json``)."""
-        entry = {
-            "type": self.type,
-            "model": self.model,
-            "name": self.name,
-            "folder_name": self.folder_name,
-            "data_layout": self.data_layout,
-            "definition": self.source or "built-in",
-        }
-        if self.characterizer:
-            entry["characterizer"] = dict(self.characterizer)
-        return entry
 
 
 def _sources(value: Any) -> Tuple[str, ...]:
@@ -280,7 +278,7 @@ def parse_definition(data: Dict[str, Any], source: Optional[str] = None) -> Inst
     problems: List[str] = []
     if not isinstance(data, dict):
         raise DefinitionError(["the file must contain one JSON object { ... }"], source)
-    _unknown(data, _TOP_KEYS, "", problems)
+    _unknown({k: v for k, v in data.items() if k != "folder_name"}, _TOP_KEYS, "", problems)
 
     def text(key: str, *, required: bool = True, default: str = "") -> str:
         value = data.get(key, default)
@@ -304,9 +302,9 @@ def parse_definition(data: Dict[str, Any], source: Optional[str] = None) -> Inst
     if type_ and not _NAME_RE.match(type_):
         problems.append(f"'type' {type_!r} may only contain a-z, 0-9, '_' and '-'")
     model = text("model")
-    folder_name = text("folder_name")
-    if folder_name and (issue := file_name_problem(folder_name)):
-        problems.append(f"'folder_name' {folder_name!r} {issue}: it is the instrument's folder in the data folder")
+    if "folder_name" in data:
+        problems.append("'folder_name' belongs to the instrument, not to its reader: give the folder in the "
+                        "instrument's own file (see .mfethuls/instruments)")
     data_layout = text("data_layout", required=False, default="file")
     if data_layout not in LAYOUTS:
         problems.append(f"'data_layout' must be 'file' or 'folder', not {data_layout!r}")
@@ -367,12 +365,15 @@ def parse_definition(data: Dict[str, Any], source: Optional[str] = None) -> Inst
         name_from = "file"
 
     from_file_name = _parse_values(data, "from_file_name", problems)
+    from_sheet_name = _parse_values(data, "from_sheet_name", problems)
+    if from_sheet_name and not any(f.file.workbook for f in formats):
+        problems.append("'from_sheet_name' only goes with workbooks (.xlsx): their tests are on named sheets")
     from_header = _parse_values(data, "from_header", problems)
-    captured = [v.column for v in (*from_file_name, *from_header)]
+    captured = [v.column for v in (*from_file_name, *from_sheet_name, *from_header)]
     for column in sorted({c for c in captured if captured.count(c) > 1}):
-        problems.append(f"the column {column!r} is filled twice by from_file_name / from_header")
+        problems.append(f"the column {column!r} is filled twice by from_file_name / from_sheet_name / from_header")
 
-    tables = _parse_tables(data.get("tables"), problems)
+    tables = _parse_tables(data.get("tables"), problems, workbooks=any(f.file.workbook for f in formats))
 
     if problems:
         raise DefinitionError(problems, source)
@@ -381,7 +382,6 @@ def parse_definition(data: Dict[str, Any], source: Optional[str] = None) -> Inst
         name=name,
         type=type_,
         model=model,
-        folder_name=folder_name,
         data_layout=data_layout,
         formats=tuple(formats),
         derived=tuple(derived),
@@ -391,6 +391,7 @@ def parse_definition(data: Dict[str, Any], source: Optional[str] = None) -> Inst
         check=dict(check) if check else None,
         name_from=name_from,
         from_file_name=tuple(from_file_name),
+        from_sheet_name=tuple(from_sheet_name),
         from_header=tuple(from_header),
         tables=tables,
         raw=json.loads(json.dumps(data)),
@@ -442,7 +443,7 @@ def _parse_values(data: Dict[str, Any], key: str, problems: List[str]) -> Tuple[
     return tuple(out)
 
 
-def _parse_tables(raw: Any, problems: List[str]) -> Tuple[TextTable, ...]:
+def _parse_tables(raw: Any, problems: List[str], workbooks: bool = False) -> Tuple[TextTable, ...]:
     """``tables``: second tables in the text around the data, kept as metadata."""
     if raw is None:
         return ()
@@ -459,7 +460,25 @@ def _parse_tables(raw: Any, problems: List[str]) -> Tuple[TextTable, ...]:
         where = f"tables {i} ({item['name']})"
         _unknown(item, _TABLE_KEYS, f"{where}: ", problems)
         starts_at, ends_at, columns = item.get("starts_at"), item.get("ends_at"), item.get("columns", [])
-        if not (isinstance(starts_at, str) and starts_at.strip()):
+        sheet, header = item.get("sheet"), item.get("header")
+        header_rows = 0
+        if header is not None:
+            if not (isinstance(header, dict) and set(header) <= {"rows"} and header.get("rows") in (1, 2, 3)):
+                problems.append(f"{where}: 'header' must be {{\"rows\": 1}} (names) or {{\"rows\": 2}} (names, then units)")
+                continue
+            header_rows = header["rows"]
+        if sheet is not None:
+            if not (isinstance(sheet, str) and sheet.strip()):
+                problems.append(f"{where}: 'sheet' must be the sheet's name, e.g. \"Results\"")
+                continue
+            if not workbooks:
+                problems.append(f"{where}: 'sheet' only goes with workbooks (.xlsx)")
+                continue
+        if starts_at is None and not (sheet and header_rows):
+            problems.append(f"{where}: 'starts_at' must be text on the line before the table's rows "
+                            "(or on its header line); a table with a 'sheet' and a 'header' needs none")
+            continue
+        if starts_at is not None and not (isinstance(starts_at, str) and starts_at.strip()):
             problems.append(f"{where}: 'starts_at' must be text on the line before the table's rows")
             continue
         if ends_at is not None and not (isinstance(ends_at, str) and ends_at.strip()):
@@ -471,7 +490,7 @@ def _parse_tables(raw: Any, problems: List[str]) -> Tuple[TextTable, ...]:
         if any(t.name == item["name"] for t in out):
             problems.append(f"{where}: another table has this name")
             continue
-        out.append(TextTable(item["name"], starts_at, tuple(columns), ends_at))
+        out.append(TextTable(item["name"], starts_at, tuple(columns), ends_at, sheet, header_rows))
     return tuple(out)
 
 
@@ -588,6 +607,10 @@ def _parse_file(data: Dict[str, Any], where: str, problems: List[str]) -> FileFo
     if contains is not None and not (isinstance(contains, str) and contains.strip()):
         problems.append(f"{where}'file.contains' must be text found near the top of this layout's files")
         contains = None
+    not_contains = data.get("not_contains")
+    if not_contains is not None and not (isinstance(not_contains, str) and not_contains.strip()):
+        problems.append(f"{where}'file.not_contains' must be text found near the top of other layouts' files only")
+        not_contains = None
 
     blocks = data.get("blocks")
     if blocks is not None:
@@ -632,6 +655,7 @@ def _parse_file(data: Dict[str, Any], where: str, problems: List[str]) -> FileFo
         data_ends=data_ends,
         comment=comment,
         contains=contains,
+        not_contains=not_contains,
         segment_lines=segment_lines,
         names_from=names_from,
         blocks=blocks,
@@ -778,9 +802,9 @@ def load_definition(path: Union[str, Path]) -> InstrumentDefinition:
     return parse_definition(definition_json(text, str(path)), source=str(path))
 
 
-BUILTIN_DIR = Path(__file__).resolve().parent.parent / "config" / "instruments"
+BUILTIN_DIR = Path(__file__).resolve().parent.parent / "config" / "readers"
 
 
 def builtin_definitions() -> List[InstrumentDefinition]:
-    """Definitions shipped with mfethuls (``config/instruments/*.json``)."""
+    """Readers shipped with mfethuls (``config/readers/*.json``)."""
     return [load_definition(path) for path in sorted(BUILTIN_DIR.glob("*.json"))]

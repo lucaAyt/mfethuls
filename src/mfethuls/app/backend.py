@@ -19,7 +19,7 @@ from mfethuls.settings import get_settings
 
 _CATALOG_TEXT_FIELDS = (
     "experiment_id", "experiment_name", "raw_data_filename", "instrument_name",
-    "instrument_type", "instrument_model", "sample_id", "run_id", "measurement_profile",
+    "instrument_type", "instrument_model", "sample_id", "run_id",
 )
 
 
@@ -63,7 +63,8 @@ def query_local_dataset(name: str, limit: Optional[int] = None, offset: int = 0)
     return _query_catalog(local_catalog_path(), name, limit, offset)
 
 
-@st.cache_data(show_spinner=False, ttl=600)
+# Not cached here: the page keeps the experiments it shows (page._selection), without the copy and
+# pickling st.cache_data makes on every rerun (seconds and hundreds of MB for a long in-situ series).
 def _query_catalog(db_path: str, name: str, limit: Optional[int], offset: int) -> pd.DataFrame:
     from mfethuls.storage import duckdb_session
 
@@ -72,6 +73,19 @@ def _query_catalog(db_path: str, name: str, limit: Optional[int], offset: int) -
         if limit is None:
             return catalog.query(f'SELECT * FROM "{safe}" OFFSET ?', [offset])
         return catalog.query(f'SELECT * FROM "{safe}" LIMIT ? OFFSET ?', [limit, offset])
+
+
+def pick_experiments(names: List[str]) -> List[str]:
+    """The Ingest sidebar's choice of experiments: the list, with **Select all** on its label's line.
+
+    With Select all ticked, the list stays in place (greyed out, saying how many) instead of vanishing.
+    """
+    with st.container(horizontal=True, horizontal_alignment="distribute", vertical_alignment="center"):
+        st.markdown(":small[Experiments]", width="content")
+        select_all = st.checkbox("Select all", value=False, width="content")
+    chosen = st.multiselect("Experiments", options=names, label_visibility="collapsed", disabled=select_all,
+                            placeholder=f"All {len(names)} experiments" if select_all else "Choose experiments")
+    return list(names) if select_all else chosen
 
 
 class LocalBackend:
@@ -118,8 +132,7 @@ class LocalBackend:
 
         selected: List[str] = []
         if experiment_names:
-            select_all = st.checkbox("Select all", value=False)
-            selected = experiment_names if select_all else st.multiselect("Experiments", options=experiment_names)
+            selected = pick_experiments(experiment_names)
             st.caption(f"{len(selected)} selected.")
         elif registry_path:
             st.caption("Registered experiments are listed here, ready to ingest.")
@@ -143,6 +156,7 @@ class LocalBackend:
                 st.warning(message)  # stays with the errors above
             else:
                 st.session_state["ingest_message"] = message
+                st.session_state["just_ingested"] = True  # the page opens Datasets (page.INGESTED)
                 st.rerun()
         return registry_path
 
@@ -156,17 +170,17 @@ class LocalBackend:
 
     def clear_caches(self) -> None:
         _list_catalog.clear()
-        _query_catalog.clear()
 
     def ingest(self, names: List[str], registry_path: str, refresh: bool = False) -> List[tuple]:
         """Ingest experiments into the local stores; returns ``(name, result)`` pairs."""
         from mfethuls.config.loader import ingest_experiment_dataset
         from mfethuls.experiments import Registry
+        from mfethuls.manifest import one_scan_per_folder
         from mfethuls.stores import open_local_stores
 
         registry = Registry.load(registry_path)
         results = []
-        with open_local_stores() as stores:
+        with open_local_stores() as stores, one_scan_per_folder():
             for name in names:
                 try:
                     result = ingest_experiment_dataset(name, refresh=refresh, registry=registry, stores=stores)

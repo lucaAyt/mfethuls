@@ -211,7 +211,7 @@ def test_text_in_a_number_column_is_recorded_with_the_file(tmp_path):
     path = tmp_path / "run1.txt"
     path.write_text("T\tm\n1\t5.0\n2\t--\n3\t4.8\n4\t4.7\n5\tn/a\n", encoding="utf8")
     definition = parse_definition({
-        "name": "probe", "type": "tga", "model": "probe", "folder_name": "Probe",
+        "name": "probe", "type": "tga", "model": "probe",
         "file": {"extensions": [".txt"], "delimiter": "tab"},
         "columns": [{"source": "T", "quantity": "temperature", "unit": "°C"},
                     {"source": "m", "quantity": "mass", "unit": "mg"}],

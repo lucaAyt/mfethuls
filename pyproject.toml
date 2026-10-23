@@ -1,6 +1,6 @@
 [project]
 name = "mfethuls"
-version = "0.4.1"
+version = "0.5.0"
 description = "From scattered instrument files to analysis-ready data: a Python framework and app that read, clean and organise experimental lab data."
 authors = [{name = "Luca Bertossi", email = "lucabertossi@gmail.com"}]
 readme = "README.md"
@@ -29,14 +29,13 @@ dependencies = [
     "openpyxl>=3.1.0",
     "pandas>=1.5.3",
     "pyarrow>=20.0.0",
+    "python-dateutil>=2.8.2",  # time zones of instrument dates
     "python-dotenv>=1.0.0",
-    "pytz>=2024.1",
     "regex>=2024.11.6",
 ]
 
 [project.optional-dependencies]
 notebook = [
-    "notebook>=6.5.3",
     "marimo>=0.9.0",
     "matplotlib>=3.10.1",
     "plotly>=6.0.0",
@@ -66,7 +65,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 mfethuls = ["py.typed"]
-"mfethuls.config" = ["*.json", "schemas/*.json", "instruments/*.json"]
+"mfethuls.config" = ["*.json", "schemas/*.json", "readers/*.json"]
 "mfethuls.examples" = ["experiments_registry.csv", "data/**/*"]
 "mfethuls.tutorials" = ["*.py"]
 

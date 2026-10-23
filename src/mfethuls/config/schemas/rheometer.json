@@ -11,35 +11,5 @@
     "shear_rate_s_inv": "float64",
     "shear_stress_pa": "float64",
     "viscosity_pa_s": "float64"
-  },
-  "profiles": {
-    "oscillatory_frequency_sweep": {
-      "required_columns": [
-        "angular_frequency_rad_s",
-        "storage_modulus_pa",
-        "loss_modulus_pa"
-      ]
-    },
-    "oscillatory_strain_sweep": {
-      "required_columns": [
-        "strain_pct",
-        "storage_modulus_pa",
-        "loss_modulus_pa"
-      ]
-    },
-    "oscillatory_time_sweep": {
-      "required_columns": [
-        "time_s",
-        "storage_modulus_pa",
-        "loss_modulus_pa"
-      ]
-    },
-    "flow_curve": {
-      "required_columns": [
-        "shear_rate_s_inv",
-        "shear_stress_pa",
-        "viscosity_pa_s"
-      ]
-    }
   }
 }

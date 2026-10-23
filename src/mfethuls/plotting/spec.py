@@ -97,6 +97,8 @@ class Panel:
     # Hand-built legends; when set they replace the per-trace legend.
     legends: list[Legend] = field(default_factory=list)
     colorbar: Optional[Colorbar] = None
+    # False hides the y tick values, e.g. for curves shifted apart (their values are no longer the data's).
+    y_ticks: bool = True
 
     def trace_color(self, trace: Trace):
         """Colour to draw ``trace`` with: its colour-bar position if set, else ``trace.color``."""
@@ -112,6 +114,10 @@ class PlotSpec:
     panels: list[Panel]
     layout: Literal["single", "facet"] = "single"
     title: Optional[str] = None
+    # Facets only: the panels share one x-axis (zooming one zooms all); its values show under the last.
+    shared_x: bool = False
+    # What the figure could not do as asked, for the reader (e.g. an experiment left unnormalised).
+    notes: list[str] = field(default_factory=list)
 
     @property
     def panel(self) -> Panel:

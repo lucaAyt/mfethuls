@@ -37,7 +37,7 @@ def _tensile_workbook(path, sample="LUB001_test", rows=((0.0, 0.001), (0.01, 0.0
 
 
 TENSILE = {
-    "name": "tensile_tester", "type": "tensile", "model": "zwick", "folder_name": "tensile_tester",
+    "name": "tensile_tester", "type": "tensile", "model": "zwick",
     "file": {"extensions": [".xlsx"], "header": {"starts_at": "Strain", "rows": 2}},
     "columns": [
         {"source": "Strain mm", "quantity": "strain", "unit": "mm"},
@@ -107,7 +107,7 @@ def test_detect_reads_a_workbook_with_bare_units(tmp_path):
     assert detection.file["header"] == {"rows": 2, "starts_at": "Strain"}
     guesses = {g.source: (g.quantity, g.unit) for g in detection.columns}
     assert guesses == {"Strain mm": ("strain", "mm"), "Shearing stress MPa": ("shear_stress", "MPa")}
-    definition = parse_definition(detection.definition(name="t", type="tensile", model="m", folder_name="f"))
+    definition = parse_definition(detection.definition(name="t", type="tensile", model="m"))
     assert len(_parse(definition, path).data) == 3
 
 
@@ -146,7 +146,7 @@ def test_sample_mass_from_the_footer_gives_heat_flow_in_mW(tmp_path):
     path = tmp_path / "lub1.txt"
     path.write_text(DSC_PRIOR_LIKE, encoding="utf-8")
     definition = parse_definition({
-        "name": "dsc_x", "type": "dsc", "model": "x", "folder_name": "DSC",
+        "name": "dsc_x", "type": "dsc", "model": "x",
         "file": {"extensions": [".txt"], "delimiter": "whitespace", "header": {"starts_at": "Index", "rows": 2},
                  "data_ends": "first_non_numeric_row"},
         "columns": [{"source": "t [s]", "quantity": "time", "unit": "s"},
@@ -163,7 +163,7 @@ def test_sample_mass_from_the_footer_gives_heat_flow_in_mW(tmp_path):
 
 def test_divide_skips_files_without_the_other_column():
     definition = parse_definition({
-        "name": "d", "type": "dsc", "model": "x", "folder_name": "DSC", "file": {"extensions": [".txt"]},
+        "name": "d", "type": "dsc", "model": "x", "file": {"extensions": [".txt"]},
         "columns": [{"source": "HF", "quantity": "heat_flow", "unit": "mW"}],
         "derived": [{"op": "divide", "column": "heat_flow_mW", "by": "sample_mass_mg", "into": "heat_flow_W_g"}],
     })
@@ -180,7 +180,7 @@ def test_divide_skips_files_without_the_other_column():
 ])
 def test_column_operations_are_checked(step, problem):
     with pytest.raises(DefinitionError) as info:
-        parse_definition({"name": "d", "type": "dsc", "model": "x", "folder_name": "DSC",
+        parse_definition({"name": "d", "type": "dsc", "model": "x",
                           "file": {"extensions": [".txt"]},
                           "columns": [{"source": "HF", "quantity": "heat_flow", "unit": "mW"}], "derived": [step]})
     assert problem in str(info.value)
@@ -188,7 +188,7 @@ def test_column_operations_are_checked(step, problem):
 
 def test_pct_of_initial_starts_each_curve_at_100():
     definition = parse_definition({
-        "name": "t", "type": "tga", "model": "x", "folder_name": "TGA", "file": {"extensions": [".txt"]},
+        "name": "t", "type": "tga", "model": "x", "file": {"extensions": [".txt"]},
         "columns": [{"source": "m", "quantity": "mass", "unit": "mg"}],
         "derived": [{"op": "pct_of_initial", "column": "mass_mg", "into": "mass_pct"}],
     })
@@ -245,7 +245,7 @@ def _multi_test_workbook(path, specimens=("LUB640", "LUB640_1", "LUB641")):
 def test_every_sheet_with_the_table_is_read_one_curve_per_sheet(tmp_path):
     path = _multi_test_workbook(tmp_path / "LUB640toLUB641.xlsx")
     definition = parse_definition({
-        "name": "tensile_tester", "type": "tensile", "model": "zwick", "folder_name": "tensile_tester",
+        "name": "tensile_tester", "type": "tensile", "model": "zwick",
         "name_from": "sheet",
         "file": {"extensions": [".xlsx"], "header": {"starts_at": "Elongation", "rows": 2}},
         "columns": [{"source": "Elongation %", "quantity": "strain", "unit": "%"},
@@ -267,7 +267,7 @@ def test_detect_proposes_one_curve_per_sheet(tmp_path):
     assert detection.name_from == "sheet" and "sheet" not in detection.file
     assert {g.source: (g.quantity, g.unit) for g in detection.columns} == {
         "Elongation %": ("strain", "%"), "Standard force kPa": ("stress", "kPa")}
-    draft = detection.definition(name="t", type="tensile", model="m", folder_name="f")
+    draft = detection.definition(name="t", type="tensile", model="m")
     assert draft["name_from"] == "sheet"
     assert set(_parse(parse_definition(draft), path).data["name"]) == {"LUB640", "LUB640_1", "LUB641"}
 
@@ -297,7 +297,7 @@ def test_each_test_gets_its_date_from_its_results_row(tmp_path):
         sheet.append([1.0, 2.0])
     book.save(path)
     definition = parse_definition({
-        "name": "t", "type": "tensile", "model": "m", "folder_name": "f", "name_from": "sheet",
+        "name": "t", "type": "tensile", "model": "m", "name_from": "sheet",
         "file": {"extensions": [".xlsx"], "header": {"starts_at": "Elongation", "rows": 2}},
         "columns": [{"source": "Elongation %", "quantity": "strain", "unit": "%"}],
         "from_header": [{"column": "test_date", "pattern": "^{sheet}\t([0-9.]+)", "type": "datetime",
@@ -310,3 +310,80 @@ def test_each_test_gets_its_date_from_its_results_row(tmp_path):
     assert str(dates["LUB640_1"]) == "2026-08-12 16:00:00+00:00"
     assert dataset.metadata["file_text"][path.name]["values"]["test_date"] == {
         "LUB640": "2026-08-12T15:53:01+00:00", "LUB640_1": "2026-08-12T16:00:00+00:00"}
+
+
+def test_the_results_sheet_is_kept_as_a_table_of_numbers(tmp_path):
+    """One row per specimen, named by its header lines (name and unit), keyed by the specimen."""
+    path = _multi_test_workbook(tmp_path / "LUB640toLUB641.xlsx", specimens=("LUB640", "LUB641"))
+    definition = parse_definition({
+        "name": "tensile_tester", "type": "tensile", "model": "zwick",
+        "name_from": "sheet",
+        "file": {"extensions": [".xlsx"], "header": {"starts_at": "Elongation", "rows": 2}},
+        "columns": [{"source": "Elongation %", "quantity": "strain", "unit": "%"}],
+        "tables": [{"name": "results", "sheet": "Results", "header": {"rows": 2}, "columns": ["specimen"]}],
+    })
+    dataset = _parse(definition, path)
+    assert dataset.metadata["tables"]["results"][path.name] == [
+        {"specimen": "LUB640", "sM kPa": 20.0, "eB %": 300.0},
+        {"specimen": "LUB641", "sM kPa": 21.0, "eB %": 301.0},
+    ]
+    assert "sheet: Results" in dataset.metadata["file_text"][path.name]  # the text stays too
+
+
+@pytest.mark.parametrize(("table", "problem"), [
+    ({"name": "r", "sheet": "Results", "header": {"rows": 5}}, "'header' must be"),
+    ({"name": "r", "sheet": "", "header": {"rows": 2}}, "'sheet' must be the sheet's name"),
+    ({"name": "r", "sheet": "Results"}, "'starts_at' must be text"),
+])
+def test_results_tables_are_checked(table, problem):
+    with pytest.raises(DefinitionError) as info:
+        parse_definition({**TENSILE, "tables": [table]})
+    assert any(problem in line for line in info.value.problems), info.value.problems
+
+
+def test_a_sheet_table_needs_a_workbook():
+    with pytest.raises(DefinitionError) as info:
+        parse_definition({**TENSILE, "file": {"extensions": [".txt"]},
+                          "tables": [{"name": "r", "sheet": "Results", "header": {"rows": 2}}]})
+    assert any("'sheet' only goes with workbooks" in line for line in info.value.problems)
+
+
+def test_each_curve_gets_its_sample_from_its_sheet_name(tmp_path):
+    path = _multi_test_workbook(tmp_path / "LUB640toLUB641.xlsx", specimens=("LUB640", "LUB640_1", "LUB641"))
+    definition = parse_definition({
+        "name": "tensile_tester", "type": "tensile", "model": "zwick",
+        "name_from": "sheet",
+        "file": {"extensions": [".xlsx"], "header": {"starts_at": "Elongation", "rows": 2}},
+        "columns": [{"source": "Elongation %", "quantity": "strain", "unit": "%"}],
+        "from_sheet_name": [{"column": "sample", "pattern": r"^(.+?)(?:_\d+)?$"}],
+    })
+    data = _parse(definition, path).data
+    assert data.groupby("name")["sample"].first().to_dict() == {"LUB640": "LUB640", "LUB640_1": "LUB640",
+                                                                "LUB641": "LUB641"}
+
+
+def test_sheet_names_only_go_with_workbooks():
+    with pytest.raises(DefinitionError) as info:
+        parse_definition({**TENSILE, "file": {"extensions": [".txt"]},
+                          "from_sheet_name": [{"column": "sample", "pattern": "^(.+)$"}]})
+    assert any("'from_sheet_name' only goes with workbooks" in line for line in info.value.problems)
+    with pytest.raises(DefinitionError) as info:
+        parse_definition({**TENSILE, "from_sheet_name": [{"column": "x", "pattern": "^(.+)$"}],
+                          "from_file_name": [{"column": "x", "pattern": "^(.+)$"}]})
+    assert any("filled twice" in line for line in info.value.problems)
+
+
+def test_the_built_in_tensile_tester_knows_each_curves_sample(tmp_path):
+    from mfethuls.instruments.definition import BUILTIN_DIR, load_definition
+
+    path = _multi_test_workbook(tmp_path / "LUB640toLUB641.xlsx", specimens=("LUB640", "LUB640_2", "LUB641_1"))
+    definition = load_definition(BUILTIN_DIR / "tensile_tester.json")
+    data = TabularParser(definition).parse({"x": [str(path)]}, experiment_id="e1", instrument_type="tensile").data
+    assert sorted(data["sample"].unique()) == ["LUB640", "LUB641"]
+
+
+def test_sheet_heads_are_the_first_lines_of_every_sheet(tmp_path):
+    path = _tensile_workbook(tmp_path / "LUB001.xlsx")
+    heads = workbook.sheet_heads(path, 2)
+    assert {name: len(lines) for name, lines in heads.items()} == {"Parameters": 1, "Results": 2, "LUB001_test": 2}
+    assert heads["Results"] == workbook.sheets(path)["Results"][:2]

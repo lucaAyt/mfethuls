@@ -47,7 +47,7 @@ def _cell(value) -> str:
 
 
 @lru_cache(maxsize=8)
-def _sheets(path: str, modified: float, size: int) -> Tuple[Tuple[str, Tuple[str, ...]], ...]:
+def _sheets(path: str, modified: float, size: int, rows: Optional[int] = None) -> Tuple[Tuple[str, Tuple[str, ...]], ...]:
     from openpyxl import load_workbook
 
     try:
@@ -56,7 +56,7 @@ def _sheets(path: str, modified: float, size: int) -> Tuple[Tuple[str, Tuple[str
         raise ValueError(f"cannot open the workbook: {exc}") from None
     try:
         return tuple(
-            (sheet.title, tuple("\t".join(_cell(v) for v in row).rstrip("\t") for row in sheet.iter_rows(values_only=True)))
+            (sheet.title, tuple("\t".join(_cell(v) for v in row).rstrip("\t") for row in sheet.iter_rows(max_row=rows, values_only=True)))
             for sheet in book.worksheets
         )
     finally:
@@ -68,6 +68,13 @@ def sheets(path) -> Dict[str, List[str]]:
     path = Path(path)
     stat = path.stat()
     return {name: list(lines) for name, lines in _sheets(str(path.resolve()), stat.st_mtime, stat.st_size)}
+
+
+def sheet_heads(path, rows: int) -> Dict[str, List[str]]:
+    """The first ``rows`` lines of every sheet: quicker than :func:`sheets` for a large workbook."""
+    path = Path(path)
+    stat = path.stat()
+    return {name: list(lines) for name, lines in _sheets(str(path.resolve()), stat.st_mtime, stat.st_size, rows)}
 
 
 def pick_sheet(all_sheets: Dict[str, List[str]], sheet: Optional[Union[int, str]] = None,

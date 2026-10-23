@@ -6,6 +6,9 @@ From scattered instrument files to analysis-ready data. mfethuls is a Python fra
 [![Python](https://img.shields.io/pypi/pyversions/mfethuls)](https://pypi.org/project/mfethuls/)
 [![Tests](https://github.com/lucaAyt/mfethuls/actions/workflows/tests.yml/badge.svg)](https://github.com/lucaAyt/mfethuls/actions/workflows/tests.yml)
 [![License](https://img.shields.io/pypi/l/mfethuls)](https://github.com/lucaAyt/mfethuls/blob/master/LICENSE)
+
+![The mfethuls app: two DSC runs from the example data plotted together, filtered to the second heating and zoomed into the transition](https://raw.githubusercontent.com/lucaAyt/mfethuls/master/docs/media/hero.webp)
+
 ---
 
 ## Instrument support
@@ -61,7 +64,7 @@ The latest development version: `pip install "mfethuls[viz,notebook] @ git+https
 | Extra | Installs | Use when |
 |---|---|---|
 | `viz` | Plotly, Matplotlib, Kaleido, Streamlit | The app or notebook plotting |
-| `notebook` | Jupyter, Marimo, Matplotlib, Plotly, seaborn | Interactive notebooks with plotting |
+| `notebook` | Marimo, Matplotlib, Plotly, seaborn | Interactive notebooks with plotting (the tutorial is a Marimo notebook) |
 
 ---
 
@@ -114,7 +117,7 @@ fig = mfethuls.plot_experiments(cs, backend="plotly")    # interactive, every da
 mfethuls.set_plot_backend("plotly")                      # make Plotly the default
 ```
 
-Each instrument gets a suitable plot, with axis labels and units (*Temperature (°C)*, *Wavenumber (cm⁻¹)*). Experiments that share an x-axis are overlaid, otherwise each gets its own panel, and time-resolved spectra series are coloured by elapsed time. Matplotlib figures use a fixed publication style and save as vector SVG/PDF. See [docs/guides/plotting.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/plotting.md).
+Each instrument gets a suitable plot, with axis labels and units (*Temperature (°C)*, *Wavenumber (cm⁻¹)*). Experiments that share an x-axis are overlaid, otherwise each gets its own panel, and time-resolved spectra series are coloured by elapsed time. Several experiments can be laid out together, offset or in panels, and normalised (max, 0 to 1 or area; optionally within the x-axis limits) to compare their shapes. Matplotlib figures use a fixed publication style and save as vector SVG/PDF. See [docs/guides/plotting.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/guides/plotting.md).
 
 ---
 
@@ -152,7 +155,7 @@ What each format and part is, to look things up.
 
 | Reference | Contents |
 |---|---|
-| [docs/reference/registry.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/reference/registry.md) | Registry format, column reference, measurement profiles |
+| [docs/reference/registry.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/reference/registry.md) | Registry format, column reference, instrument folders |
 | [docs/reference/schema.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/reference/schema.md) | Canonical column names, units, normalisation rules |
 | [docs/reference/architecture.md](https://github.com/lucaAyt/mfethuls/blob/master/docs/reference/architecture.md) | System diagrams, ETL pipeline, storage design |
 

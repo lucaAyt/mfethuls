@@ -383,3 +383,97 @@ def test_find_data_files_collects_an_experiment_folder_with_its_subfolders(tmp_p
     assert parent == str(tmp_path / "EXP014")
     assert sorted(os.path.relpath(f, parent).replace(os.sep, "/") for f in files) == [
         "1/acqus", "1/fid", "1/pdata/1/1r", "1/pdata/1/procs"]
+
+
+def test_a_series_is_listed_in_numeric_order(tmp_path):
+    """One file per spectrum: poly3__2 comes before poly3__10, as it was measured."""
+    series = tmp_path / "Fluorescence" / "poly3"
+    series.mkdir(parents=True)
+    for i in (0, 1, 2, 10, 11, 20):
+        (series / f"poly3__{i}__18-11-{i:02d}.txt").write_text("x")
+    _, files = find_data_files(str(tmp_path / "Fluorescence"), "poly3")
+    assert [os.path.basename(f).split("__")[1] for f in files] == ["0", "1", "2", "10", "11", "20"]
+
+
+def test_natural_key_compares_numbers_as_numbers():
+    from mfethuls.naming import natural_key
+
+    names = ["run10.txt", "Run2.txt", "run1.txt", "run1a.txt"]
+    assert sorted(names, key=natural_key) == ["run1.txt", "run1a.txt", "Run2.txt", "run10.txt"]
+
+
+def test_a_name_with_a_dot_that_is_not_an_extension(tmp_path):
+    """Agilent names its exports '<date>.dx_RID1A.CSV': '.dx_RID1A' is part of the name, and its
+    result folder holds '<date>.dx' files that must not be taken for it."""
+    sec = tmp_path / "SEC"
+    (sec / "DMF" / "LUB114_1_ON").mkdir(parents=True)
+    (sec / "DMF" / "run.rslt").mkdir()
+    name = "2024-01-30 17-03-42+01-00-01"
+    (sec / "DMF" / "LUB114_1_ON" / f"{name}.dx_RID1A.CSV").write_text("1,2\n")
+    (sec / "DMF" / "run.rslt" / f"{name}.dx").write_text("binary")
+    folder, files = find_data_files(str(sec), f"{name}.dx_RID1A")
+    assert [os.path.basename(f) for f in files] == [f"{name}.dx_RID1A.CSV"]
+    # A real extension still names one file: the LUB055.txt rule.
+    (sec / "LUB055.txt").write_text("x")
+    (sec / "LUB055.csv").write_text("x")
+    assert [os.path.basename(f) for f in find_data_files(str(sec), "LUB055.txt")[1]] == ["LUB055.csv", "LUB055.txt"]
+
+
+# ── one walk per folder (P1) ──────────────────────────────────────────────────
+
+
+def _lab_folder(root):
+    """An instrument folder with every kind of layout find_data_files knows."""
+    files = ["poly1.txt", "poly1.csv", "poly2.txt", "sub/chitosan_jan15.txt", "old.parquet",
+             "kinetics/poly3__10.txt", "kinetics/poly3__2.txt", "kinetics/.hidden/skip.txt",
+             "nmr/LUB055/1/fid", "nmr/LUB055/1/pdata/1/1r", "LUB056/LUB056.txt",
+             "a/twice.txt", "b/twice.txt", "both/sample_A/x.txt", "both/sample_A.txt",
+             "run01.dx_RID1A.CSV"]
+    for name in files:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(name)
+    return ["poly1", "poly2", "chitosan_jan15", "kinetics", "LUB055", "LUB056", "LUB056.txt",
+            "twice", "sample_A", "run01.dx_RID1A", "missing", "old"]
+
+
+def _outcome(folder, name):
+    try:
+        return find_data_files(str(folder), name)
+    except (FileNotFoundError, ValueError) as exc:
+        return type(exc).__name__, str(exc)
+
+
+def test_one_scan_gives_the_same_answers_with_one_walk(tmp_path, monkeypatch):
+    import os
+
+    from mfethuls import manifest
+    from mfethuls.manifest import one_scan_per_folder
+
+    names = _lab_folder(tmp_path)
+    expected = {name: _outcome(tmp_path, name) for name in names}
+    walks = []
+    real_walk = os.walk
+    monkeypatch.setattr(manifest.os, "walk", lambda top, *a, **k: walks.append(top) or real_walk(top, *a, **k))
+
+    with one_scan_per_folder():
+        found = {name: _outcome(tmp_path, name) for name in names}
+        with one_scan_per_folder():  # an inner block keeps using the outer one's walks
+            assert _outcome(tmp_path, "poly1") == expected["poly1"]
+
+    assert found == expected
+    assert walks == [str(tmp_path)]  # one walk for all of them, folder experiments included
+    assert expected["kinetics"][1][0].endswith("poly3__2.txt")  # numeric order kept
+    assert not any("skip.txt" in f for f in expected["kinetics"][1])  # hidden folders left out
+
+
+def test_outside_the_block_new_files_are_seen(tmp_path):
+    from mfethuls.manifest import one_scan_per_folder
+
+    with one_scan_per_folder():
+        with pytest.raises(FileNotFoundError):
+            find_data_files(str(tmp_path), "late")
+        (tmp_path / "late.txt").write_text("x")
+        with pytest.raises(FileNotFoundError):  # the kept walk does not know it yet
+            find_data_files(str(tmp_path), "late")
+    assert find_data_files(str(tmp_path), "late")[1] == [str(tmp_path / "late.txt")]

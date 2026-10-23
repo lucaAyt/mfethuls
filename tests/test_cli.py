@@ -115,3 +115,21 @@ def test_a_missing_optional_package_names_the_extra(lab, tmp_path, capsys, monke
     monkeypatch.setattr(builtins, "__import__", no_matplotlib)
     assert main(["plot", "LB_dsc_001", "-o", str(tmp_path / "d.png")]) == 2
     assert 'pip install "mfethuls[viz]"' in capsys.readouterr().err
+
+
+def test_ingest_all_walks_each_instrument_folder_once(lab, monkeypatch):
+    import os
+    from collections import Counter
+
+    data, _ = lab
+    real_walk = os.walk
+    walks = Counter()
+
+    def counting_walk(top, *args, **kwargs):
+        walks[os.path.normcase(os.path.abspath(top))] += 1
+        return real_walk(top, *args, **kwargs)
+
+    monkeypatch.setattr(os, "walk", counting_walk)
+    assert main(["ingest", "--all"]) == 0
+    folders = {os.path.normcase(str(p)) for p in data.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))}
+    assert folders and all(walks[folder] == 1 for folder in folders), walks

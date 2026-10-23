@@ -12,7 +12,7 @@ from mfethuls.examples import REGISTRY_PATH as EXAMPLE_REGISTRY
 def _registry(*rows: tuple[str, str]) -> Registry:
     """A registry of DSC experiments from (name, sample_id) pairs."""
     return Registry.from_frame(
-        pd.DataFrame([{"name": name, "instrument_name": "dsc_mettler_toledo_v0", "sample_id": sample} for name, sample in rows])
+        pd.DataFrame([{"name": name, "instrument_name": "dsc", "sample_id": sample} for name, sample in rows])
     )
 
 
@@ -73,12 +73,12 @@ def test_load_experiments_reads_registry_file_when_none_given(monkeypatch):
 def test_load_experiments_reads_edits_to_the_registry_file(monkeypatch, tmp_path):
     """Nothing is cached between calls, so a renamed row is picked up immediately."""
     path = tmp_path / "registry.csv"
-    pd.DataFrame([{"name": "exp_a", "instrument_name": "dsc_mettler_toledo_v0"}]).to_csv(path, index=False)
+    pd.DataFrame([{"name": "exp_a", "instrument_name": "dsc"}]).to_csv(path, index=False)
     monkeypatch.setattr("mfethuls.comparison.load_experiment_dataset", _fake_loader())
 
     assert load_experiments(["exp_a"], registry_path=str(path)).labels == ["name_exp_a"]
 
-    pd.DataFrame([{"name": "exp_b", "instrument_name": "dsc_mettler_toledo_v0"}]).to_csv(path, index=False)
+    pd.DataFrame([{"name": "exp_b", "instrument_name": "dsc"}]).to_csv(path, index=False)
     assert load_experiments(["exp_b"], registry_path=str(path)).labels == ["name_exp_b"]
 
 

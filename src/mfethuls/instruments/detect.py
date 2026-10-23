@@ -519,7 +519,7 @@ def detect(path) -> Detection:
         file_settings["data_ends"] = "first_non_numeric_row"
         notes.append(f"The table ends before {after.strip()[:40]!r}; the text after it is kept.")
 
-    file_format = parse_definition({"name": "x", "type": "x", "model": "x", "folder_name": "x",
+    file_format = parse_definition({"name": "x", "type": "x", "model": "x",
                                     "file": file_settings, "columns": [{"source": "x", "column": "x"}]}
                                    ).formats[0].file
     table = read_table(path, file_format)

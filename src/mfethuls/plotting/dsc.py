@@ -112,7 +112,7 @@ def build_dsc_spec(
         df = dataset.data
         groups = [
             ("<missing>" if pd.isna(group_value) else str(group_value), subset)
-            for group_value, subset in df.groupby(resolved_group_by, dropna=False, sort=False)
+            for group_value, subset in df.groupby(resolved_group_by, dropna=False, sort=False, observed=True)
         ]
         colors = dsc_segment_colors([label for label, _ in groups]) if resolved_group_by == "profile" else {}
         traces = [

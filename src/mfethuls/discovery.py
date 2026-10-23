@@ -1,9 +1,8 @@
 """Find raw data under PATH_TO_DATA that the registry does not describe yet.
 
-Each instrument reads one ``folder_name`` (its own, or the one the lab linked it to,
-see :func:`mfethuls.instruments.configured.link_folder`); several can share one (the
-DSC models share ``DSC/``). Folders no instrument reads are :func:`unclaimed_folders`,
-with the instrument their name suggests. In an instrument folder:
+Each instrument reads one folder of the data folder, and each folder belongs to one
+instrument (see :mod:`mfethuls.instruments.configured`). Folders no instrument reads are
+:func:`unclaimed_folders`, with the measurement type their name suggests. In an instrument folder:
 
 - each file directly in it is one experiment, named by its stem (``poly1.txt`` and
   ``poly1.csv`` are one experiment);
@@ -13,11 +12,11 @@ with the instrument their name suggests. In an instrument folder:
   file** (each file a run of the same sample: R001, R002, ...). A subfolder that
   holds a single stem (``LUB055/LUB055.txt``) is proposed as that file.
 
-Data files are those the instruments' parsers read (see
+Data files are those the instrument's readers read (see
 ``parsers.registry.data_extensions``). Other files next to the data, such as a
 plot saved in the experiment folder, are ignored and listed in ``NewData.ignored``.
 
-The instrument's ``data_layout`` (``"folder"`` or ``"file"``) only sets the
+The readers' ``data_layout`` (``"folder"`` for a series, or ``"file"``) only sets the
 default for subfolders; the person registering decides per folder.
 """
 
@@ -34,10 +33,10 @@ from typing import Collection, Dict, Iterable, List, Optional
 import pandas as pd
 
 from .experiments import Registry, _normalize_optional_str
-from .manifest import MANIFEST_FILENAME
+from .manifest import MANIFEST_FILENAME, one_scan_per_folder
 from .naming import stem_key
-from .parsers.registry import data_extensions, get_parser
-from .registry_validator import _load_instrument_config
+from .instruments.configured import Instrument, get_instrument, instruments, reader_for, readers, readers_of
+from .parsers.registry import data_extensions
 from .settings import get_settings
 
 # Registry columns proposed for new rows, in this order (extra registry columns follow).
@@ -47,7 +46,6 @@ REGISTRY_COLUMNS = [
     "sample_id",
     "run_id",
     "raw_data_filename",
-    "measurement_profile",
     "description",
 ]
 _IGNORED_NAMES = {MANIFEST_FILENAME, ".gitkeep"}
@@ -66,9 +64,9 @@ class NewData:
     raw_data_filename: str
     files: List[str]
     modified: datetime
-    # Instruments that use this folder.
+    # The instrument whose folder it is in (a list for display: always one).
     instruments: List[str]
-    # Instrument to pre-fill: the only one for this kind of data, if there is one.
+    # Instrument to pre-fill: the folder's instrument when one of its readers reads this kind of item.
     suggested: Optional[str] = None
     runs: Dict[str, List[str]] = field(default_factory=dict)
     # For a subfolder registered per file: instrument to pre-fill for its runs.
@@ -137,18 +135,20 @@ def _by_stem(paths: Iterable[str], extensions: set[str], registered: set[str]) -
     return dict(sorted(stems.items()))
 
 
-def _scan_group(folder_name: str, entries: list[dict], data_root: str, registered: set[str]) -> List[NewData]:
+def _scan_instrument(instrument: Instrument, data_root: str, registered: set[str]) -> List[NewData]:
+    folder_name = instrument.folder_name
     folder = os.path.join(data_root, folder_name)
     if not os.path.isdir(folder):
         return []
 
-    file_layout = [e["name"] for e in entries if e["data_layout"] == "file"]
-    folder_layout = [e["name"] for e in entries if e["data_layout"] == "folder"]
-    every = [e["name"] for e in entries]
-    readable = {e["name"]: data_extensions(get_parser(e["type"], e["model"])) for e in entries}
-    # Extensions of single-file instruments: what can be a run or a file experiment.
+    found_readers = readers_of(instrument, data_root)
+    readable = {r.name: data_extensions(r.parser) for r in found_readers}
+    file_layout = [r.name for r in found_readers if r.layout == "file"]
+    folder_layout = [r.name for r in found_readers if r.layout == "folder"]
+    every = [instrument.name]
+    # Extensions of single-file readers: what can be a run or a file experiment.
     extensions = set().union(*(readable[name] or set() for name in file_layout))
-    # Extensions any instrument here reads (None: one of them reads every file).
+    # Extensions any reader here reads (None: one of them reads every file).
     data = None if None in readable.values() else set().union(*readable.values())
 
     def ignored(paths: Iterable[str]) -> List[str]:
@@ -156,14 +156,11 @@ def _scan_group(folder_name: str, entries: list[dict], data_root: str, registere
             return []
         return [os.path.relpath(p, folder) for p in paths if os.path.splitext(p)[1].casefold() not in data]
 
-    def only(names: List[str]) -> Optional[str]:
-        return names[0] if len(names) == 1 else (every[0] if len(every) == 1 else None)
-
     items: List[NewData] = []
     top_files = [os.path.join(folder, f) for f in sorted(os.listdir(folder)) if os.path.isfile(os.path.join(folder, f))]
     for stem, files in _by_stem(top_files, extensions, registered).items():
         others = ignored(f for f in top_files if os.path.splitext(os.path.basename(f))[0] == stem)
-        items.append(NewData(folder_name, "file", stem, files, _modified(files), every, suggested=only(file_layout),
+        items.append(NewData(folder_name, "file", stem, files, _modified(files), every, suggested=instrument.name,
                              ignored=others))
 
     for child in sorted(os.listdir(folder)):
@@ -183,7 +180,7 @@ def _scan_group(folder_name: str, entries: list[dict], data_root: str, registere
             # A folder around a single experiment (LUB055/LUB055.txt) is just that file.
             (stem,) = runs
             items.append(NewData(folder_name, "file", stem, runs[stem], _modified(files), every,
-                                 suggested=only(file_layout), ignored=others))
+                                 suggested=instrument.name, ignored=others))
             continue
         items.append(
             NewData(
@@ -193,9 +190,9 @@ def _scan_group(folder_name: str, entries: list[dict], data_root: str, registere
                 files,
                 _modified(files),
                 every,
-                suggested=only(folder_layout),
+                suggested=instrument.name,
                 runs=runs,
-                suggested_for_runs=only(file_layout),
+                suggested_for_runs=instrument.name,
                 # Folders of single-file instruments are usually runs; series instruments keep them whole.
                 split_by_default=bool(runs) and not folder_layout,
                 ignored=others,
@@ -236,14 +233,9 @@ def discover_unregistered(registry: Registry, data_root: Optional[str] = None) -
     if not data_root:
         raise ValueError("No data folder to scan. Set PATH_TO_DATA or pass data_root.")
 
-    groups: dict[str, list[dict]] = defaultdict(list)
-    for entry in _load_instrument_config():
-        groups[entry["folder_name"]].append(entry)
-
     items: List[NewData] = []
-    for folder_name, entries in sorted(groups.items()):
-        registered = _registered(registry, {entry["name"].casefold() for entry in entries})
-        items.extend(_scan_group(folder_name, entries, data_root, registered))
+    for instrument in sorted(instruments(data_root), key=lambda i: i.folder_name):
+        items.extend(_scan_instrument(instrument, data_root, _registered(registry, {instrument.name})))
     return items
 
 
@@ -318,7 +310,8 @@ def tree_rows(items: Iterable[NewData], registry: Registry, data_root: str) -> p
     Rows are ordered by path.
 
     Columns are those of :func:`proposed_rows` plus ``_kind`` (``"file"``, ``"folder"`` or
-    ``"run"``), ``_data``, the path shown, and ``_whole``: whether a subfolder's row registers it
+    ``"run"``), ``_data``, the path shown, ``_open``: whether a subfolder's files are shown (False
+    at first; None on other rows, see :func:`visible_rows`), and ``_whole``: whether a subfolder's row registers it
     as one experiment (all its files together, e.g. a titration or time series: the default for
     series instruments, and for a folder without files to register one by one). Otherwise the
     subfolder's row only ticks its files (see :func:`sync_folder_ticks`). A subfolder's row and
@@ -333,39 +326,97 @@ def tree_rows(items: Iterable[NewData], registry: Registry, data_root: str) -> p
     for position, item in enumerate(items):
         if item.layout == "file":
             label = f"{item.folder_name}/{_files_label(item.files, os.path.join(data_root, item.folder_name))}"
-            parts.append(whole.iloc[[position]].assign(_kind="file", _data=label, _whole=False))
+            parts.append(whole.iloc[[position]].assign(_kind="file", _data=label, _whole=False, _open=None))
             continue
         count = len(item.files)
         runs = [files for stem, files in item.runs.items() if stem not in item.run_issues]
         one = not (item.split_by_default and runs)
         label = f"📁 {item.key}/  ·  {count} file{'s' if count != 1 else ''}" + ("  ·  one experiment" if one else "")
-        parts.append(whole.iloc[[position]].assign(_kind="folder", _data=label, _whole=one))
+        parts.append(whole.iloc[[position]].assign(_kind="folder", _data=label, _whole=one, _open=False))
         if runs:
             base = os.path.join(data_root, item.folder_name, item.raw_data_filename)
             labels = [f"\u2003\u2003└ {_files_label(files, base)}" for files in runs]
-            parts.append(per_file[per_file["_folder"] == item.key].assign(_kind="run", _data=labels, _whole=False))
-    columns = list(whole.columns) + ["_kind", "_data", "_whole"]
+            parts.append(per_file[per_file["_folder"] == item.key].assign(_kind="run", _data=labels, _whole=False,
+                                                                           _open=None))
+    columns = list(whole.columns) + ["_kind", "_data", "_whole", "_open"]
     if not parts:
         return pd.DataFrame(columns=columns)
-    return pd.concat(parts, ignore_index=True)[columns]
+    tree = pd.concat(parts, ignore_index=True)[columns]
+    tree["_open"] = tree["_open"].astype(object).where(tree["_kind"] == "folder", None)
+    return tree
+
+
+def visible_rows(tree: pd.DataFrame) -> pd.DataFrame:
+    """The rows of a :func:`tree_rows` table to show: files, subfolders, and the files of the
+    subfolders that are open (``_open``). Index labels are kept, to apply edits to ``tree``.
+
+    A subfolder's ``_data`` gets ▸ (closed) or ▾ (open) and how many of its files are ticked,
+    so ticks are not out of sight while it is closed.
+    """
+
+    folders = tree["_kind"] == "folder"
+    opened = set(tree.loc[folders & tree["_open"].eq(True), "_folder"])
+    shown = tree[(tree["_kind"] != "run") | tree["_folder"].isin(opened)].copy()
+    runs = tree[tree["_kind"] == "run"]
+    for index in shown.index[shown["_kind"] == "folder"]:
+        folder = shown.at[index, "_folder"]
+        files = runs[runs["_folder"] == folder]
+        if files.empty:
+            continue
+        label = f"{'▾' if folder in opened else '▸'} {shown.at[index, '_data']}"
+        ticked = int(_ticks(files).sum())
+        if ticked:
+            label += f"  ·  {ticked} of {len(files)} ticked"
+        shown.at[index, "_data"] = label
+    return shown
 
 
 def _ticks(tree: pd.DataFrame) -> pd.Series:
     return tree["include"].fillna(False).astype(bool)
 
 
+# Columns each experiment has its own value of: not filled in from a folder's row.
+_OWN_VALUES = {"include", "name", "run_id", "raw_data_filename"}
+
+
+def _blank(value) -> bool:
+    return value is None or (isinstance(value, float) and pd.isna(value)) or (isinstance(value, str) and not value.strip())
+
+
+def _same(a, b) -> bool:
+    return (_blank(a) and _blank(b)) or a == b
+
+
 def sync_folder_ticks(before: pd.DataFrame, after: pd.DataFrame) -> pd.DataFrame:
     """``after`` (a :func:`tree_rows` table with an ``include`` column, edited from ``before``) with
-    the ticks of subfolders that only tick their files carried over: ticking or unticking such a
-    folder does the same to its files. Its files can then be ticked or unticked one by one."""
+    what was changed on subfolders that only tick their files carried over to those files:
+
+    - ticking or unticking such a folder does the same to its files, which can then be ticked
+      or unticked one by one;
+    - a value typed in the folder's row (e.g. ``sample_id`` or ``instrument_name``) fills in its
+      files that were empty or had the folder's previous value; their own values are kept.
+
+    ``_open`` stays None on rows that are not subfolders."""
 
     tree = after.copy()
     tree["include"] = _ticks(tree)
+    if "_open" in tree:
+        tree["_open"] = tree["_open"].astype(object).where(tree["_kind"] == "folder", None)
     changed = tree["include"] != _ticks(before)
     selectors = (tree["_kind"] == "folder") & ~tree["_whole"].fillna(False).astype(bool)
     runs = tree["_kind"] == "run"
     for index in tree.index[selectors & changed]:
         tree.loc[runs & (tree["_folder"] == tree.at[index, "_folder"]), "include"] = tree.at[index, "include"]
+    filled = [c for c in tree.columns if not str(c).startswith("_") and c not in _OWN_VALUES]
+    for index in tree.index[selectors]:
+        files = tree.index[runs & (tree["_folder"] == tree.at[index, "_folder"])]
+        for column in filled:
+            old, new = before.at[index, column], tree.at[index, column]
+            if _same(old, new):
+                continue
+            for file in files:
+                if _same(tree.at[file, column], old):
+                    tree.at[file, column] = new
     return tree
 
 
@@ -388,53 +439,87 @@ def overlapping_folders(rows: pd.DataFrame) -> List[str]:
 
 
 @lru_cache(maxsize=512)
-def _probe_file(instrument_name: str, path: str, modified: float) -> Optional[str]:
-    """Read one raw file with the instrument's parser; the problem, or None. ``modified`` keys the cache."""
+def _probe_file(reader_name: str, path: str, modified: float, fingerprint: Optional[str] = None,
+                data_root: Optional[str] = None) -> Optional[str]:
+    """Read one raw file with the reader's parser (one of ``data_root``'s readers); the problem, or
+    None. ``modified`` and ``fingerprint`` (the reader's: an edited definition reads again) key the cache."""
     from .config.loader import check_parsed
-    from .parsers.registry import reads
+    from .instruments.configured import get_reader
 
-    entry = next((e for e in _load_instrument_config() if e["name"] == instrument_name), None)
-    if entry is None:
-        return None  # unknown instruments are reported by the registry checks
-    parser = get_parser(entry["type"], entry["model"])
-    if not reads(parser, path):
-        return f"{os.path.basename(path)} is not a {instrument_name} file type"
+    reader = get_reader(reader_name, data_root)
+    if reader is None:
+        return None  # reported by the registry checks
     try:
-        dataset = parser.parse(
+        dataset = reader.parser.parse(
             {"probe": [path]},
             experiment_id="probe",
-            instrument_type=entry["type"],
-            instrument_model=entry["model"],
-            instrument_name=instrument_name,
+            instrument_type=reader.type,
+            instrument_model=reader.model,
+            instrument_name=reader.name,
         )
-        check_parsed(dataset, instrument_name)
-    except Exception as exc:  # noqa: BLE001 - any failure means "not this instrument's data"
+        check_parsed(dataset, reader.name)
+    except Exception as exc:  # noqa: BLE001 - any failure means "not this reader's data"
         return str(exc)
     return None
 
 
-def probe_raw_data(instrument_name: str, raw_data_filename: str, data_root: Optional[str] = None) -> Optional[str]:
+@lru_cache(maxsize=4096)
+def _sniff_file(reader_name: str, path: str, modified: float, fingerprint: Optional[str] = None,
+                data_root: Optional[str] = None) -> Optional[str]:
+    """The quick check of one raw file: for a definition, the format it would be read with (its
+    ``contains`` text); the problem, or None. Cached like :func:`_probe_file`."""
+    from .instruments.configured import get_reader
+    from .parsers.tabular import select_format
+
+    reader = get_reader(reader_name, data_root)
+    if reader is None or reader.definition is None:
+        return None
+    try:
+        select_format(reader.definition, path)
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
+def probe_raw_data(instrument_name: str, raw_data_filename: str, data_root: Optional[str] = None, *,
+                   parsed: Optional[set] = None) -> Optional[str]:
     """Whether raw data reads as this instrument's data: the problem, or None.
 
-    Reads only the first data file, so it is quick enough to run while rows are edited.
+    The reader is the instrument's reader of these files (:func:`~mfethuls.instruments.configured.reader_for`);
+    only their first data file is read. With ``parsed`` (a set shared by the rows being checked),
+    only the first file of each reader in each folder is read in full; the others get the quick
+    check of :func:`_sniff_file`, so ticking a folder of many files stays quick. A file that passes
+    it but still cannot be read is reported at ingest.
     Returns None when the files cannot be found (reported elsewhere).
     """
     from .manifest import find_data_files
-    from .parsers.registry import reads
 
     data_root = data_root or get_settings().data_root
-    entry = next((e for e in _load_instrument_config() if e["name"] == instrument_name), None)
-    if entry is None or not data_root:
+    if not data_root:
         return None
     try:
-        _, files = find_data_files(os.path.join(data_root, entry["folder_name"]), raw_data_filename)
+        instrument = get_instrument(instrument_name, data_root)
+    except ValueError:
+        return None
+    try:
+        _, files = find_data_files(os.path.join(data_root, instrument.folder_name), raw_data_filename)
     except (FileNotFoundError, ValueError):
         return None
-    parser = get_parser(entry["type"], entry["model"])
-    data = [f for f in files if reads(parser, f)] or files
+    try:
+        reader = reader_for(instrument, files, data_root)
+    except ValueError as exc:
+        return str(exc)
+    data = [f for f in files if reader.claims(f)]
     if not data:
         return None
-    return _probe_file(instrument_name, data[0], os.path.getmtime(data[0]))
+    first = data[0]
+    key = (reader.name, os.path.normcase(os.path.dirname(os.path.abspath(first))))
+    fingerprint = getattr(reader.definition, "fingerprint", None)
+    if parsed is not None:
+        if key in parsed:
+            return _sniff_file(reader.name, first, os.path.getmtime(first), fingerprint, data_root)
+        parsed.add(key)
+    return _probe_file(reader.name, first, os.path.getmtime(first), fingerprint, data_root)
 
 
 def validate_proposed(registry: Registry, rows: pd.DataFrame, data_root: Optional[str] = None) -> List[dict]:
@@ -444,20 +529,27 @@ def validate_proposed(registry: Registry, rows: pd.DataFrame, data_root: Optiona
     that matter for data found on disk: the instrument must be chosen, the raw data
     must be found exactly once (problems the general check only warns about), and it
     must read as the chosen instrument's data (:func:`probe_raw_data`), so files of
-    another instrument are not registered and ingested as this one.
+    another instrument are not registered and ingested as this one. One file per instrument
+    and folder is read in full, the others are checked quickly (see :func:`probe_raw_data`).
     Returns one result per row: ``{"valid", "errors", "warnings", ...}``.
     """
 
-    from .registry_validator import validate_registry_dataframe
-
     if rows.empty:
         return []
+    with one_scan_per_folder():
+        return _validate_proposed(registry, rows, data_root)
+
+
+def _validate_proposed(registry: Registry, rows: pd.DataFrame, data_root: Optional[str]) -> List[dict]:
+    from .registry_validator import validate_registry_dataframe
+
     data_root = data_root or get_settings().data_root
     helper = [c for c in rows.columns if str(c).startswith("_") or c == "include"]
     combined = pd.concat([registry.frame, rows.drop(columns=helper)], ignore_index=True)
     results = validate_registry_dataframe(combined, check_data_paths=True, data_root=data_root)["rows"]
     results = results[len(registry.frame):]
 
+    parsed: set = set()
     for result in results:
         if not _normalize_optional_str(result["values"].get("instrument_name")):
             result["errors"].append({"field": "instrument_name", "message": "Choose the instrument."})
@@ -470,7 +562,7 @@ def validate_proposed(registry: Registry, rows: pd.DataFrame, data_root: Optiona
         instrument = _normalize_optional_str(values.get("instrument_name"))
         raw = _normalize_optional_str(values.get("raw_data_filename")) or _normalize_optional_str(values.get("name"))
         if not result["errors"] and instrument and raw:
-            problem = probe_raw_data(instrument, raw, data_root)
+            problem = probe_raw_data(instrument, raw, data_root, parsed=parsed)
             if problem:
                 result["errors"].append({
                     "field": "instrument_name",
@@ -519,8 +611,8 @@ class UnclaimedFolder:
     file_count: int
     # True when counting stopped at ``max_count``: the folder holds more files.
     more: bool = False
-    # The instrument folder its name suggests (``DMA data`` -> ``DMA``), see :func:`suggest_instruments`.
-    suggested: Optional[str] = None
+    # The measurement type its name suggests (``DSC room B`` -> ``dsc``), see :func:`suggest_type`.
+    suggested_type: Optional[str] = None
 
     @property
     def count_label(self) -> str:
@@ -557,20 +649,20 @@ def _storage_folders(data_root: str) -> set:
 def unclaimed_folders(
     data_root: Optional[str] = None, *, limit: int = 200, max_count: int = 1000
 ) -> List[UnclaimedFolder]:
-    """Folders directly under ``data_root`` holding files but no known instrument's data.
+    """Folders directly under ``data_root`` holding files but no instrument.
 
-    These are what "Add instrument" offers: data of an instrument mfethuls cannot read yet.
+    Each needs an instrument: one of a type mfethuls reads, or a new reader ("Add instrument").
     Hidden folders (``.mfethuls``) and the storage folder are left out. Counting stops at
     ``max_count`` files per folder, so a large archive folder is not walked to the end.
     """
-    known = {str(entry["folder_name"]).casefold() for entry in _load_instrument_config()}
+    known = {instrument.folder_name.casefold() for instrument in instruments(data_root)}
     found = []
     for entry in instrument_folders(data_root):
         if entry.name.casefold() in known:
             continue
         files, count, more = folder_files(entry.path, limit=limit, max_count=max_count)
         if count:
-            found.append(UnclaimedFolder(entry.name, files, count, more, suggest_instruments(entry.name)))
+            found.append(UnclaimedFolder(entry.name, files, count, more, suggest_type(entry.name, data_root)))
     return found
 
 
@@ -592,29 +684,40 @@ def folder_files(path: str, *, limit: int = 200, max_count: int = 1000) -> tuple
     return files, count, False
 
 
-def instrument_groups() -> Dict[str, List[dict]]:
-    """The instruments by the folder they read, e.g. ``{"DSC": [four DSC models], "TGA": [tga]}``."""
-    groups: Dict[str, List[dict]] = defaultdict(list)
-    for entry in sorted(_load_instrument_config(), key=lambda e: e["name"]):
-        groups[entry["folder_name"]].append(entry)
-    return dict(sorted(groups.items(), key=lambda item: item[0].casefold()))
-
-
 def _words(text: str) -> set:
     return {word for word in re.split(r"[^a-z0-9]+", text.casefold()) if word}
 
 
-def suggest_instruments(folder_name: str) -> Optional[str]:
-    """The instrument folder whose instruments ``folder_name`` names, or None.
-
-    ``DMA data``, ``dma_Q800`` and ``Rheometer 2024`` name the DMA and rheometer
-    folders: every word of the instruments' folder or type is a word of ``folder_name``.
-    Only a single match is suggested.
-    """
+def suggest_type(folder_name: str, data_root: Optional[str] = None) -> Optional[str]:
+    """The measurement type ``folder_name`` names, or None: every word of the type, of one of its
+    readers or of its built-in folder is a word of ``folder_name`` (``DSC room B`` -> ``dsc``,
+    ``inSitu_UV`` -> ``uv_vis`` by its reader ``uv_insitu``, ``Rheometer 2024`` -> ``rheometer``).
+    Only a single match is suggested."""
     words = _words(folder_name)
-    matches = [
-        folder for folder, entries in instrument_groups().items()
-        if folder.casefold() != folder_name.casefold()
-        and any(_words(name) and _words(name) <= words for name in [folder, *(e["type"] for e in entries)])
-    ]
+    names: Dict[str, set] = defaultdict(set)
+    for reader in readers(data_root):
+        names[reader.type].update({reader.type, reader.name})
+    for instrument in instruments(data_root):
+        names[instrument.type].add(instrument.default_folder or instrument.folder_name)
+    matches = [t for t, candidates in names.items() if any(_words(n) and _words(n) <= words for n in candidates)]
     return matches[0] if len(matches) == 1 else None
+
+
+def recognise_files(paths: Iterable[str], data_root: Optional[str] = None, *, limit: int = 5) -> Dict[str, int]:
+    """How many of the first ``limit`` files each reader, of any type, reads: to suggest the type
+    of a folder no instrument reads. Each reader that recognises a file reads it, and only those
+    giving their type's required columns count (a Mettler DSC export has a TGA export's "Index"
+    marker, but not its columns; a reader without a marker recognises any file of its ending).
+    Ingest never does this: it only tries the readers of the instrument's type."""
+    counts: Dict[str, int] = defaultdict(int)
+    every = readers(data_root)
+    for path in list(paths)[:limit]:
+        found = [r for r in every if data_extensions(r.parser) is not None and r.claims(path) and r.recognises(path)]
+        if found:
+            modified = os.path.getmtime(path)
+            found = [r for r in found
+                     if _probe_file(r.name, path, modified, getattr(r.definition, "fingerprint", None),
+                                    data_root) is None]
+        for reader in found:
+            counts[reader.name] += 1
+    return dict(counts)

@@ -16,9 +16,6 @@ from mfethuls.discovery import (
 )
 from mfethuls.examples import DATA_DIR
 
-DSC_MODELS = ["dsc_mettler_toledo_v0", "dsc_perkin_elmer", "dsc_mettler_toledo_v1", "dsc_default"]
-
-
 def _touch(path: Path, text: str = "data") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf8")
@@ -37,21 +34,22 @@ def test_top_level_files_are_found_unless_registered_for_that_instrument(tmp_pat
     _touch(tmp_path / "DSC" / "poly1.txt")
     _touch(tmp_path / "DSC" / "poly2.txt")
     _touch(tmp_path / "TGA" / "poly1.txt")
-    registry = _registry({"name": "LB_dsc_001", "instrument_name": "dsc_mettler_toledo_v1", "raw_data_filename": "poly1"})
+    registry = _registry({"name": "LB_dsc_001", "instrument_name": "dsc", "raw_data_filename": "poly1"})
 
     # poly1 is registered for DSC only; the TGA file of the same name is still new.
     assert set(_items(tmp_path, registry)) == {"DSC/poly2", "TGA/poly1"}
 
 
-def test_shared_folder_offers_every_instrument_and_single_instrument_is_prefilled(tmp_path):
+def test_the_folders_instrument_is_prefilled(tmp_path):
     _touch(tmp_path / "DSC" / "poly1.txt")
     _touch(tmp_path / "TGA" / "poly1.txt")
     items = _items(tmp_path)
 
     rows = proposed_rows(items.values(), _registry()).set_index("_folder")
 
-    assert sorted(items["DSC/poly1"].instruments) == sorted(DSC_MODELS)
-    assert pd.isna(rows.loc["DSC", "instrument_name"])
+    # One instrument per folder, whichever DSC export the file is (its reader is found at ingest).
+    assert items["DSC/poly1"].instruments == ["dsc"]
+    assert rows.loc["DSC", "instrument_name"] == "dsc"
     assert rows.loc["TGA", "instrument_name"] == "tga"
 
 
@@ -85,7 +83,7 @@ def test_series_folder_defaults_to_one_experiment(tmp_path):
     assert len(items["Fluorescence/poly3"].files) == 3
 
     rows = proposed_rows(items.values(), _registry()).set_index("raw_data_filename")
-    assert rows.loc["poly3", "instrument_name"] == "fluorescence_insitu"
+    assert rows.loc["poly3", "instrument_name"] == "fluorescence"
     assert rows.loc["EXP015", "instrument_name"] == "nmr"
 
 
@@ -99,7 +97,7 @@ def test_uv_vis_single_spectrum_and_titration_folder(tmp_path):
     assert single.layout == "file" and single.suggested == "uv_vis"
     # A folder in UV_Vis is kept whole by default (the Flame records series) ...
     assert titration.layout == "folder" and not titration.split_by_default
-    assert titration.suggested == "uv_insitu"
+    assert titration.suggested == "uv_vis"
     rows = proposed_rows(items.values(), _registry())
     assert sorted(rows["raw_data_filename"]) == ["compoundA", "titration_A"]
 
@@ -166,7 +164,7 @@ def test_run_named_like_its_folder_is_registered_by_file_name(tmp_path):
     assert list(whole["raw_data_filename"]) == ["LUB055"]
 
     # Once registered by file name, that run is not proposed again.
-    registry = _registry({"name": "LUB055", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "LUB055.txt"})
+    registry = _registry({"name": "LUB055", "instrument_name": "dsc", "raw_data_filename": "LUB055.txt"})
     assert list(_items(tmp_path, registry)["DSC/LUB055"].runs) == ["LUB055_b"]
 
 
@@ -195,8 +193,8 @@ def test_registered_folders_and_runs_are_skipped(tmp_path):
     _touch(tmp_path / "DSC" / "poly1" / "poly1_run1.txt")
     _touch(tmp_path / "DSC" / "poly1" / "poly1_run2.txt")
     registry = _registry(
-        {"name": "fl", "instrument_name": "fluorescence_insitu", "raw_data_filename": "poly3"},
-        {"name": "run1", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "poly1_run1"},
+        {"name": "fl", "instrument_name": "fluorescence", "raw_data_filename": "poly3"},
+        {"name": "run1", "instrument_name": "dsc", "raw_data_filename": "poly1_run1"},
     )
     items = _items(tmp_path, registry)
 
@@ -221,7 +219,7 @@ def test_proposed_names_are_unique_and_columns_follow_the_registry(tmp_path):
     _touch(tmp_path / "TGA" / "poly1.txt")
     _touch(tmp_path / "FTIR" / "poly1.csv")
     registry = Registry.from_frame(
-        pd.DataFrame([{"name": "poly1", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "other", "operator": "LB"}])
+        pd.DataFrame([{"name": "poly1", "instrument_name": "dsc", "raw_data_filename": "other", "operator": "LB"}])
     )
 
     rows = proposed_rows(discover_unregistered(registry, str(tmp_path)), registry)
@@ -243,13 +241,14 @@ def test_validate_proposed_requires_instrument_and_found_data(tmp_path):
     registry = _registry()
     rows = _proposals_for(tmp_path, registry)
 
+    (ready,) = validate_proposed(registry, rows, str(tmp_path))
+    assert ready["valid"], ready["errors"]
+
+    rows.loc[0, "instrument_name"] = None
     (missing_instrument,) = validate_proposed(registry, rows, str(tmp_path))
     assert not missing_instrument["valid"]
     assert any(e["message"] == "Choose the instrument." for e in missing_instrument["errors"])
-
-    rows.loc[0, "instrument_name"] = "dsc_mettler_toledo_v1"
-    (ready,) = validate_proposed(registry, rows, str(tmp_path))
-    assert ready["valid"], ready["errors"]
+    rows.loc[0, "instrument_name"] = "dsc"
 
     rows.loc[0, "raw_data_filename"] = "not_on_disk"
     (missing_data,) = validate_proposed(registry, rows, str(tmp_path))
@@ -265,8 +264,7 @@ def test_names_with_spaces_and_brackets_can_be_registered(tmp_path):
     _touch(tmp_path / "DSC" / "My Sample" / "run B.txt").write_bytes(sample)
     registry = _registry()
     rows = _proposals_for(tmp_path, registry)
-    rows["instrument_name"] = "dsc_mettler_toledo_v1"
-
+    assert set(rows["instrument_name"]) == {"dsc"}
     assert sorted(rows["raw_data_filename"]) == ["poly 2 (repeat)", "run A", "run B"]
     assert all(result["valid"] for result in validate_proposed(registry, rows, str(tmp_path)))
 
@@ -275,7 +273,7 @@ def test_validate_proposed_checks_against_existing_rows_and_bad_ids(tmp_path):
     from mfethuls.discovery import validate_proposed
 
     _touch(tmp_path / "TGA" / "poly2.txt")
-    registry = _registry({"name": "poly2", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "other"})
+    registry = _registry({"name": "poly2", "instrument_name": "dsc", "raw_data_filename": "other"})
     rows = _proposals_for(tmp_path, registry)
     rows.loc[0, "name"] = "poly2"  # clashes with the existing row
     rows.loc[0, "sample_id"] = "S1"  # malformed
@@ -291,8 +289,8 @@ def test_folder_whose_runs_are_all_registered_is_not_new(tmp_path):
     _touch(tmp_path / "DSC" / "polyX" / "polyX_run1.txt")
     _touch(tmp_path / "DSC" / "polyX" / "polyX_run2.txt")
     registry = _registry(
-        {"name": "r1", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "polyX_run1"},
-        {"name": "r2", "instrument_name": "dsc_mettler_toledo_v0", "raw_data_filename": "polyX_run2"},
+        {"name": "r1", "instrument_name": "dsc", "raw_data_filename": "polyX_run1"},
+        {"name": "r2", "instrument_name": "dsc", "raw_data_filename": "polyX_run2"},
     )
 
     assert _items(tmp_path, registry) == {}
@@ -433,3 +431,75 @@ def test_a_series_folder_is_one_experiment_and_flagged_when_its_files_are_ticked
 def test_tree_rows_of_nothing_new(tmp_path):
     (tmp_path / "DSC").mkdir()
     assert tree_rows(discover_unregistered(_registry(), str(tmp_path)), _registry(), str(tmp_path)).empty
+
+
+def test_closed_folders_hide_their_files_and_show_their_ticks(tmp_path):
+    from mfethuls.discovery import visible_rows
+
+    _touch(tmp_path / "DSC" / "aaa.txt")
+    _touch(tmp_path / "DSC" / "batch" / "b_run1.txt")
+    _touch(tmp_path / "DSC" / "batch" / "b_run2.txt")
+    tree = _tree(tmp_path)
+    assert tree["_open"].tolist() == [None, False, None, None]  # only folders open and close
+
+    closed = visible_rows(tree)
+    assert closed["_kind"].tolist() == ["file", "folder"]
+    assert closed["_data"].tolist()[1] == "▸ \U0001f4c1 DSC/batch/  \xb7  2 files"
+
+    edited = tree.copy()
+    edited.loc[1, ["include", "_open"]] = [True, True]
+    opened = visible_rows(sync_folder_ticks(tree, edited))
+    assert opened.index.tolist() == [0, 1, 2, 3]  # labels kept: edits go back to the right rows
+    assert opened["_data"].tolist()[1] == "▾ \U0001f4c1 DSC/batch/  \xb7  2 files  \xb7  2 of 2 ticked"
+
+    # Opening a file row does nothing.
+    stray = tree.copy()
+    stray.loc[0, "_open"] = True
+    assert sync_folder_ticks(tree, stray)["_open"].tolist() == [None, False, None, None]
+
+
+def test_a_value_typed_in_a_folder_row_fills_in_its_files(tmp_path):
+    _touch(tmp_path / "DSC" / "batch" / "b_run1.txt")
+    _touch(tmp_path / "DSC" / "batch" / "b_run2.txt")
+    _touch(tmp_path / "DSC" / "batch" / "b_run3.txt")
+    tree = _tree(tmp_path)  # the folder, then its three files
+    edited = tree.copy()
+    edited.loc[3, "sample_id"] = "S002"  # one file has its own sample
+    tree = sync_folder_ticks(tree, edited)
+
+    edited = tree.copy()
+    edited.loc[0, ["sample_id", "instrument_name", "name"]] = ["S001", "dsc", "renamed"]
+    filled = sync_folder_ticks(tree, edited)
+    assert filled["sample_id"].tolist() == ["S001", "S001", "S001", "S002"]
+    assert filled["instrument_name"].tolist()[1:] == ["dsc"] * 3
+    assert filled["name"].tolist()[1:] == ["b_run1", "b_run2", "b_run3"]  # each experiment keeps its own
+
+    edited = filled.copy()
+    edited.loc[0, "sample_id"] = "S003"  # files that followed the folder follow again
+    assert sync_folder_ticks(filled, edited)["sample_id"].tolist() == ["S003", "S003", "S003", "S002"]
+
+
+def test_one_file_per_folder_is_read_in_full_the_others_checked_quickly(tmp_path, monkeypatch):
+    import mfethuls.discovery as discovery
+    from mfethuls.discovery import validate_proposed
+
+    sample = (DATA_DIR / "DSC" / "poly2.txt").read_bytes()
+    for name in ("run1", "run2", "run3"):
+        _touch(tmp_path / "DSC" / "batch" / f"{name}.txt").write_bytes(sample)
+    _touch(tmp_path / "DSC" / "batch" / "run4.txt", "Curve Values:\n1\t2\n")  # another export kind
+    read = []
+    probe = discovery._probe_file
+
+    def counted(*args):
+        read.append(args[1])
+        return probe(*args)
+
+    monkeypatch.setattr(discovery, "_probe_file", counted)
+    registry = _registry()
+    rows = proposed_rows(discover_unregistered(registry, str(tmp_path)), registry, split={"DSC/batch"})
+    rows["instrument_name"] = "dsc"
+
+    results = validate_proposed(registry, rows, str(tmp_path))
+    assert len(read) == 1 and read[0].endswith("run1.txt")
+    assert [result["valid"] for result in results] == [True, True, True, False]
+    assert "run4.txt is none of the dsc formats mfethuls reads" in results[3]["errors"][0]["message"]

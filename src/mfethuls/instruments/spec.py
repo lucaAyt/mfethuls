@@ -70,6 +70,9 @@ def json_schema() -> Dict[str, Any]:
             "contains": {"type": "string",
                          "description": f"Text in the first {CONTAINS_LINES} lines that tells this layout apart "
                                         "from others with the same file ending."},
+            "not_contains": {"type": "string",
+                             "description": f"Text in the first {CONTAINS_LINES} lines of OTHER layouts only (e.g. an "
+                                            "older export of the same instrument): files with it are not this layout."},
             "blocks": {
                 "type": "object",
                 "required": ["starts_at"],
@@ -147,14 +150,13 @@ def json_schema() -> Dict[str, Any]:
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "mfethuls instrument definition",
         "type": "object",
-        "required": ["name", "type", "model", "folder_name"],
+        "required": ["name", "type", "model"],
         "oneOf": [{"required": ["file", "columns"]}, {"required": ["formats"]}],
         "properties": {
             "spec_version": {"const": SPEC_VERSION},
-            "name": {**simple_name, "description": "Instrument name used in the registry."},
+            "name": {**simple_name, "description": "Name of this reader (export format), e.g. tga_netzsch."},
             "type": {**simple_name, "description": "Measurement type, e.g. tga, ftir, uv_vis, or a new one."},
             "model": {"type": "string"},
-            "folder_name": {"type": "string", "description": "Folder under the data folder holding its files."},
             "data_layout": {"enum": list(LAYOUTS), "default": "file",
                             "description": "file: one file per experiment; folder: one folder per experiment."},
             "description": {"type": "string"},
@@ -204,6 +206,13 @@ def json_schema() -> Dict[str, Any]:
                                "found in the file name without its ending.",
                 "items": captured,
             },
+            "from_sheet_name": {
+                "type": "array",
+                "description": "Excel workbooks with one test per sheet: columns filled from each test sheet's "
+                               "name, e.g. the sample (LUB640_1 -> LUB640): the first group of a regular "
+                               "expression found in the sheet name.",
+                "items": captured,
+            },
             "from_header": {
                 "type": "array",
                 "description": "Columns filled from the text around the table (before it, then after it and "
@@ -218,14 +227,24 @@ def json_schema() -> Dict[str, Any]:
                                "stay in the file text too.",
                 "items": {
                     "type": "object",
-                    "required": ["name", "starts_at"],
+                    "required": ["name"],
                     "properties": {
                         "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
-                        "starts_at": {"type": "string", "description": "Text on the line before its rows."},
+                        "starts_at": {"type": "string", "description": "Text on the line before its rows "
+                                                                       "(with 'header': on its header line)."},
                         "ends_at": {"type": "string", "description": "Text on the line after its rows."},
                         "columns": {"type": "array", "items": {"type": "string",
                                                                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
-                                    "description": "Names of the fields, in order."},
+                                    "description": "Names of the fields, in order (with 'header': of the "
+                                                   "fields without a header name)."},
+                        "sheet": {"type": "string",
+                                  "description": "Excel workbooks only: the sheet holding the table, e.g. Results."},
+                        "header": {"type": "object", "required": ["rows"],
+                                   "properties": {"rows": {"type": "integer", "minimum": 1, "maximum": 3}},
+                                   "additionalProperties": False,
+                                   "description": "The table's own header lines (1: names, 2: names then "
+                                                  "units); every line below them is a row, e.g. one per "
+                                                  "specimen."},
                     },
                     "additionalProperties": False,
                 },
@@ -256,7 +275,6 @@ _EXAMPLE = {
     "name": "tga_lab2",
     "type": "tga",
     "model": "tgaX",
-    "folder_name": "TGA",
     "data_layout": "file",
     "file": {
         "extensions": [".txt"],
@@ -306,7 +324,9 @@ RULES = [
     "`extensions: [\".xlsx\"]` and the `header`; leave out encoding, delimiter and decimal. Without "
     "`file.sheet`, EVERY sheet containing `header.starts_at` is read (a workbook often holds one test per "
     "sheet) and rows get a `sheet` column; then set `name_from: \"sheet\"` so each test is its own curve. "
-    "`file.sheet` (name or number, 1 = first, -1 = last) reads only that sheet. The other sheets are kept. When sheet names change from file to file "
+    "When test sheets are named after the sample and a replicate number (LUB640, LUB640_1, LUB640_2), add "
+    "`from_sheet_name`: [{\"column\": \"sample\", \"pattern\": \"^(.+?)(?:_\\\\d+)?$\"}] so each curve knows its "
+    "sample. `file.sheet` (name or number, 1 = first, -1 = last) reads only that sheet. The other sheets are kept. When sheet names change from file to file "
     "(e.g. named after the sample), use a number or rely on `header.starts_at`, never the name. In a "
     "`from_header` pattern, `{sheet}` stands for each test's sheet name, to take a value from that test's "
     "row in a results sheet, e.g. `^{sheet}\\\\t([0-9.]+)`. Dates Excel saved as plain numbers "
@@ -340,6 +360,11 @@ RULES = [
     "\"ends_at\": text on the line after it, \"columns\": [field names]}] to keep it as metadata. Rows "
     "written twice (identical in every field) can be left out with `file.duplicate_rows: \"drop\"`; "
     "never use it when repeated rows are real measurements.",
+    "- A workbook's results sheet (one row per specimen or test, under its own header lines of names and "
+    "units: strength, modulus, dimensions) is kept as metadata with `tables`: [{\"name\": \"results\", "
+    "\"sheet\": its name, \"header\": {\"rows\": 2}, \"columns\": [\"specimen\"]}] (`columns` names "
+    "the fields without a header, such as the specimen name in the first column). Do not keep a sheet "
+    "of statistics (mean, min, max) this way; it stays in the file text.",
     "- For a measurement type mfethuls does not know yet, add `plot`: "
     "{\"x\": stored column, \"y\": stored column}.",
 ]

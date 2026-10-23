@@ -8,7 +8,7 @@ import pandas as pd
 
 
 def list_datasets(limit: int = 100) -> pd.DataFrame:
-    """Ingested datasets from the DuckDB catalog: experiment, instrument, sample, run, profile and row count."""
+    """Ingested datasets from the DuckDB catalog: experiment, instrument, sample, run and row count."""
 
     from .duckdb_backend import DuckDBQueryBackend
 

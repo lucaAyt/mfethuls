@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Fields copied from a dataset's .metadata.json sidecar when backfilling older catalog rows.
 _SIDECAR_FIELDS = (
     "experiment_id", "experiment_name", "instrument_name", "instrument_type",
-    "instrument_model", "sample_id", "run_id", "measurement_profile", "reader_fingerprint",
+    "instrument_model", "sample_id", "run_id", "reader_fingerprint", "reader",
 )
 
 try:

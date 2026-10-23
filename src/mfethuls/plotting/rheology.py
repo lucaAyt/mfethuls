@@ -7,49 +7,30 @@ from .backend import Backend, render
 from .core import PlotError, _default_title, _require_columns, _values
 from .labels import axis_label, legend_name, shared_axis_label
 from .spec import Panel, PlotSpec, Trace
+from .sweeps import SWEEP_NAMES, sweep_axis
 
-
-SUPPORTED_RHEOLOGY_PROFILES = frozenset(
-    {
-        "oscillatory_frequency_sweep",
-        "oscillatory_strain_sweep",
-        "oscillatory_time_sweep",
-        "flow_curve",
-    }
-)
-
-
-_PROFILE_MAP = {
-    "oscillatory_frequency_sweep": ("angular_frequency_rad_s", ["storage_modulus_pa", "loss_modulus_pa"]),
-    "oscillatory_strain_sweep": ("strain_pct", ["storage_modulus_pa", "loss_modulus_pa"]),
-    "oscillatory_time_sweep": ("time_s", ["storage_modulus_pa", "loss_modulus_pa"]),
-    "flow_curve": ("shear_rate_s_inv", ["shear_stress_pa", "viscosity_pa_s"]),
-}
-
-
-def is_supported_rheology_profile(profile: Optional[str]) -> bool:
-    """Return True if the profile is a supported rheometer profile."""
-
-    return bool(profile) and str(profile).strip() in SUPPORTED_RHEOLOGY_PROFILES
+# Swept quantities in the order they are looked for (see sweeps.sweep_axis); time last.
+RHEOLOGY_AXES = ("shear_rate_s_inv", "angular_frequency_rad_s", "strain_pct", "temperature_C", "time_s")
+_MODULI = ["storage_modulus_pa", "loss_modulus_pa"]
+# A flow curve: stress and viscosity against shear rate.
+_FLOW = ["shear_stress_pa", "viscosity_pa_s"]
 
 
 def build_rheology_spec(
     dataset: Dataset,
     *,
-    profile: Optional[str] = None,
+    x: Optional[str] = None,
     group_by: Optional[str] = None,
     max_groups: int = 20,
     title: Optional[str] = None,
     strict: bool = True,
 ) -> PlotSpec:
-    resolved_profile = profile or str(dataset.metadata.get("measurement_profile") or "").strip() or None
-    if resolved_profile not in _PROFILE_MAP:
-        raise PlotError(
-            "plot_rheology requires a supported measurement_profile: "
-            f"{sorted(_PROFILE_MAP)}"
-        )
-
-    x_column, y_columns = _PROFILE_MAP[resolved_profile]
+    """Rheometer moduli (stress and viscosity for a flow curve) against the quantity the run
+    swept, read from the data (see :mod:`~mfethuls.plotting.sweeps`), or against ``x``."""
+    x_column = x or sweep_axis(dataset.data, RHEOLOGY_AXES)
+    if x_column is None:
+        raise PlotError(f"plot_rheology needs one of the columns {', '.join(RHEOLOGY_AXES)}.")
+    y_columns = list(_FLOW if x_column == "shear_rate_s_inv" else _MODULI)
     if strict:
         _require_columns(dataset, [x_column] + y_columns, "plot_rheology")
 
@@ -60,9 +41,10 @@ def build_rheology_spec(
         elif strict:
             raise PlotError(f"plot_rheology requires canonical column {y_column!r}.")
 
+    sweep = SWEEP_NAMES.get(x_column, f"against {x_column}")
     panel = Panel(
         traces=traces,
-        title=title or _default_title(dataset, f"Rheology - {resolved_profile.replace('_', ' ')}"),
+        title=title or _default_title(dataset, f"Rheology - {sweep}"),
         xlabel=axis_label(x_column),
         ylabel=shared_axis_label(y_columns),
         # Log-log scaling unless the x-axis is time or temperature.
@@ -76,7 +58,7 @@ def build_rheology_spec(
 def plot_rheology(
     dataset: Dataset,
     *,
-    profile: Optional[str] = None,
+    x: Optional[str] = None,
     group_by: Optional[str] = None,
     max_groups: int = 20,
     ax=None,
@@ -84,11 +66,11 @@ def plot_rheology(
     strict: bool = True,
     backend: Optional[Backend] = None,
 ):
-    """Plot Rheology data for a supported measurement profile."""
+    """Plot Rheometer data against the swept quantity (or ``x``)."""
 
     spec = build_rheology_spec(
         dataset,
-        profile=profile,
+        x=x,
         group_by=group_by,
         max_groups=max_groups,
         title=title,
