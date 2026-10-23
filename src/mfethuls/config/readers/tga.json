@@ -3,7 +3,6 @@
   "name": "tga",
   "type": "tga",
   "model": "tgaX",
-  "folder_name": "TGA",
   "data_layout": "file",
   "description": "TGA text export (header line 'Index ...' followed by a units line, a footer after the data) or a CSV export with one header line.",
   "formats": [

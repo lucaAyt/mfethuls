@@ -3,7 +3,6 @@
   "name": "ftir",
   "type": "ftir",
   "model": "bruker",
-  "folder_name": "FTIR",
   "data_layout": "file",
   "description": "Bruker FTIR spectra exported as CSV: one line of text, then 'cm-1,%T' (or absorbance).",
   "file": {

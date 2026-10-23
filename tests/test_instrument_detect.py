@@ -10,7 +10,7 @@ from mfethuls.parsers.tabular import TabularParser
 
 def _round_trip(path, detection, type_="test_type"):
     """The detected settings and guesses as a definition, reading ``path``."""
-    data = detection.definition(name="x", type=type_, model="m", folder_name="F")
+    data = detection.definition(name="x", type=type_, model="m")
     if not data["columns"]:
         data["columns"] = [{"source": detection.columns[0].source, "column": "first"}]
     return TabularParser(parse_definition(data)).parse({"x": [str(path)]}, instrument_type=type_).data

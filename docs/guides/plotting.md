@@ -7,7 +7,7 @@ mfethuls draws every built-in plot with two interchangeable backends:
 | `"matplotlib"` (default) | `(fig, ax)`, or `(fig, axes)` for one panel per experiment | Publication figures, vector SVG/PDF, the CLI |
 | `"plotly"` | `plotly.graph_objects.Figure` | Interactive exploration in notebooks and the Streamlit app |
 
-Both draw the same plot: same columns, labels, colours, axis directions and limits. Plotly uses WebGL, so hundreds of thousands of points stay responsive without downsampling.
+Both draw the same plot: same columns, labels, colours, axis directions and limits. Plotly uses WebGL, so hundreds of thousands of points stay responsive. In the app, a figure of more than 300,000 points is thinned for the screen (see [Large datasets](#large-datasets-in-the-app)); downloads and notebooks always get every point.
 
 Install with the `viz` or `notebook` extra (`pip install "mfethuls[viz,notebook]"`).
 
@@ -79,6 +79,7 @@ When a dataset holds several curves on the same x values (e.g. a series of spect
 - Overlays of several experiments give each experiment its own colour (families drawn in one colour, such as FTIR or NMR, would otherwise draw them alike).
 - Up to 10 lines: a normal legend.
 - More than 10 lines of a **numeric** column (e.g. `time_s`): a continuous colour bar instead of a legend. Overlays of several such experiments share one colour bar and use line style to mark the experiment.
+- More than 50 lines of a numeric column (an in-situ run of hundreds of spectra): 100 of them, spread evenly from the first to the last, on the colour bar; a note says how many there are. The heatmap shows them all.
 
 ### Time-resolved data (`time_s`)
 
@@ -135,10 +136,22 @@ Pass `ax=` to draw into your own axes (overlay and single plots only). The figur
 
 The **Plot** section of the app (`mfethuls-app`) offers two modes:
 
-- **Line or scatter plots of any columns:** choose the x and y columns, **Colour by** and **Style by** columns, log axes and axis direction.
+- **Line or scatter plots of any columns:** choose the x and y columns, **Colour by** and **Style by** columns, log axes and axis direction. Colouring by a numeric column with more than 100 values (spectra over time) draws 100 of them, spread evenly.
+- **Heatmap** (plot type): a series as one image, e.g. **X axis** wavelength, **Y axis** the value (its colour), **Rows** time: every spectrum is a row. One heatmap per experiment, sharing the colour scale. More than 600 rows (or 1,200 x values) are combined into equal ranges and averaged, and a note says so. The SVG is drawn with Matplotlib.
 - **Built-in instrument plot** (toggle): the plots described above, for the selected experiments. Experiments whose x-axes differ always get one panel each.
 - **Normalise** (next to **Filter**): **Max = 1**, **0 to 1** or **Area = 1**, for each experiment, in line and scatter plots and the built-in plot; once chosen the button is coloured and says so (**Normalised: 0 to 1**). With x **Axis limits** set (Together or Offset), only the points inside them set the scale, so you can normalise to one peak; a note under the chart says *Normalised over … (the axis limits)*. Changing Normalise clears the y limits, which are in the old units; the x limits stay. The data and the CSV download stay as measured.
 - **Layout** (in the toolbar above the chart, with several experiments in a line or scatter plot or the built-in plot): **Together** on one axis, **Offset** (each experiment shifted up by its tallest curve, so the curves don't overlap; the slider sets the **spacing**, and the y-axis shows no values since they are shifted) or **Panels** (one per experiment, one under the other, sharing the x-axis; zoom one and all follow). Axis limits apply to Together and Offset.
+- **Waterfall** (in the same toolbar, for a line plot coloured by a numeric column such as **Time (s)**, even of one experiment): each line is shifted up by its colour value, the first at the bottom and the last three Offset steps above it, so a series of spectra reads like a 3D view and stays exact in 2D. A line at 10 s of a 40 s run sits a quarter of the way up. The **spacing** slider sets the height; the y-axis is labelled *(offset)* and shows no values. A long series shows its spread of 100 lines (above); the SVG is a clean vector figure for publication.
+
+### Large datasets in the app
+
+An in-situ run of 1,500 spectra is 1.5 million rows: more points than a screen can show, and too many to send to the browser on every click. The app:
+
+- **draws at most about 300,000 points.** Above that, each line keeps its first and last point and the lowest and highest point of each short stretch, so peaks, dips and edges stay where they are; lines of up to 2,000 points are never thinned. A note under the toolbar says *Showing … of … points*. The SVG, HTML and CSV downloads have every point.
+- **shows a spread of a long series' lines** (above), or all of them in the **heatmap**.
+- **keeps the selected experiments loaded** while you change the plot, and redraws only the Plot and Preview when you change a plot option. Repeated text columns (file and experiment names) are held as categories, about a sixth of the memory.
+
+`benchmarks/insitu_series.py` builds such a series from the example files and times ingest, loading and each plot.
 
 The toolbar above the chart:
 

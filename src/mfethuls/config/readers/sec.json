@@ -3,7 +3,6 @@
   "name": "sec",
   "type": "sec",
   "model": "agilent",
-  "folder_name": "SEC",
   "data_layout": "file",
   "description": "Agilent SEC export: one file per detector (..._RID1A.CSV, ..._VWD1A.CSV), two columns of numbers (retention time in minutes, detector response) and no header. The detector code at the end of the file name fills detector_name.",
   "file": { "extensions": [".csv"], "encoding": "auto", "delimiter": "comma", "header": { "rows": 0 } },

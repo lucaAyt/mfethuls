@@ -70,6 +70,9 @@ def json_schema() -> Dict[str, Any]:
             "contains": {"type": "string",
                          "description": f"Text in the first {CONTAINS_LINES} lines that tells this layout apart "
                                         "from others with the same file ending."},
+            "not_contains": {"type": "string",
+                             "description": f"Text in the first {CONTAINS_LINES} lines of OTHER layouts only (e.g. an "
+                                            "older export of the same instrument): files with it are not this layout."},
             "blocks": {
                 "type": "object",
                 "required": ["starts_at"],
@@ -147,14 +150,13 @@ def json_schema() -> Dict[str, Any]:
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "mfethuls instrument definition",
         "type": "object",
-        "required": ["name", "type", "model", "folder_name"],
+        "required": ["name", "type", "model"],
         "oneOf": [{"required": ["file", "columns"]}, {"required": ["formats"]}],
         "properties": {
             "spec_version": {"const": SPEC_VERSION},
-            "name": {**simple_name, "description": "Instrument name used in the registry."},
+            "name": {**simple_name, "description": "Name of this reader (export format), e.g. tga_netzsch."},
             "type": {**simple_name, "description": "Measurement type, e.g. tga, ftir, uv_vis, or a new one."},
             "model": {"type": "string"},
-            "folder_name": {"type": "string", "description": "Folder under the data folder holding its files."},
             "data_layout": {"enum": list(LAYOUTS), "default": "file",
                             "description": "file: one file per experiment; folder: one folder per experiment."},
             "description": {"type": "string"},
@@ -273,7 +275,6 @@ _EXAMPLE = {
     "name": "tga_lab2",
     "type": "tga",
     "model": "tgaX",
-    "folder_name": "TGA",
     "data_layout": "file",
     "file": {
         "extensions": [".txt"],

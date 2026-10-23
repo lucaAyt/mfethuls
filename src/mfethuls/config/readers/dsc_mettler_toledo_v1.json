@@ -3,12 +3,12 @@
   "name": "dsc_mettler_toledo_v1",
   "type": "dsc",
   "model": "mettler_toledo_v1",
-  "folder_name": "DSC",
   "data_layout": "file",
   "description": "Mettler Toledo DSC text export, current version (the older STARe export is dsc_mettler_toledo_v0): an 'Index' header line, a line of units, the table, then a sample/date line.",
   "file": {
     "extensions": [".txt"],
     "encoding": "auto",
+    "not_contains": "Curve Values:",
     "delimiter": "whitespace",
     "header": { "starts_at": "Index", "rows": 2 },
     "data_ends": "first_non_numeric_row"

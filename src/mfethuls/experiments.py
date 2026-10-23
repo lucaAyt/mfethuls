@@ -13,6 +13,7 @@ from copy import copy
 
 import pandas as pd
 
+from .manifest import one_scan_per_folder
 from .registry_validator import RegistryValidator
 from .settings import get_settings
 
@@ -247,6 +248,12 @@ class Registry:
         validator = RegistryValidator()
         experiments: List[Experiment] = []
         problems: List[RegistryProblem] = []
+        with one_scan_per_folder():  # with check_data_paths, every row looks for its files
+            cls._check_rows(df, validator, experiments, problems, check_data_paths, data_root)
+        return cls(experiments, frame=df, path=path, problems=problems)
+
+    @staticmethod
+    def _check_rows(df, validator, experiments, problems, check_data_paths, data_root) -> None:
         for rec in df.to_dict(orient="records"):
             name = _normalize_optional_str(rec.get("name"))
             row_result = experiment_from_registry_record(rec)
@@ -268,8 +275,6 @@ class Registry:
                 problems.append(RegistryProblem(name=name, errors=errors, warnings=warnings))
             if not errors and row_result.experiment is not None:
                 experiments.append(row_result.experiment)
-
-        return cls(experiments, frame=df, path=path, problems=problems)
 
     def get(self, name: str) -> Experiment:
         """The experiment called ``name``; ``KeyError`` if it is unknown or its row was skipped."""

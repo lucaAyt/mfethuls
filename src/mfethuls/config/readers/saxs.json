@@ -3,7 +3,6 @@
   "name": "saxs",
   "type": "saxs",
   "model": "anton_paar",
-  "folder_name": "SAXS",
   "data_layout": "file",
   "description": "Anton Paar SAXS curve: a CSV with one header line (q, intensity, error). Curves are named after their folder.",
   "file": { "extensions": [".csv"], "encoding": "auto", "delimiter": "comma", "header": { "rows": 1 },

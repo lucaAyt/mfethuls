@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from mfethuls.parsers.registry import _PARSER_REGISTRY
 from mfethuls.schema_normalization import _load_instrument_schema
+from mfethuls.manifest import one_scan_per_folder
 from mfethuls.naming import file_name_problem, stem_key, view_key, view_name
 from mfethuls.settings import get_settings
 
@@ -28,28 +28,6 @@ logger = logging.getLogger(__name__)
 _S_RE = re.compile(r"^S[0-9]{3,6}$")
 _R_RE = re.compile(r"^R[0-9]{3,6}$")
 
-# Built-in instruments that were renamed: old name -> new name. Only to say so when a
-# registry row still uses the old name; the old name is not accepted.
-_RENAMED_INSTRUMENTS = {"dsc": "dsc_mettler_toledo_v0", "dsc_mettler_toledo": "dsc_mettler_toledo_v1"}
-
-
-def _load_instrument_config() -> List[Dict[str, Any]]:
-    """Every instrument: ``instrument_params.json`` plus instrument definitions."""
-    from mfethuls.instruments.configured import instrument_entries
-
-    return instrument_entries()
-
-
-def _get_instrument_entry(name: str, config: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
-    """Retrieve an instrument config entry by name (from ``config``, else the current instruments)."""
-    config = _load_instrument_config() if config is None else config
-    name_norm = str(name).casefold()
-    for entry in config:
-        entry_name = entry.get("name")
-        if isinstance(entry_name, str) and entry_name.casefold() == name_norm:
-            return entry
-    return None
-
 
 class RegistryValidationError(ValueError):
     """Raised when registry validation fails."""
@@ -60,61 +38,29 @@ class RegistryValidationError(ValueError):
 class RegistryValidator:
     """Validates experiment and instrument setup before parsing."""
 
-    def __init__(self):
-        self.config = _load_instrument_config()
-
-    def validate_experiment(self, experiment: Experiment) -> Tuple[bool, List[str]]:
-        """Validate an Experiment against the registry.
+    def validate_experiment(self, experiment: Experiment, data_root: Optional[str] = None) -> Tuple[bool, List[str]]:
+        """Whether the experiment's instrument (one of ``data_root``'s) is known and its type can be stored.
 
         Returns a tuple (is_valid, error_messages).
         """
-        errors: List[str] = []
+        from mfethuls.instruments.configured import get_instrument, get_reader, instruments, readers_of
 
-        # 1. Check instrument exists in config
-        instr_entry = _get_instrument_entry(experiment.instrument_name, self.config)
-        if instr_entry is None:
-            renamed = _RENAMED_INSTRUMENTS.get(str(experiment.instrument_name or "").casefold())
-            if renamed:
-                errors.append(
-                    f"Instrument '{experiment.instrument_name}' was renamed to '{renamed}' in mfethuls 0.4.0. "
-                    f"Change instrument_name in the registry, then run Clean up."
-                )
-            else:
-                errors.append(
-                    f"Instrument '{experiment.instrument_name}' is not a known instrument. "
-                    f"Available instruments: {self._list_instrument_names()}"
-                )
-            return False, errors
-
-        # 2. Extract type and model from config
-        instr_type = instr_entry.get("type")
-        instr_model = instr_entry.get("model")
-
-        if not instr_type or not instr_model:
-            errors.append(
-                f"Instrument '{experiment.instrument_name}' has missing type or model in config."
-            )
-            return False, errors
-
-        # 3. Check parser is registered
-        parser_key = (instr_type, instr_model)
-        if parser_key not in _PARSER_REGISTRY:
-            errors.append(
-                f"No parser registered for ({instr_type}, {instr_model}). "
-                f"Available parsers: {self._list_available_parsers()}"
-            )
-            return False, errors
-
-        # 4. Check schema exists (an instrument definition may bring a new measurement type)
-        schema = _load_instrument_schema(instr_type)
-        if not schema and instr_entry.get("definition") is None:
-            errors.append(
-                f"No schema file found for instrument type '{instr_type}'. "
-                f"Expected: schemas/{instr_type}.json"
-            )
-            return False, errors
-
-        return len(errors) == 0, errors
+        try:
+            instrument = get_instrument(experiment.instrument_name, data_root)
+        except ValueError:
+            reader = get_reader(experiment.instrument_name, data_root)
+            if reader is not None:
+                same_type = ", ".join(i.name for i in instruments(data_root) if i.type == reader.type)
+                return False, [f"'{experiment.instrument_name}' is a reader (an export format of {reader.type} data), "
+                               f"not an instrument: use the instrument whose folder holds the files ({same_type})."]
+            names = ", ".join(i.name for i in instruments(data_root)) or "(none)"
+            return False, [f"Instrument '{experiment.instrument_name}' is not a known instrument. "
+                           f"Available instruments: {names}"]
+        # A definition may bring a new measurement type, with no schema of its own.
+        if not _load_instrument_schema(instrument.type) and not any(r.definition for r in readers_of(instrument, data_root)):
+            return False, [f"No schema file found for the measurement type '{instrument.type}'. "
+                           f"Expected: schemas/{instrument.type}.json"]
+        return True, []
 
     def validate_experiment_details(
         self,
@@ -125,7 +71,8 @@ class RegistryValidator:
     ) -> Tuple[List[str], List[Tuple[str, str]]]:
         """Validate an Experiment and collect warnings.
 
-        Returns (errors, warnings) where warnings are tuples of (field, message).
+        With ``check_data_paths``, its raw data must be found in its instrument's folder and be
+        read by one of its readers. Returns (errors, warnings) where warnings are tuples of (field, message).
         """
         warnings: List[Tuple[str, str]] = []
 
@@ -135,7 +82,7 @@ class RegistryValidator:
             )
             return [], warnings
 
-        ok, errors = self.validate_experiment(experiment)
+        ok, errors = self.validate_experiment(experiment, data_root)
         if not ok:
             return errors, warnings
 
@@ -146,25 +93,16 @@ class RegistryValidator:
                     ("data_path", "No data_root provided; cannot validate data paths.")
                 )
             else:
+                from mfethuls.instruments.configured import get_instrument, reader_for
                 from mfethuls.manifest import find_data_files
-                entry = _get_instrument_entry(experiment.instrument_name, self.config)
-                folder_name = entry.get("folder_name") if entry else None
-                if not folder_name:
-                    warnings.append(
-                        (
-                            "data_path",
-                            f"Instrument '{experiment.instrument_name}' has no folder_name configured.",
-                        )
-                    )
-                else:
-                    instrument_path = os.path.join(data_root, folder_name)
-                    raw_filename = experiment.raw_data_filename or experiment.name
-                    try:
-                        find_data_files(instrument_path, raw_filename)
-                    except FileNotFoundError as exc:
-                        warnings.append(("data_path", str(exc)))
-                    except ValueError as exc:
-                        warnings.append(("data_path", str(exc)))
+
+                instrument = get_instrument(experiment.instrument_name, data_root)
+                raw_filename = experiment.raw_data_filename or experiment.name
+                try:
+                    _, files = find_data_files(os.path.join(data_root, instrument.folder_name), raw_filename)
+                    reader_for(instrument, files, data_root)
+                except (FileNotFoundError, ValueError) as exc:
+                    warnings.append(("data_path", str(exc)))
 
         return [], warnings
 
@@ -193,16 +131,6 @@ class RegistryValidator:
                 "Expected pattern R### (e.g. R001)."
             )
         return run_id
-
-    def _list_instrument_names(self) -> str:
-        """Return comma-separated list of available instrument names."""
-        names = [entry.get("name") for entry in self.config if entry.get("name")]
-        return ", ".join(sorted(set(names))) or "(none)"
-
-    def _list_available_parsers(self) -> str:
-        """Return comma-separated list of registered (type, model) pairs."""
-        parsers = sorted(_PARSER_REGISTRY.keys())
-        return ", ".join(f"({t}, {m})" for t, m in parsers) or "(none)"
 
 
 def _text(value: Any) -> Optional[str]:
@@ -281,6 +209,7 @@ def _table_errors(df: pd.DataFrame) -> List[List[Dict[str, str]]]:
     return errors
 
 
+@one_scan_per_folder()  # with check_data_paths, every row looks for its files: walk each folder once
 def validate_registry_dataframe(
     df: pd.DataFrame,
     *,

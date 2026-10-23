@@ -47,7 +47,7 @@ def build_sec_spec(
                 max_groups,
             )
         else:
-            for group_value, subset in df.groupby(group_by, dropna=False, sort=False):
+            for group_value, subset in df.groupby(group_by, dropna=False, sort=False, observed=True):
                 label_value = "<missing>" if group_value is None else str(group_value)
                 traces.append(Trace(_values(subset[x_column]), _values(subset[y_column]), label=label_value))
             legend_title = group_by
@@ -55,7 +55,7 @@ def build_sec_spec(
         subset = df[df[detector_column] == detector]
         traces.append(Trace(_values(subset[x_column]), _values(subset[y_column]), label=detector))
     elif detector_column in df.columns:
-        for detector_name, subset in df.groupby(detector_column):
+        for detector_name, subset in df.groupby(detector_column, observed=True):
             traces.append(Trace(_values(subset[x_column]), _values(subset[y_column]), label=str(detector_name)))
     else:
         traces.append(Trace(_values(df[x_column]), _values(df[y_column])))

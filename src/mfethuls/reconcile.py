@@ -45,9 +45,8 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Dict, List, Optional, Tuple
 
 from .experiments import Experiment, Registry, _normalize_optional_str
-from .manifest import content_hash
+from .manifest import content_hash, one_scan_per_folder
 from .naming import stem_key
-from .parsers.registry import reads
 from .storage.config import _dataset_basename
 from .stores import Stores
 
@@ -157,14 +156,12 @@ def _experiment_key(exp: Experiment) -> Tuple[Optional[str], Optional[str]]:
 def raw_data_hash(exp: Experiment) -> Optional[str]:
     """The content hash of the raw data files an experiment would ingest; ``None`` if not found."""
 
-    from .config.loader import prepare_instruments
+    from .factory import prepare_experiment
 
     raw = exp.raw_data_filename or exp.name
     try:
-        bundle = prepare_instruments(filters={"name": [exp.instrument_name]}, experiments=[raw])
-        instrument = bundle.instruments[exp.instrument_name]
-        files = [f for f in bundle.data_paths[exp.instrument_name].get(raw, []) if reads(instrument.parser, f)]
-    except Exception:  # missing or ambiguous raw data: no match possible
+        _, files, _ = prepare_experiment(exp.instrument_name, raw)
+    except Exception:  # missing or ambiguous raw data, or no reader for it: no match possible
         return None
     return content_hash(files) if files else None
 
@@ -211,55 +208,56 @@ def _stale_catalog_fields(row: Dict[str, Any], exp: Experiment) -> List[str]:
 
 
 class _Readers:
-    """Each instrument's current reader, resolved once per plan.
+    """Each reader's current fingerprint, resolved once per plan.
 
-    Resolving reads the lab's instrument folder and rebuilds the parsers; doing it for every
+    Resolving reads the lab's readers folder and rebuilds the parsers; doing it for every
     experiment made Clean up slow on a large registry in a synced folder.
     """
 
     def __init__(self) -> None:
-        self._entries: Optional[Dict[str, Dict[str, Any]]] = None
         self._found: Dict[str, Optional[tuple]] = {}
 
-    def current(self, instrument_name: Optional[str]) -> Optional[tuple]:
-        """``(reader fingerprint, read by a definition)`` of the instrument, or None if it has no reader."""
-        from .instruments.configured import definition_for, instrument_entries
-        from .parsers.registry import get_parser, reader_fingerprint
+    def current(self, reader_name: Optional[str]) -> Optional[tuple]:
+        """``(fingerprint, read by a definition)`` of the reader, or None if there is no such reader."""
+        from .instruments.configured import get_reader
+        from .parsers.registry import reader_fingerprint
 
-        name = str(instrument_name or "").casefold()
+        name = str(reader_name or "").casefold()
         if name not in self._found:
-            if self._entries is None:
-                self._entries = {entry["name"]: entry for entry in instrument_entries()}
-            entry, found = self._entries.get(name), None
-            if entry is not None:
-                try:
-                    found = (reader_fingerprint(get_parser(entry["type"], entry["model"])),
-                             definition_for(name) is not None)
-                except ValueError:
-                    found = None
-            self._found[name] = found
+            reader = get_reader(name) if name else None
+            try:
+                self._found[name] = (reader_fingerprint(reader.parser), reader.definition is not None) if reader else None
+            except ValueError:
+                self._found[name] = None
         return self._found[name]
 
 
 def _reader_change(rows: List[Dict[str, Any]], exp: Experiment, readers: Optional[_Readers] = None) -> Optional[str]:
-    """Why the experiment's raw data must be read again: its reader changed since it was read."""
-    found = (readers or _Readers()).current(exp.instrument_name)
+    """Why the experiment's raw data must be read again: the reader that read it has changed since.
+
+    Only that reader counts: a reader added later for the same type does not read stored data again.
+    """
+    names = {_normalize_optional_str(row.get("reader")) for row in rows}
+    if names <= {None}:
+        return "read before mfethuls recorded which reader read the data"
+    (name, *_) = sorted(n for n in names if n)
+    found = (readers or _Readers()).current(name)
     if found is None:
-        return None
+        return None  # the reader is gone (e.g. a lab reader removed): its data stays as it is
     current, by_definition = found
     stored = {_normalize_optional_str(row.get("reader_fingerprint")) for row in rows}
     if stored == {current}:
         return None
     if not by_definition:
         before = ", ".join(sorted(value for value in stored if value)) or "an older reader"
-        return f"read by another version of mfethuls' {exp.instrument_name} reader ({before} -> {current})"
+        return f"read by another version of mfethuls' {name} reader ({before} -> {current})"
     if stored <= {None} or any(value and "-v" in value for value in stored):
-        return f"{exp.instrument_name} is now read by an instrument definition"
+        return f"{name} is now read by a definition"
     definition_part, _, engine = current.partition("@")
     if any(value and value.partition("@")[0] == definition_part for value in stored):
         before = ", ".join(sorted(value.partition("@")[2] or "an older reader" for value in stored if value))
         return f"read by another version of mfethuls' definition reader ({before} -> {engine})"
-    return f"the instrument definition of {exp.instrument_name} has changed"
+    return f"the reader {name} has changed"
 
 
 def plan(registry: Registry, stores: Stores, *, max_forget: Optional[int] = None) -> Plan:
@@ -279,7 +277,7 @@ def plan(registry: Registry, stores: Stores, *, max_forget: Optional[int] = None
     experiments = list(registry)
     unmatched = [exp for exp in experiments if _experiment_key(exp) not in by_key]
     actions: List[Action] = []
-    readers = _Readers()  # each instrument resolved once, not once per experiment
+    readers = _Readers()  # each reader resolved once, not once per experiment
 
     # Renamed raw data: an unmatched row with the same content as exactly one forgotten entry.
     forgotten_by_hash: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
@@ -422,6 +420,11 @@ def apply(plan: Plan, registry: Registry, stores: Stores, *, force: bool = False
 
     if plan.blocked and not force:
         raise ReconcileBlocked(plan.blocked_reason)
+    with one_scan_per_folder():  # re-reading many experiments: each instrument folder walked once
+        return _apply_actions(plan, registry, stores)
+
+
+def _apply_actions(plan: Plan, registry: Registry, stores: Stores) -> List[Dict[str, Any]]:
 
     failed_refresh: set = set()
     results = []

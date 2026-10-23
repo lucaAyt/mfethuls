@@ -11,7 +11,7 @@ import pytest
 
 from mfethuls.config.loader import load_experiment_dataset
 from mfethuls.experiments import Registry
-from mfethuls.instruments.configured import definition_for
+from mfethuls.instruments.configured import get_instrument
 from mfethuls.manifest import FileManifestBackend
 
 from mfethuls.examples import EXAMPLES_DIR
@@ -92,7 +92,7 @@ def test_files_next_to_the_data_are_not_read_or_hashed(examples_config, caplog):
     raw = entry["raw_data_filename"]
     # In the experiment's instrument folder: other instruments' folders have files of the same name
     # (TGA/poly1.txt next to DSC/poly1.txt), and rglob's order differs between systems.
-    folder = data_root / definition_for(entry["instrument_name"], str(data_root)).folder_name
+    folder = data_root / get_instrument(entry["instrument_name"], str(data_root)).folder_name
     (data_file,) = [p for p in sorted(folder.rglob(f"{raw}*")) if p.is_file() and p.suffix != ".parquet"][:1]
     (data_file.parent / f"{raw}.svg").write_text("<svg/>", encoding="utf8")
 

@@ -1,4 +1,4 @@
-"""Adding and removing instruments in the app: chatbot route (default), own guesses, plain form, Remove."""
+"""Adding readers in the app (chatbot route by default, own guesses, plain form), and removing the lab's files."""
 
 import re
 import json
@@ -45,6 +45,7 @@ class Backend(LocalBackend):
 render_instruments_section(Backend(), {registry!r})
 """
 
+# A chatbot's answer may still name the folder (the older layout): the form takes it as the folder.
 ANSWER = {
     "name": "photometer", "type": "absorbance_kinetics", "model": "lab_built", "folder_name": "Photometer",
     "file": {"extensions": [".dat"], "delimiter": "semicolon", "decimal": ",", "header": {"starts_at": "Time"}},
@@ -52,6 +53,7 @@ ANSWER = {
                 {"source": "A600", "quantity": "absorbance"}],
     "plot": {"x": "time_s", "y": "absorbance_a_u"},
 }
+READER = {k: v for k, v in ANSWER.items() if k != "folder_name"}
 
 
 @pytest.fixture
@@ -64,9 +66,9 @@ def data_root(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("PATH_TO_DATA", str(root))
     yield root
-    from mfethuls.instruments.configured import instrument_definitions
+    from mfethuls.instruments.configured import reader_definitions
 
-    instrument_definitions(data_root="")  # unregister the lab parsers again
+    reader_definitions(data_root="")  # unregister the lab parsers again
 
 
 def _run(script):
@@ -90,8 +92,8 @@ def _paste(at, answer):
     return at
 
 
-def _saved(data_root, name="photometer"):
-    return json.loads((data_root / ".mfethuls" / "instruments" / f"{name}.json").read_text(encoding="utf8"))
+def _saved(data_root, name="photometer", folder="readers"):
+    return json.loads((data_root / ".mfethuls" / folder / f"{name}.json").read_text(encoding="utf8"))
 
 
 def _click(at, label):
@@ -124,11 +126,15 @@ def test_chatbot_answer_fills_the_form_and_is_saved(data_root):
     assert summary.loc[summary["column in the file"] == "Lamp", "values"].item() == "kept as they are"
     assert any("Read **3** rows" in c.value for c in at.caption)
 
+    assert any("A new instrument **photometer** will read **Photometer**" in c.value for c in at.caption)
     _click(at, "Save instrument")
     saved = _saved(data_root)
     assert saved["columns"] == ANSWER["columns"] and saved["plot"] == ANSWER["plot"]
     assert saved["description"].startswith("Drafted with a chatbot and checked in mfethuls")
-    assert saved["check"]["rows"] == 3
+    assert saved["check"]["rows"] == 3 and "folder_name" not in saved
+    # Its folder had no instrument: one of the new type reads it now.
+    assert _saved(data_root, folder="instruments") == {"spec_version": 1, "name": "photometer",
+                                                       "type": "absorbance_kinetics", "folder_name": "Photometer"}
 
 
 def test_the_form_changes_what_the_chatbot_wrote(data_root):
@@ -192,38 +198,51 @@ def test_own_guesses_fill_the_same_form(data_root):
 
 # --- removing ---------------------------------------------------------------------
 
+def _lab_photometer(data_root):
+    from mfethuls.instruments.configured import add_instrument
+
+    save_definition(READER, data_root / "Photometer" / "kin1.dat")
+    add_instrument("photometer", "absorbance_kinetics", "Photometer")
+
+
 def test_remove_asks_first_then_moves_the_files_aside(data_root, tmp_path):
-    save_definition(ANSWER, data_root / "Photometer" / "kin1.dat")
+    _lab_photometer(data_root)
     registry = tmp_path / "registry.csv"
     pd.DataFrame([{"name": "K1", "instrument_name": "photometer"}, {"name": "K2", "instrument_name": "tga"}]
                  ).to_csv(registry, index=False)
     at = _run(SETTINGS.format(registry=str(registry)))
-    _click(at, "Remove")
+    at.button(key="remove-instrument-photometer.json").click().run()
     warning = " ".join(_shown(w.value) for w in at.warning)
     assert "Used by **1** registry row(s) and **1** ingested experiment(s)" in warning
-    assert "removed/" in warning
-    assert (data_root / ".mfethuls" / "instruments" / "photometer.json").exists()
-
+    assert ".mfethuls/instruments/removed/" in warning
     _click(at, "Remove photometer")
     folder = data_root / ".mfethuls" / "instruments"
     assert not (folder / "photometer.json").exists()
+    (moved,) = (folder / "removed").iterdir()
+    assert [p.name for p in moved.iterdir()] == ["photometer.json"]
+
+    at = _run(SETTINGS.format(registry=str(registry)))
+    at.button(key="remove-reader-photometer.json").click().run()
+    assert "Files of its format are not read any more" in " ".join(_shown(w.value) for w in at.warning)
+    _click(at, "Remove photometer")
+    folder = data_root / ".mfethuls" / "readers"
     (moved,) = (folder / "removed").iterdir()
     assert sorted(p.name for p in moved.iterdir()) == ["photometer.json", "photometer.sample.dat"]
 
 
 def test_remove_can_be_cancelled(data_root):
-    save_definition(ANSWER, data_root / "Photometer" / "kin1.dat")
+    save_definition(READER, data_root / "Photometer" / "kin1.dat")
     at = _run(SETTINGS.format(registry=""))
     _click(at, "Remove")
     _click(at, "Cancel")
-    assert (data_root / ".mfethuls" / "instruments" / "photometer.json").exists()
+    assert (data_root / ".mfethuls" / "readers" / "photometer.json").exists()
     assert [b.label for b in at.button if b.label.startswith("Remove")] == ["Remove"]
 
 
 def test_remove_definition_refuses_files_outside_the_lab_folder(data_root, tmp_path):
     other = tmp_path / "x.json"
     other.write_text("{}", encoding="utf8")
-    with pytest.raises(ValueError, match="not one of the lab's instrument definitions"):
+    with pytest.raises(ValueError, match="not one of the lab's readers or instruments"):
         remove_definition(other)
 
 
@@ -328,11 +347,18 @@ def test_the_folder_gives_the_file_and_the_others_of_its_type_to_check(data_root
     assert any("Also reads the 1 other file checked cleanly: kin2.dat" in c.value for c in at.caption)
 
 
-def test_an_other_file_that_cannot_be_read_blocks_saving(data_root):
+def test_an_other_file_that_cannot_be_read_needs_a_tick_to_save(data_root):
     (data_root / "Photometer" / "broken.dat").write_text("nothing; to read\n", encoding="utf-8")
     at = _paste(_run(DIALOG.format(writes=True)), json.dumps(ANSWER))
     assert any(_shown(e.value).startswith("broken.dat cannot be read") for e in at.error)
-    assert not [b for b in at.button if b.label == "Save instrument"]
+    (save,) = [b for b in at.button if b.label == "Save instrument"]
+    assert save.disabled  # shown, but the user decides
+
+    tick = next(c for c in at.checkbox if c.label.startswith("Save anyway: it cannot read 1 of the other files"))
+    tick.check().run()
+    assert not at.exception
+    _click(at, "Save instrument")
+    assert (data_root / ".mfethuls" / "readers" / "photometer.json").is_file()
 
 
 def test_the_answer_is_read_with_a_button_and_details_open_only_when_needed(data_root):
@@ -360,7 +386,7 @@ def test_new_format_keys_survive_the_form(data_root):
         "Sample: PLA\n1) Isothermal\n\tTime\tUnsubtracted\tProgram\n\t\tHeat Flow\tTemperature\n"
         "\t0.0\t-0.81\t30.0\n\t0.5\t-0.82\t30.0\n2) Scan\n\t1.0\t-0.88\t30.1\n", encoding="cp1252")
     answer = {
-        "name": "pe_lab", "type": "dsc", "model": "pe_lab", "folder_name": "PE",
+        "name": "pe_lab", "type": "dsc", "model": "pe_lab",
         "file": {"extensions": [".txt"], "encoding": "auto", "delimiter": "tab",
                  "header": {"starts_at": "Unsubtracted", "rows": 2}, "data_ends": "first_non_numeric_row",
                  "segment_lines": True},
@@ -389,7 +415,7 @@ def test_header_values_names_from_and_add_time_survive_the_form(data_root):
         "Date: Sun May 11 18:11:09 CEST 2025\nSig1\tWavelength (nm)\nSig2\tCounts\n"
         ">>>>>Begin Spectral Data<<<<<\n347.5\t11.8\n348.1\t1.8\n", encoding="utf-8")
     answer = {
-        "name": "flame_lab", "type": "fluorescence", "model": "flame_lab", "folder_name": "FL",
+        "name": "flame_lab", "type": "fluorescence", "model": "flame_lab",
         "data_layout": "folder", "name_from": "folder",
         "file": {"extensions": [".txt"], "encoding": "auto", "delimiter": "tab",
                  "header": {"starts_at": ">>>>>Begin", "skip_lines": 1, "rows": 0, "names_from": r"^Sig\d+\t(.+)$"}},
@@ -431,7 +457,7 @@ def test_blocks_survive_the_form(data_root):
         "Interval and data points:\t2\t1\nInterval data:\tTime\tG\n\t\t\n\t[s]\t[Pa]\n\t2\t20\n", encoding="utf-8")
     blocks = {"starts_at": "Interval and data points:", "column": "interval",
               "label": r"^Interval and data points:\s*(\d+)"}
-    answer = {"name": "rheo_lab", "type": "rheometer", "model": "rheo_lab", "folder_name": "RH",
+    answer = {"name": "rheo_lab", "type": "rheometer", "model": "rheo_lab",
               "file": {"extensions": [".csv"], "encoding": "auto", "delimiter": "tab",
                        "header": {"starts_at": "Interval data:", "rows": 2}, "blocks": blocks},
               "columns": [{"source": "Time [s]", "quantity": "time", "unit": "s"}]}
@@ -444,14 +470,17 @@ def test_blocks_survive_the_form(data_root):
     assert saved["check"]["rows"] == 2 and "interval" in saved["check"]["columns"]
 
 
-def test_read_by_tells_built_in_definitions_from_lab_ones(tmp_path):
-    from mfethuls.app.instruments import _read_by
-    from mfethuls.instruments.definition import BUILTIN_DIR
+def test_settings_list_instruments_and_their_readers(data_root):
+    from mfethuls.app.instruments import _source
+    from mfethuls.instruments.configured import get_reader
 
-    assert _read_by({"definition": str(BUILTIN_DIR / "tga.json")}) == "built-in definition"
-    assert _read_by({"definition": "built-in"}) == "built-in definition"
-    assert _read_by({"definition": str(tmp_path / ".mfethuls" / "instruments" / "tga.json")}) == "lab definition"
-    assert _read_by({}) == "built-in code"
+    assert [_source(get_reader(n)) for n in ("tga", "nmr")] == ["built-in", "built-in code"]
+    _lab_photometer(data_root)
+    assert _source(get_reader("photometer")) == "lab"
+    at = _run(SETTINGS.format(registry=""))
+    table = at.dataframe[0].value.set_index("instrument")
+    assert table.loc["photometer", "readers"] == "photometer" and table.loc["photometer", "source"] == "lab"
+    assert table.loc["dsc", "readers"] == "dsc_mettler_toledo_v0, dsc_mettler_toledo_v1, dsc_perkin_elmer"
 
 
 
@@ -467,7 +496,7 @@ edit_instrument_dialog(LocalBackend(), {path!r})
 
 
 def test_settings_offer_edit_next_to_remove(data_root):
-    save_definition(ANSWER, data_root / "Photometer" / "kin1.dat")
+    save_definition(READER, data_root / "Photometer" / "kin1.dat")
     at = AppTest.from_string(SETTINGS.format(registry=""), default_timeout=60).run()
     [b for b in at.button if b.label == "Edit"][0].click().run()
     request = at.session_state["add_instrument_request"]
@@ -475,12 +504,12 @@ def test_settings_offer_edit_next_to_remove(data_root):
 
 
 def test_edit_opens_the_saved_instrument_and_saves_the_changes(data_root):
-    path = save_definition({**ANSWER, "file": {**ANSWER["file"], "duplicate_rows": "drop"},
+    path = save_definition({**READER, "file": {**READER["file"], "duplicate_rows": "drop"},
                             "tables": [{"name": "notes", "starts_at": "Sample:"}]},
                            data_root / "Photometer" / "kin1.dat")
     at = _run(EDIT.format(path=str(path)))
     name = _by_key(at.text_input, "-name")
-    assert name.value == "photometer" and name.disabled  # registry rows use the name
+    assert name.value == "photometer" and name.disabled  # stored data records the reader's name
     assert any("Checked against **photometer.sample.dat**" in c.value for c in at.caption)
     assert any("Read **3** rows" in c.value for c in at.caption)
     assert not [c for c in at.checkbox if c.label.startswith("Replace")]  # editing needs no Replace
@@ -496,7 +525,7 @@ def test_edit_opens_the_saved_instrument_and_saves_the_changes(data_root):
 
 
 def test_edit_without_its_sample_file_asks_for_one(data_root):
-    path = save_definition(ANSWER, data_root / "Photometer" / "kin1.dat")
+    path = save_definition(READER, data_root / "Photometer" / "kin1.dat")
     (path.parent / "photometer.sample.dat").unlink()
     at = _run(EDIT.format(path=str(path)))
     assert any("not next to it any more" in i.value for i in at.info)

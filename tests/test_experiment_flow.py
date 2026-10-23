@@ -22,7 +22,7 @@ def _write_registry(tmpdir: str) -> str:
         [
             {
                 "name": "dsc_test_1",
-                "instrument_name": "dsc_mettler_toledo_v1",
+                "instrument_name": "dsc",
                 "raw_data_filename": "dsc_test_1_data",
                 "sample_id": "S001",
                 "run_id": "R001",
@@ -30,7 +30,7 @@ def _write_registry(tmpdir: str) -> str:
             },
             {
                 "name": "dsc_test_2",
-                "instrument_name": "dsc_mettler_toledo_v1",
+                "instrument_name": "dsc",
                 "raw_data_filename": "dsc_test_2_data",
                 "sample_id": "S002",
                 "run_id": "R001",
@@ -38,7 +38,7 @@ def _write_registry(tmpdir: str) -> str:
             },
             {
                 "name": "dsc_test_3",
-                "instrument_name": "dsc_perkin_elmer",
+                "instrument_name": "dsc",
                 "raw_data_filename": "dsc_test_3_data",
                 "sample_id": "S003",
                 "run_id": "R001",
@@ -258,7 +258,7 @@ def test_registry_load_normalizes_instrument_name_case():
             [
                 {
                     "name": "case_test_1",
-                    "instrument_name": "DSC_METTLER_TOLEDO_V1",
+                    "instrument_name": "DSC",
                     "sample_id": "S001",
                     "run_id": "R001",
                 }
@@ -267,7 +267,7 @@ def test_registry_load_normalizes_instrument_name_case():
 
         registry = Registry.load(registry_path)
         exp = registry.get("case_test_1")
-        assert exp.instrument_name == "dsc_mettler_toledo_v1"
+        assert exp.instrument_name == "dsc"
 
 
 def test_registry_load_keeps_placeholder_experiments_without_instrument_data(caplog):
@@ -305,7 +305,7 @@ def test_registry_load_raw_data_filename_defaults_to_name(caplog):
             [
                 {
                     "name": "exp_no_filename",
-                    "instrument_name": "dsc_mettler_toledo_v1",
+                    "instrument_name": "dsc",
                     "sample_id": "S001",
                     "run_id": "R001",
                 }
@@ -340,14 +340,14 @@ def test_parse_experiment_applies_characterizer_for_dataset_parser_output():
     class _FakeInstrument:
         type_ = "dsc"
         model = "mettler_toledo_v1"
-        name = "dsc_mettler_toledo_v1"
+        name = "dsc"
         parser = _FakeParser()
         characterizer = _FakeCharacterizer()
 
     exp = Experiment(
         name="dsc_char_test",
         experiment_id="abc123def456",
-        instrument_name="dsc_mettler_toledo_v1",
+        instrument_name="dsc",
         sample_id="S001",
         run_id="R001",
     )

@@ -141,6 +141,27 @@ def test_free_form_offset_and_panels_split_by_experiment():
         assert [p.title for p in panels.panels] == ["A", "B", "C"]
 
 
+def test_a_waterfall_shifts_each_spectrum_up_by_its_time():
+    from mfethuls.app.page import WATERFALL_RISE
+
+    # Three spectra, at 0, 10 and 40 s, each running 0..4 over five wavelengths.
+    spectra = pd.DataFrame({"_experiment": "run", "wavelength_nm": [400.0, 450, 500, 550, 600] * 3,
+                            "time_s": np.repeat([0.0, 10.0, 40.0], 5), "signal": [0.0, 1, 4, 1, 0] * 3})
+    spec = _xy_spec(spectra, x="wavelength_nm", y="signal", color="time_s", mode="lines", palette=PALETTE,
+                    title="t", ylabel="Signal", log_x=False, log_y=False, invert_x=False, layout="waterfall")
+    panel = spec.panel
+    assert spec.layout == "single" and not panel.y_ticks and panel.legend  # few times: a legend, not a scale
+    assert panel.ylabel == "Signal (offset)"
+    rise = WATERFALL_RISE * 1.1 * 4  # the last spectrum: three Offset steps of the tallest line
+    # Shifted in proportion to the time: 10 s is a quarter of the way up.
+    assert [float(t.y.min()) for t in panel.traces] == pytest.approx([0.0, rise / 4, rise])
+    assert float(spectra["signal"].max()) == 4.0  # the data itself is not changed
+
+    # Lines without a colour scale (coloured by experiment): drawn as they are.
+    together = _spec("lines", color="_experiment", layout="waterfall")
+    assert together.panel.y_ticks and [float(t.y.min()) for t in together.panel.traces] == [0.0, 0.0, 0.0]
+
+
 def test_one_experiment_has_nothing_to_lay_out():
     data = _data()
     one = data[data["_experiment"] == "A"]

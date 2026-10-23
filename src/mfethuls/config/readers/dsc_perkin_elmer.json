@@ -1,9 +1,8 @@
 {
   "spec_version": 1,
-  "name": "dsc_default",
+  "name": "dsc_perkin_elmer",
   "type": "dsc",
-  "model": "default",
-  "folder_name": "DSC",
+  "model": "perkin_elmer",
   "data_layout": "file",
   "description": "PerkinElmer Pyris text export: method and sample header, a two-line header (names, then their second words), segment lines (e.g. '2) DSC 8500 Temperature Scan') inside the table. Time is in minutes. Or a CSV export.",
   "formats": [

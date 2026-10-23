@@ -13,6 +13,7 @@ from ..dataset import Dataset
 from .backend import Backend, render
 from .labels import axis_label, legend_name
 from .spec import Colorbar, Panel, PlotError, PlotSpec, Scale, Trace
+from .thin import spread_values
 
 
 LOGGER = logging.getLogger(__name__)
@@ -24,9 +25,6 @@ _MAX_LEGEND_GROUPS = 10
 # Plot families with a built-in builder; an instrument type names its family, except:
 _PLOT_FAMILIES = {"dma", "rheology", "uv_vis", "fluorescence", "ftir", "dsc", "tga", "saxs", "ms", "sec", "nmr"}
 _FAMILY_OF_TYPE = {"rheometer": "rheology"}
-
-# Columns that, in a series, label the same files as time_s does.
-_SERIES_LABELS = {"timestamp", "source_file"}
 
 __all__ = ["PlotError", "build_dataset_spec", "plot_dataset"]
 
@@ -103,9 +101,9 @@ def _resolve_grouping_column(
     best_score = -1.0
     tied_best_columns: list[str] = []
     for column in candidates:
-        grouped_duplicates = 0
-        for _, subset in df.groupby(column, dropna=False, sort=False):
-            grouped_duplicates += _duplicate_row_count(subset, key_columns)
+        # Rows duplicated within their group = rows duplicated on (group, key columns): one pass,
+        # not one per group (a series of 1,500 spectra made this loop take seconds).
+        grouped_duplicates = _duplicate_row_count(df, [column, *key_columns])
 
         score = 1.0 - (grouped_duplicates / max(baseline_duplicates, 1))
         if score > best_score:
@@ -118,11 +116,11 @@ def _resolve_grouping_column(
     if best_column is None or best_score <= 0:
         return None
 
-    # In a series, timestamp, source_file and time_s label the same files, so they tie;
-    # time_s (derived from timestamp) is numeric and can drive a continuous colour scale.
+    # In a series, timestamp, the header's date, source_file and time_s label the same files, so they
+    # tie; time_s (derived from the timestamp) is numeric and can drive a continuous colour scale.
     if "time_s" in tied_best_columns:
-        tied_best_columns = [c for c in tied_best_columns if c not in _SERIES_LABELS]
-        best_column = tied_best_columns[0]
+        tied_best_columns = ["time_s"]
+        best_column = "time_s"
 
     if len(tied_best_columns) > 1:
         LOGGER.warning(
@@ -164,6 +162,18 @@ def _grouped_single_signal_traces(
         return [Trace(_values(df[x_column]), _values(df[y_column]), color=color)], None, None
 
     group_count = int(df[resolved_group].nunique(dropna=False))
+    group_values = df[resolved_group]
+    if group_count > max_groups and pd.api.types.is_numeric_dtype(group_values):
+        # A long series (spectra over time): draw an even spread of its lines on the colour scale.
+        shown = spread_values(group_values)
+        colorbar = Colorbar(title=axis_label(resolved_group), vmin=float(group_values.min()),
+                            vmax=float(group_values.max()))
+        subset = df[group_values.isin(shown)]
+        traces = [
+            Trace(_values(rows[x_column]), _values(rows[y_column]), label=str(value), color_value=float(value))
+            for value, rows in subset.groupby(resolved_group, sort=True, observed=True)
+        ]
+        return traces, resolved_group, colorbar
     if group_count > max_groups:
         LOGGER.warning(
             "Skipping grouped plot for %r: inferred/selected grouper %r has %d groups, exceeding max_groups=%d. "
@@ -175,7 +185,6 @@ def _grouped_single_signal_traces(
         )
         return [], None, None
 
-    group_values = df[resolved_group]
     if group_count > _MAX_LEGEND_GROUPS and pd.api.types.is_numeric_dtype(group_values):
         colorbar = Colorbar(
             title=axis_label(resolved_group),
@@ -190,7 +199,7 @@ def _grouped_single_signal_traces(
                 color="grey" if pd.isna(group_value) else None,
                 color_value=None if pd.isna(group_value) else float(group_value),
             )
-            for group_value, subset in df.groupby(resolved_group, dropna=False, sort=False)
+            for group_value, subset in df.groupby(resolved_group, dropna=False, sort=False, observed=True)
         ]
         return traces, resolved_group, colorbar
 
@@ -201,7 +210,7 @@ def _grouped_single_signal_traces(
         gradient_colors = iter(cmap(idx / denominator) for idx in range(group_count))
 
     traces = []
-    for group_value, subset in df.groupby(resolved_group, dropna=False, sort=False):
+    for group_value, subset in df.groupby(resolved_group, dropna=False, sort=False, observed=True):
         traces.append(
             Trace(
                 _values(subset[x_column]),
@@ -248,7 +257,13 @@ def _single_signal_spec(
         legend_title=legend_name(legend_title),
         colorbar=colorbar,
     )
-    return PlotSpec([panel])
+    notes = []
+    if colorbar is not None and legend_title:
+        present = int(dataset.data[legend_title].nunique())
+        if len(traces) < present:
+            notes.append(f"Showing {len(traces)} of the {present:,} {axis_label(legend_title)} values, spread evenly "
+                         "from first to last.")
+    return PlotSpec([panel], notes=notes)
 
 
 def _resolve_plot_kind(dataset: Dataset, kind: Optional[str]) -> Optional[str]:
@@ -298,12 +313,13 @@ def _resolve_plot_kind(dataset: Dataset, kind: Optional[str]) -> Optional[str]:
 
 
 def _definition_with_plot(dataset: Dataset):
-    """The instrument definition that read ``dataset``, when it names a plot."""
-    from mfethuls.instruments.configured import definition_for
+    """The definition of the reader that read ``dataset``, when it names a plot."""
+    from mfethuls.instruments.configured import get_reader
 
     metadata = dataset.metadata if isinstance(dataset.metadata, dict) else {}
-    name = metadata.get("instrument_definition") or metadata.get("instrument_name")
-    definition = definition_for(name) if name else None
+    name = metadata.get("reader") or metadata.get("instrument_definition")
+    reader = get_reader(name) if name else None
+    definition = reader.definition if reader is not None else None
     return definition if definition is not None and definition.plot else None
 
 

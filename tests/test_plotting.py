@@ -495,7 +495,7 @@ def test_plot_uv_vis_logs_when_inferred_grouping_ties(caplog):
 def _dsc_registry(*names):
     from mfethuls import Registry
 
-    return Registry.from_frame(pd.DataFrame([{"name": name, "instrument_name": "dsc_mettler_toledo_v0"} for name in names]))
+    return Registry.from_frame(pd.DataFrame([{"name": name, "instrument_name": "dsc"} for name in names]))
 
 
 def test_load_experiments_preserves_order_and_options(monkeypatch):

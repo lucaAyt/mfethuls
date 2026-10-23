@@ -1,0 +1,14 @@
+[
+  { "name": "dma", "type": "dma", "folder_name": "DMA" },
+  { "name": "dsc", "type": "dsc", "folder_name": "DSC" },
+  { "name": "fluorescence", "type": "fluorescence", "folder_name": "Fluorescence" },
+  { "name": "ftir", "type": "ftir", "folder_name": "FTIR" },
+  { "name": "ms", "type": "ms", "folder_name": "MS" },
+  { "name": "nmr", "type": "nmr", "folder_name": "NMR" },
+  { "name": "rheometer", "type": "rheometer", "folder_name": "Rheology" },
+  { "name": "saxs", "type": "saxs", "folder_name": "SAXS" },
+  { "name": "sec", "type": "sec", "folder_name": "SEC" },
+  { "name": "tensile_tester", "type": "tensile", "folder_name": "tensile_tester" },
+  { "name": "tga", "type": "tga", "folder_name": "TGA" },
+  { "name": "uv_vis", "type": "uv_vis", "folder_name": "UV_Vis" }
+]

@@ -1,6 +1,12 @@
 # Adding an instrument
 
-mfethuls reads an instrument's files through an **instrument definition**: a small JSON file that says how to find the table in the instrument's exports and what each column is. You don't write code. Most instruments that export text files (CSV, TXT, DAT, ...) or Excel workbooks (`.xlsx`) can be added from the app in a few minutes.
+Three things, each with one job:
+
+- An **instrument** is where data comes from: one folder of your data folder (`DSC/`, `DSC room B/`), and the name the registry's `instrument_name` uses. Each folder belongs to one instrument and holds one type of data; below it, organise as you like.
+- Its files are read by **readers**, one per export format: the Mettler Toledo DSC exports, old and new, and the PerkinElmer one are three readers of DSC data. Each file is read by the reader of its instrument's type that recognises it, so one DSC folder can hold the exports of an old and a new machine.
+- A reader is an **instrument definition**: a small JSON file that says how to find the table in an export and what each column is. You don't write code. Most instruments that export text files (CSV, TXT, DAT, ...) or Excel workbooks (`.xlsx`) can be added from the app in a few minutes.
+
+mfethuls ships one instrument per type (`dsc` reads `DSC/`, see the [registry reference](../reference/registry.md#supported-instruments)) and readers for the formats it knows. **Adding an instrument** in the app means adding a reader for a format mfethuls cannot read yet; the folder its files are in gets an instrument if it has none.
 
 Nothing in your files is thrown away. Every column, every row and the text around the table (sample names, dates, method settings) is kept. A definition only gives the columns it recognises a standard name and unit, so data from different instruments can be compared.
 
@@ -11,16 +17,16 @@ Nothing in your files is thrown away. Every column, every row and the text aroun
 1. Put a few files the instrument exported in a folder of your data folder, e.g. `PATH_TO_DATA/Photometer/kin1.dat`, `kin2.dat`, … Several files help: runs and methods differ, and the definition must read them all.
 2. Open **⚙ Settings → Instruments → Add instrument**. **Review & register** also offers it when it finds a folder with files no instrument reads.
 
-   If mfethuls already knows the instrument and only the folder has another name (`DMA data` instead of `DMA`), don't add it: choose it for that folder in **Review & register**, or under **⚙ Settings → Instruments → Change an instrument's folder**. That also fixes an instrument saved with the wrong folder.
-3. Choose the **folder**. mfethuls builds from its largest file of the type the folder holds most of (change it under **Build from**), and checks the definition against up to six other files of that type in the folder (the largest, the newest and others spread over the folder). Files of other types, such as a plot or a note next to the data, are left out.
+   If mfethuls already reads the files and only the folder has another name (`DMA data` instead of `DMA`), don't add anything: choose the type of data for that folder in **Review & register** (see [Another instrument of the same kind](#another-instrument-of-the-same-kind)), or move an instrument under **⚙ Settings → Instruments → Change an instrument's folder**.
+3. Choose the **folder**. Its instrument reads with the new reader; a folder without one gets one on saving (shown under **Adjust details → Instrument**). mfethuls builds from its largest file of the type the folder holds most of (change it under **Build from**), and checks the definition against up to six other files of that type in the folder (the largest, the newest and others spread over the folder). Files of other types, such as a plot or a note next to the data, are left out.
 4. **Ask a chatbot** (the default): copy the prompt into a chatbot (Gemini, Claude, ...), paste its answer back and press **Read the answer**. The prompt holds the rules of the format, the list of quantities and units, mfethuls' own reading of the file (including its outline: which lines are text and which are numbers, from start to end), the file's first 40 and last 15 lines (for a workbook: of every sheet, shown as tab-separated rows), and the outline of the other files (their shape only, not their data). A file that is neither text nor a workbook (e.g. a proprietary binary format) gets a message instead of a prompt: export it as text or `.xlsx` first. A definition a colleague sent you can be pasted the same way.
 
    > The prompt contains the start of your file. Only send it if your data may be shared with that service: think of unpublished results and your institution's rules.
 
    Or choose **Fill in myself**: mfethuls fills in its own guesses instead.
-5. Either way you see the result first: the **Name**, how many rows and which columns were read, a plot, and whether the other files read cleanly. If it looks right, press **Save instrument**.
+5. Either way you see the result first: the **Name**, how many rows and which columns were read, a plot, and whether the other files read cleanly. If it looks right, press **Save instrument**. When some of the other files cannot be read, the reasons are shown and saving needs one more tick (**Save anyway**): your call, e.g. when those files are not this instrument's data, or another layout will be added for them later. They would fail when ingested.
 6. Everything else is under **Adjust details**, which opens by itself when something must be fixed. Its tabs:
-   - **Instrument**: data folder, measurement type, model, whether one experiment is a file or a folder, notes. A known type (TGA, FTIR, UV-Vis, ...) gets mfethuls' plots and checks; for a new type you choose what to plot.
+   - **Instrument**: data folder (and which instrument reads it), measurement type, model, whether one experiment is a file or a folder, notes. A known type (TGA, FTIR, UV-Vis, ...) gets mfethuls' plots and checks; for a new type you choose what to plot.
    - **Reading the file**: file endings, text encoding, separator, decimal mark, header lines, where the table starts and ends. For a workbook, the sheet replaces encoding, separator and decimal mark.
    - **Columns**: what each column measures and the unit *in the file*. Leave columns you don't know empty: they are kept under their own name.
    - **Values and plot**: values from the file name and header, computed columns (always into a new column) and, for new types, the plot.
@@ -29,32 +35,32 @@ Nothing in your files is thrown away. Every column, every row and the text aroun
 
    Values outside the usual range for a quantity (a mass of 300 000 mg, a temperature of 5000 °C) are warned about: usually the unit is wrong. So are rows with text where numbers are expected, with the line they start on: usually a footer or results block read as part of the table, fixed with *The data ends at*. Another file that cannot be read must be fixed before saving. Each problem is shown in its tab, the top says which tabs, and **Copy the problems for the chatbot** gives a message to paste back to it.
 
-The definition is saved in the data folder, in `.mfethuls/instruments/<name>.json`, together with a copy of the file you used (`<name>.sample.<ext>`). Everyone who uses that data folder (e.g. on OneDrive) gets the instrument; nothing needs installing. **Adjust details → Definition (JSON)** shows the file itself.
+The reader is saved in the data folder, in `.mfethuls/readers/<name>.json`, together with a copy of the file you used (`<name>.sample.<ext>`); a new instrument for its folder in `.mfethuls/instruments/<name>.json`. Everyone who uses that data folder (e.g. on OneDrive) gets them; nothing needs installing. **Adjust details → Definition (JSON)** shows the reader's file itself. A folder that holds another type's data can't be chosen: each folder holds one type of data.
 
 Then register and ingest its data as usual.
 
-### Editing an instrument
+### Editing a reader
 
-**⚙ Settings → Instruments** lists the lab's instruments, each with **Edit** and **Remove**. **Edit** opens the same form, filled in with the saved definition and with **Adjust details** open: change what was wrong (the header lines, a column's unit, the end of the table) and the result is checked again, against the file the instrument was made from and other files in its folder, before **Save changes**. Its name stays, since registry rows use it; to rename an instrument, add it again under the new name. Settings the form does not show (such as `tables`) are kept as they are.
+**⚙ Settings → Instruments** lists the instruments and readers, and under **The lab's files** each of the lab's readers with **Edit** and **Remove**. **Edit** opens the same form, filled in with the saved definition and with **Adjust details** open: change what was wrong (the header lines, a column's unit, the end of the table) and the result is checked again, against the file the reader was made from and other files in its instrument's folder, before **Save changes**. Its name stays, since stored data records which reader read it; to rename a reader, add it again under the new name. Settings the form does not show (such as `tables`) are kept as they are.
 
-Data already ingested keeps the earlier reading until it is read again: ingesting it again does that, and **⚙ Settings → Clean up** offers **Read again** for every experiment the instrument read before the change.
+Data already ingested keeps the earlier reading until it is read again: ingesting it again does that, and **⚙ Settings → Clean up** offers **Read again** for every experiment the reader read before the change.
 
-### Removing an instrument
+### Removing a reader or an instrument
 
-**⚙ Settings → Instruments** lists the lab's instruments, each with **Edit** and **Remove**. It first says how many registry rows and ingested experiments use the instrument, then moves its files to `.mfethuls/instruments/removed/<date-time>/`. Nothing is deleted:
+**Remove** next to one of the lab's files moves it to `removed/<date-time>/` next to it (`.mfethuls/readers/removed/`, `.mfethuls/instruments/removed/`). Nothing is deleted:
 
 - ingested data stays where it is;
-- registry rows that use the instrument can't be ingested again until an instrument reads them (Clean up never forgets their data because of that);
-- if it replaced a built-in instrument, the built-in one reads the files again, and **Clean up** offers to read them again;
-- to undo, move the two files back into `.mfethuls/instruments/`.
+- for an instrument, it first says how many registry rows and ingested experiments use it; those rows can't be ingested again until an instrument of that name reads them (Clean up never forgets their data because of that). A built-in instrument the file moved reads its own folder again;
+- for a reader, files of its format are not read any more unless another reader recognises them; if it replaced a built-in reader, the built-in one is used again, and **Clean up** offers to read its data again;
+- to undo, move the files back.
 
-Built-in instruments can't be removed, only replaced.
+Built-in readers and instruments can't be removed, only replaced or moved.
 
 ---
 
 ## What a definition looks like
 
-The TGA that ships with mfethuls (`src/mfethuls/config/instruments/tga.json`) reads files like this one:
+The TGA reader that ships with mfethuls (`src/mfethuls/config/readers/tga.json`) reads files like this one:
 
 ```
          Index            Ts             t            HF        Weight            Tr
@@ -72,7 +78,6 @@ A definition for it:
   "name": "tga",
   "type": "tga",
   "model": "tgaX",
-  "folder_name": "TGA",
   "data_layout": "file",
   "file": {
     "extensions": [".txt"],
@@ -97,8 +102,8 @@ A definition for it:
 
 | Part | What it says |
 |---|---|
-| `name`, `type`, `model` | The instrument's name in the registry, its measurement type and its make/model/software. Two instruments can't share both type and model: for two identical instruments with their own folders (two PerkinElmer DSCs in two rooms), give the second its own `model`, e.g. `perkin_elmer_room_b`, next to its own `name` and `folder_name`. |
-| `folder_name`, `data_layout` | Its folder under the data folder; whether one experiment is one `file` or one `folder` of files. |
+| `name`, `type`, `model` | The reader's name (stored with the data it reads; the registry names instruments, not readers), its measurement type and its make/model/software. Readers are told apart by `name`, so two may share a type and model. The folder is not part of a reader: it is its instrument's (see [Another instrument of the same kind](#another-instrument-of-the-same-kind)). |
+| `data_layout` | Whether one experiment is one `file` or one `folder` of files (a series). |
 | `file` | How to find the table. `encoding` (`auto` = UTF-8, else Windows cp1252; or `utf-8`, `cp1252`, ...); `delimiter` (`comma`, `semicolon`, `tab`, `whitespace` or one character); `decimal` (`.` or `,`); `header.starts_at` (text on the line with the column names) and/or `header.skip_lines`; `header.rows` (`0` none, `1` names, `2` names then units, joined as `Weight [mg]`); `data_ends` (`end_of_file`, `first_non_numeric_row`, or text on the first line after the data; `first_non_numeric_row` ends the table at the first row of text *after* a row of numbers, so rows before the first number, such as Anton Paar's `1  (invalid)` points, are kept as data); `comment` (lines starting with it are kept as comments); `segment_lines: true` when text lines inside the table label the rows below them (PerkinElmer's "2) DSC 8500 Temperature Scan"): they fill a `segment` column. Without header lines the table starts at the first line of numbers. Blank lines between header lines (also lines of only tabs) are skipped. With `whitespace`, a units line with fewer fields than the names (no unit under `Index`) is matched to the names by where its fields stand. `blocks` is for files holding several tables, each with its own header lines (Anton Paar RheoCompass writes one per interval): `{"starts_at": "Interval and data points:", "label": "^Interval and data points:\\s*(\\d+)", "column": "interval"}` reads every table with the same settings and puts its label (the group of `label` on its first line, or its number) in the `interval` column. `header.names_from` (with `rows: 0`) is for files that list their column names one per line above the table: a regular expression whose group is the name, e.g. `^Sig\\d+\\t(.+)$` for TA Instruments' `Sig1<tab>Time (min)`. For Excel workbooks, `sheet` picks the sheet (see [Excel workbooks](#excel-workbooks)). `duplicate_rows: "drop"` leaves out rows repeating an earlier row in every field (see [A second table, and rows written twice](#a-second-table-and-rows-written-twice)). |
 | `columns` | Each `source` column (or a list of alternative names) is a `quantity` in the `unit` the file uses. mfethuls stores it under the standard name in the standard unit: `Weight [g]` with `"unit": "g"` is stored as `mass_mg`. A column that is no quantity can get a plain name instead: `{"source": "Detector", "column": "detector_name"}`. |
 | `derived` | Extra columns from a fixed list: `normalize_pct` (0–100 %), `pct_of_initial` (% of each curve's first value: TGA mass, 100 % = initial mass), `scale` (`factor`), `offset` (`value`), `multiply` / `divide` (by another column `by`, e.g. heat flow ÷ sample mass), `add_time` (adds the time in column `amount`, in `unit` `ms`/`s`/`min`/`h`, to a date-time column). Each writes a new column `into`; existing data is never changed. An operation whose column a file lacks (no sample mass in this file) is skipped for that file. |
@@ -173,7 +178,7 @@ When an instrument writes more than one layout (a newer software version, a CSV 
 
 ```json
 {
-  "name": "tga", "type": "tga", "model": "tgaX", "folder_name": "TGA",
+  "name": "tga", "type": "tga", "model": "tgaX",
   "formats": [
     { "label": "text export",
       "file": { "extensions": [".txt"], "contains": "Index", "delimiter": "whitespace", "header": { "rows": 2 } },
@@ -184,6 +189,12 @@ When an instrument writes more than one layout (a newer software version, a CSV 
   ]
 }
 ```
+
+`not_contains` does the opposite: files with that text in their first 50 lines are *not* this layout. Use it when two
+layouts (or two instruments sharing a folder) differ by something only one of them has. The built-in Mettler DSC
+definitions do this: the older STARe report has a `Curve Values:` line, so `dsc_mettler_toledo_v0` has
+`"contains": "Curve Values:"` and `dsc_mettler_toledo_v1` has `"not_contains": "Curve Values:"`. Each file is then
+read by one of them only, and choosing the wrong one gives a clear message instead of other columns.
 
 ### Excel workbooks
 
@@ -238,15 +249,54 @@ If samples must be separate experiments, export one workbook per sample (`LUB642
 
 ---
 
+## Another instrument of the same kind
+
+A second machine that writes files mfethuls already reads (a DSC in another room, a second Bruker NMR), or data
+you want to keep apart (in-situ spectra next to other UV-Vis data), needs no reader of its own: it is a second
+**instrument** of that type, with a folder of its own. Both are plotted and queried together by their type, and
+told apart by their instrument. Don't add a reader with **Add instrument** for it.
+
+Whether to split is the lab's call: an old and a new DSC whose exports differ can share one `DSC/` folder (each
+file is read by its own reader), but two identical machines in one folder can't be told apart afterwards. If it
+matters which machine measured what, give each its own folder.
+
+**From the app:** put the files in a folder of their own (e.g. `DSC room B`, `inSitu_UV`). **Review & register**
+lists it as a folder no instrument reads. Under **Measurement type of inSitu_UV**, choose the type: mfethuls
+reads a few of its files to suggest it, else goes by the folder's name. Then:
+
+- **The type's built-in instrument has its folder** (`UV_Vis/` is there): a new instrument reads the new folder.
+  Check its name (from the folder: `insitu_uv`) and press **Use this folder**; the built-in one keeps its folder.
+- **It has not** (no `UV_Vis/`): the built-in instrument reads the new folder instead (`uv_vis` reads `inSitu_UV`).
+
+To move an instrument later, use **⚙ Settings → Instruments → Change folder**.
+
+**By hand:** save a small file in the data folder's `.mfethuls/instruments/`, e.g. `dsc_room_b.json`:
+
+```json
+{ "name": "dsc_room_b", "type": "dsc", "folder_name": "DSC room B", "description": "Mettler DSC 3, room B" }
+```
+
+- `name`: the instrument, as the registry's `instrument_name` will say it.
+- `type`: the measurement type; every reader of that type reads its files (`mfethuls instruments` lists them).
+- `folder_name`: its own folder in the data folder. A folder another instrument reads is refused: each folder
+  belongs to one instrument.
+- `readers` (optional): only these readers, e.g. `["dsc_mettler_toledo_v1"]`. Rarely needed.
+- `description` is optional; nothing else is accepted.
+
+A file with a built-in instrument's name moves that instrument (`{"name": "dsc", "type": "dsc", "folder_name":
+"DSC data"}`): that is what **Change folder** writes. It then appears in **⚙ Settings → Instruments**, and
+**Remove** takes it away again.
+
 ## Safety nets
 
 - **The sample file is re-read** whenever mfethuls loads the definitions. If an update of mfethuls (or an edit) changes what it reads, **⚙ Settings → Instruments** says so.
 - **Edits are tracked.** Each ingested dataset records which reader read it: the version of its definition, or of mfethuls' own parser for code-read instruments. After a definition changes, or after an update of mfethuls improves a parser, **⚙ Settings → Clean up** lists those experiments as *Read again* and re-reads their raw data.
-- **Lab definitions override built-in ones** with the same name, for that data folder only. A definition that clashes with another instrument (same type and model) or is invalid is not used, and Settings shows why.
+- **Lab readers override built-in ones** with the same name, for that data folder only. A file that is invalid is not used, and Settings shows why.
+- **Readers of a type must tell their files apart.** When several read a file's ending, the one that recognises it reads it: by its `contains` / `not_contains` text and its header line (`header.starts_at`) near the top. A reader that recognises it this way wins over one that looks for nothing (it takes any file of its ending). A file none of them recognises, or more than one, is reported, never guessed; readers of other types are never tried.
 - **Definitions are data, not code.** Treat one from a chatbot or a colleague like any file you did not write, but it can only describe how to read a table: nothing in it is run. mfethuls also checks:
   - **Patterns** (`pattern`, `values`, `names_from`, `blocks.label`) may be at most 300 characters. A pattern that repeats a part that itself repeats, such as `(\w+\s?)+`, is refused: on some lines it can take hours. Write `[\w\s]+` instead. Every search also has a time limit (0.5 s per line). A pattern that hits it fails that file with a message naming the pattern, instead of freezing ingest.
-  - **Names stay inside the data folder.** `folder_name` and `check.sample` must be plain names, without `/`, `\` or `..`. A `timezone` must be a zone name such as `Europe/Zurich`.
-  - **Size.** A definition file may be at most 256 kB. A broken lab file only switches off that one instrument.
+  - **Names stay inside the data folder.** An instrument's `folder_name` and a reader's `check.sample` must be plain names, without `/`, `\` or `..`. A `timezone` must be a zone name such as `Europe/Zurich`.
+  - **Size.** A definition file may be at most 256 kB. A broken lab file only switches off that one reader or instrument.
 
 ## When a definition is not enough
 

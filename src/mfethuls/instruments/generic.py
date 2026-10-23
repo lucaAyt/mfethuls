@@ -1,9 +1,11 @@
-"""An instrument as ingest uses it: its name, type, model, data folder, parser and characterizer."""
+"""An instrument as ingest uses it: its name, type, data folder, and the reader (model, parser,
+characterizer) of the experiment being read."""
 
 
 class GenericInstrument:
-    def __init__(self, type_, name, model, parser, characterizer=None, data_root_path=None):
+    def __init__(self, type_, name, model, parser, characterizer=None, data_root_path=None, reader=None):
         self.type_ = type_
+        self.reader = reader
         self.name = name
         self.model = model
         self.data_root_path = data_root_path

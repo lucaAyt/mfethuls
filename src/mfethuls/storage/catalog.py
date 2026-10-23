@@ -26,6 +26,7 @@ CATALOG_FIELDS: dict[str, str] = {
     "run_id": "TEXT",
     "rows": "BIGINT",
     "reader_fingerprint": "TEXT",
+    "reader": "TEXT",
 }
 
 
@@ -44,6 +45,8 @@ class CatalogRecord:
     rows: Optional[int] = None
     # Which reader read the data: a definition's fingerprint, or "<Class>-v<N>" for a code parser.
     reader_fingerprint: Optional[str] = None
+    # The reader's name (e.g. dsc_mettler_toledo_v1): which export format the files were.
+    reader: Optional[str] = None
 
     @classmethod
     def build(
@@ -74,6 +77,7 @@ class CatalogRecord:
             run_id=experiment.run_id,
             rows=rows,
             reader_fingerprint=metadata.get("reader_fingerprint"),
+            reader=metadata.get("reader"),
         )
 
     def fields(self) -> dict[str, Any]:

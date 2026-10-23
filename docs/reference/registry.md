@@ -33,29 +33,70 @@ These are optional and validated on load. Rows with malformed identifiers are sk
 
 ## Supported instruments
 
-| `instrument_name` | Instrument type | Folder in `PATH_TO_DATA` | Notes |
-|-------------------|----------------|--------------------------|-------|
-| `dsc_mettler_toledo_v0` | DSC — Mettler Toledo, older STARe export (heat flow per gram; called `dsc` before 0.4.0) | `DSC/` | Instrument definition; heat flow as exported in `heat_flow_W_g` (W/g); the sample mass after the table gives `sample_mass_mg` and `heat_flow_mW` too |
-| `dsc_perkin_elmer` | DSC — PerkinElmer | `DSC/` | Higher sensitivity. Instrument definition; segment lines kept as a `segment` column; time read in minutes; `Sample Weight` gives `sample_mass_mg` and `heat_flow_W_g` |
-| `dsc_mettler_toledo_v1` | DSC — Mettler Toledo, current export (called `dsc_mettler_toledo` before 0.4.0) | `DSC/` | Instrument definition |
-| `uv_vis` | UV-Vis — Shimadzu | `UV_Vis/` | Instrument definition; `titrant` from the file name |
-| `uv_insitu` | UV-Vis in-situ — Ocean Insight Flame | `UV_Vis/` | Instrument definition; `timestamp` from the header date plus the milliseconds in the file name |
-| `fluorescence_insitu` | Fluorescence in-situ — Ocean Insight Flame | `Fluorescence/` | Instrument definition, same layout as `uv_insitu` |
-| `rheometer` | Rheometer — Anton Paar | `Rheology/` | Instrument definition; one table per interval, numbered in the `interval` column |
-| `tga` | TGA | `TGA/` | Instrument definition: `.txt` text export and `.csv` export; `mass_pct` is % of the initial mass |
-| `tensile_tester` | Universal testing machine — ZwickRoell testXpert | `tensile_tester/` | Instrument definition, Excel `.xlsx`: lap shear (`strain_mm`, `shear_stress_mpa`) and tensile tests (`strain_pct`, `stress_mpa`); one curve per test sheet; `test_date` from the Results sheet. A workbook with several samples is one experiment (see below) |
-| `nmr` | NMR — Bruker | `NMR/` | Code parser. One dataset folder per experiment, as TopSpin writes it (`NMR/EXP014/1/pdata/1/1r`); `raw_data_filename` = the dataset folder. Every processed spectrum (`<expno>/pdata/<procno>`) is read once, named in `source_file` (`1/pdata/1`), with its `nucleus` and `solvent` on every row; parameters and title in `file_text` |
-| `ftir` | FTIR — Bruker | `FTIR/` | Instrument definition |
-| `sec` | SEC — Agilent | `SEC/` | Instrument definition; `detector_name` (ri, uv, ls, viscometer) from the file name |
-| `dma` | DMA — TA Q800 | `DMA/` | Instrument definition (column names from the `SigN` lines; time read in minutes) |
-| `saxs` | SAXS — Anton Paar | `SAXS/` | Instrument definition |
-| `ms` | MS — Bruker | `MS/` | Definition (`ms.json`); rows written twice left out; the `MS Peak List` stored in metadata (`tables.peak_list`) |
+An **instrument** is where data comes from: one folder of the data folder, and what `instrument_name` says.
+Its files are read by the **readers** of its measurement type, one per export format; each experiment by the
+reader that recognises its files (see [readers](#readers-export-formats) below). The registry never names a
+reader.
 
-Instruments added by the lab (**⚙ Settings → Instruments**) are listed there too; see [adding an instrument](../guides/instruments.md).
+| `instrument_name` | Measurement type | Folder in `PATH_TO_DATA` |
+|-------------------|------------------|--------------------------|
+| `dsc` | DSC | `DSC/` |
+| `tga` | TGA | `TGA/` |
+| `ftir` | FTIR | `FTIR/` |
+| `uv_vis` | UV-Vis (`uv_vis`) | `UV_Vis/` |
+| `fluorescence` | Fluorescence | `Fluorescence/` |
+| `rheometer` | Rheology | `Rheology/` |
+| `dma` | DMA | `DMA/` |
+| `sec` | SEC | `SEC/` |
+| `saxs` | SAXS | `SAXS/` |
+| `ms` | MS | `MS/` |
+| `nmr` | NMR | `NMR/` |
+| `tensile_tester` | Tensile and lap shear (`tensile`) | `tensile_tester/` |
+
+The lab's own instruments (**⚙ Settings → Instruments**, or `mfethuls instruments`) are listed there too: a
+second DSC in another room, in-situ spectra kept apart from other UV-Vis data, or an instrument mfethuls did not
+know ([adding an instrument](../guides/instruments.md)).
+
+**One folder, one instrument.** Each folder of the data folder belongs to one instrument, and holds one type of
+data. Below it, organise as you like (`DSC/2024/thesis/LUB055.txt`). A second machine of a kind, or data you
+keep apart, is a second instrument with a folder of its own; both are plotted and queried together by their type.
+
+### Readers (export formats)
+
+| Type | Reader | Format | Notes |
+|------|--------|--------|-------|
+| DSC | `dsc_mettler_toledo_v1` | Mettler Toledo, current export | |
+| DSC | `dsc_mettler_toledo_v0` | Mettler Toledo, older STARe export (`Curve Values:`) | heat flow as exported in `heat_flow_W_g` (W/g); the sample mass after the table gives `sample_mass_mg` and `heat_flow_mW` too |
+| DSC | `dsc_perkin_elmer` | PerkinElmer Pyris text or CSV export | segment lines kept as a `segment` column; time read in minutes; `Sample Weight` gives `sample_mass_mg` and `heat_flow_W_g` |
+| UV-Vis | `uv_vis` | Shimadzu UVProbe | `titrant` from the file name |
+| UV-Vis | `uv_insitu` | Ocean Insight Flame series | one folder per experiment; `timestamp` from the header date plus the milliseconds in the file name |
+| Fluorescence | `fluorescence_insitu` | Ocean Insight Flame series | same layout as `uv_insitu` |
+| Rheology | `rheometer` | Anton Paar | one table per interval, numbered in the `interval` column |
+| TGA | `tga` | `.txt` text export and `.csv` export | `mass_pct` is % of the initial mass |
+| Tensile | `tensile_tester` | ZwickRoell testXpert, Excel `.xlsx` | lap shear (`strain_mm`, `shear_stress_mpa`) and tensile tests (`strain_pct`, `stress_mpa`); one curve per test sheet; `test_date` from the Results sheet. A workbook with several samples is one experiment (see below) |
+| NMR | `nmr` | Bruker (code reader) | one dataset folder per experiment, as TopSpin writes it (`NMR/EXP014/1/pdata/1/1r`); `raw_data_filename` = the dataset folder. Every processed spectrum (`<expno>/pdata/<procno>`) is read once, named in `source_file` (`1/pdata/1`), with its `nucleus` and `solvent` on every row; parameters and title in `file_text` |
+| FTIR | `ftir` | Bruker | |
+| SEC | `sec` | Agilent | `detector_name` (ri, uv, ls, viscometer) from the file name |
+| DMA | `dma` | TA Q800 | column names from the `SigN` lines; time read in minutes |
+| SAXS | `saxs` | Anton Paar | |
+| MS | `ms` | Bruker | rows written twice left out; the `MS Peak List` stored in metadata (`tables.peak_list`) |
+
+When several readers of a type read a file's ending, the one that **recognises** the file reads it: by the text
+its format looks for (`contains` / `not_contains`) and its header line (`header.starts_at`) near the top. A reader
+that recognises a file this way wins over one that looks for nothing and takes any file of its ending. A file
+none of them recognises, or more than one, is reported in Review & register and at ingest, never guessed. The
+reader of each dataset is stored with it (catalog column `reader`); a reader added later never reads stored data
+again by itself.
 
 ---
 
-**Your folder has another name?** The folders above are where each instrument looks by default. If yours is called differently (`DMA data`, `Rheometer 2024`), the app lists it under **Ingest** as a folder no instrument reads yet: open **Review & register** and choose the instrument (mfethuls suggests one when the folder's name says it), or change it later under **⚙ Settings → Instruments → Change an instrument's folder**. The choice is saved in the data folder (`.mfethuls/folders.json`), so everyone using it gets the same folders. A folder holds one kind of measurement: a folder another type of instrument reads can't be chosen.
+**Your folder has another name?** The folders above are where each built-in instrument looks. If yours is called
+differently (`DSC data`, `Rheometer 2024`), the app lists it under **Ingest** as a folder no instrument reads yet:
+open **Review & register** and choose the type of data it holds (mfethuls reads a few of its files to suggest it,
+else goes by the folder's name). When the type's built-in instrument's folder is not in the data folder, that
+instrument reads yours instead (`dsc` reads `DSC data`); otherwise a new instrument, named after your folder,
+reads it. The choice is saved in the data folder (`.mfethuls/instruments/`), so everyone using it gets the same
+folders; move an instrument later under **⚙ Settings → Instruments → Change an instrument's folder**.
 
 **DMA and rheometer data need no extra column.** Their built-in plots read what each run swept from the data: the quantity that changes (temperature, frequency, strain, or shear rate for a flow curve) is the x-axis, and a run where only time changes is a time sweep. A `measurement_profile` column from older registries is kept as an ordinary column.
 
@@ -117,19 +158,19 @@ Instead of typing rows by hand, let the Streamlit app find raw data that is not 
 **What is proposed:** the new data, laid out like the data folder (in path order), each subfolder followed by the files in it.
 - **A file directly in an instrument folder** (`DSC/poly2.txt`) is one experiment; its `raw_data_filename` is the stem.
 - **A subfolder holding a single file** (`DSC/LUB055/LUB055.txt`) is proposed as that file.
-- **A subfolder of files of a single-file instrument** (`DSC/poly1/`: DSC, TGA, FTIR, …): ticking the **📁 folder** ticks all the files under it, each **one experiment**: a run of the same sample, numbered R001, R002, … in file-name order. Untick the files you don't want; unticking the folder unticks them all.
-- **A subfolder of a series instrument** (`UV_Vis/titration_A/`, Flame UV-Vis/fluorescence, NMR) is marked **one experiment**: ticking it registers all its files together, e.g. a titration or a time series (`raw_data_filename` = the folder name). Where another instrument reads its files one by one, they are listed under it too; ticking the folder and its files at once is flagged, so the data is not registered twice.
-- **Pre-filled:** `raw_data_filename`, `run_id`, the instrument when only one fits the folder, and the `name` (the file or folder name, made unique). When a folder is split and one of its files is named like the folder, that row's `raw_data_filename` is the file name with its extension (`LUB055.txt`), since the bare name means the whole folder.
+- **A subfolder of files of a single-file instrument** (`DSC/poly1/`: DSC, TGA, FTIR, …): ticking the **📁 folder** ticks all the files under it, each **one experiment**: a run of the same sample, numbered R001, R002, … in file-name order. Untick the files you don't want; unticking the folder unticks them all. Folders start closed (▸), with how many of their files are ticked; tick **Open** to see and edit the files (▾). A sample, instrument or description typed in the folder's row fills in its files, except those you gave a value of their own.
+- **A subfolder of an instrument with a series reader** (`UV_Vis/titration_A/`, Flame UV-Vis/fluorescence, NMR) is marked **one experiment**: ticking it registers all its files together, e.g. a titration or a time series (`raw_data_filename` = the folder name). Where a single-file reader of the instrument also reads its files, they are listed under it too; ticking the folder and its files at once is flagged, so the data is not registered twice.
+- **Pre-filled:** `raw_data_filename`, `run_id`, the instrument (the one whose folder the data is in; it is not changed here), and the `name` (the file or folder name, made unique). When a folder is split and one of its files is named like the folder, that row's `raw_data_filename` is the file name with its extension (`LUB055.txt`), since the bare name means the whole folder.
 - **You choose** which rows to register by ticking **Register**; nothing is ticked at first.
 - **You fill in:** `sample_id`, the instrument where several share a folder (e.g. the DSC models in `DSC/`), and any other columns your registry has.
 
-**Validation** runs as you type, with the same checks as ingest. It also requires the instrument to be chosen, the raw data to be found exactly once, and the data to read as the chosen instrument's: the first file is test-read with that instrument's parser, so files of another instrument (say, Shimadzu UV-Vis files offered as in-situ Flame data) are flagged before they are registered. Ingest makes the same check on every file and stops with an error instead of storing data it could not read properly. Rows with problems are marked ✗ with the reason. Data that cannot be registered as found (for example the same file name in two folders) is listed under **Not proposed**, with the reason. Files next to the data that no instrument reads, such as plots, are listed under **Files that will not be read**. They don't stop a row from being registered, and a folder holding only such files isn't proposed.
+**Validation** runs as you type, with the same checks as ingest. It also requires the raw data to be found exactly once, and to read as its instrument's data: the instrument is the one whose folder the data is in, and the first file is test-read with the reader that recognises it, so data of another type (say, a DSC export in the UV-Vis folder) is flagged before it is registered. Ingest makes the same check on every file and stops with an error instead of storing data it could not read properly. Rows with problems are marked ✗ with the reason. Data that cannot be registered as found (for example the same file name in two folders) is listed under **Not proposed**, with the reason. Files next to the data that no instrument reads, such as plots, are listed under **Files that will not be read**. They don't stop a row from being registered, and a folder holding only such files isn't proposed.
 
 **Saving:**
 - **Save to registry** appends the rows to your CSV or XLSX registry. Existing rows, formatting and other sheets are kept, and the previous version is saved next to it as `<name>.bak.csv` / `<name>.bak.xlsx`. **Save & ingest** also ingests the new experiments. If the registry is open in Excel, close it and save again.
 - When the registry is kept elsewhere (for example on OneDrive for a team server), the app does not write it: download the rows (`.csv` or `.xlsx`) and add them to the registry there.
 
-Which instruments share a folder, and whether they record series, is set per instrument (`folder_name`, `data_layout`): in `config/instrument_params.json` for code parsers, in the instrument's definition otherwise (`config/instruments/*.json`, or the lab's own in `PATH_TO_DATA/.mfethuls/instruments/`).
+Which folder an instrument reads is set per instrument (`config/instruments.json`, or the lab's own in `PATH_TO_DATA/.mfethuls/instruments/`); whether an experiment is one file or a series is set per reader (`data_layout`: `config/readers/*.json`, `config/code_readers.json`, or the lab's own in `PATH_TO_DATA/.mfethuls/readers/`).
 
 ---
 
@@ -161,9 +202,9 @@ A realistic multi-instrument registry for one research batch:
 
 ```
 name,instrument_name,sample_id,run_id,raw_data_filename,description,batch,operator
-CL_dsc_001,dsc_mettler_toledo_v1,S001,R001,,,PB-2024-01,Maria
-CL_dsc_002,dsc_mettler_toledo_v1,S002,R001,,,PB-2024-01,Maria
-CL_dsc_002_repeat,dsc_mettler_toledo_v1,S002,R002,dsc_s002_run2,,PB-2024-01,Maria
+CL_dsc_001,dsc,S001,R001,,,PB-2024-01,Maria
+CL_dsc_002,dsc,S002,R001,,,PB-2024-01,Maria
+CL_dsc_002_repeat,dsc,S002,R002,dsc_s002_run2,,PB-2024-01,Maria
 CL_tga_001,tga,S001,R001,,,PB-2024-01,Carlos
 CL_rheometer_freq,rheometer,S003,R001,,frequency sweep,PB-2024-01,Priya
 CL_rheometer_flow,rheometer,S003,R001,,viscometry at 25C,PB-2024-01,Priya
@@ -171,7 +212,7 @@ CL_dma_temp,dma,S004,R001,,Tg measurement,PB-2024-01,Carlos
 CL_ftir_001,ftir,S001,R001,,,PB-2024-01,Maria
 CL_sec_001,sec,S002,R001,,,PB-2024-01,Priya
 CL_nmr_001,nmr,S001,R001,,,PB-2024-01,Maria
-CL_uv_kinetics,uv_insitu,S005,R001,,UV kinetics monitoring,PB-2024-01,Carlos
+CL_uv_kinetics,uv_vis,S005,R001,,UV kinetics monitoring,PB-2024-01,Carlos
 CL_saxs_001,saxs,S003,R001,,,PB-2024-01,Priya
 CL_pending,,,,,Planned — not yet run,,
 ```
