@@ -24,7 +24,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "mfethuls"
 
 def _definition(**changes):
     data = {
-        "name": "probe", "type": "probe", "model": "x", "folder_name": "Probe",
+        "name": "probe", "type": "probe", "model": "x",
         "file": {"extensions": [".txt"], "delimiter": "tab"},
         "columns": [{"source": "a", "column": "a"}],
     }
@@ -130,8 +130,11 @@ def _escaped(node) -> bool:
 # --- other untrusted input in definitions ---------------------------------------------------------
 
 @pytest.mark.parametrize("folder", ["../Windows", "C:/Users", "a/b", "..", "/etc", "x\\y", "a:b"])
-def test_folder_name_is_one_plain_folder(folder):
-    assert "'folder_name'" in _problems(_definition(folder_name=folder))
+def test_an_instruments_folder_is_one_plain_folder(folder):
+    from mfethuls.instruments.configured import parse_instrument
+
+    with pytest.raises(DefinitionError, match="'folder_name'"):
+        parse_instrument({"name": "probe", "type": "tga", "folder_name": folder})
 
 
 @pytest.mark.parametrize("sample", ["../../secret.txt", "C:/secret.txt", "sub/x.txt", ".."])
@@ -168,16 +171,19 @@ def test_oversized_and_deeply_nested_json_are_refused(tmp_path):
         load_definition(big)
 
 
-def test_a_broken_lab_file_does_not_hide_the_other_instruments(tmp_path):
-    from mfethuls.instruments.configured import LAB_SUBDIR, definition_statuses
+def test_a_broken_lab_file_does_not_hide_the_others(tmp_path):
+    from mfethuls.instruments.configured import LAB_INSTRUMENTS, LAB_READERS, lab_statuses
 
-    lab = tmp_path / LAB_SUBDIR
-    lab.mkdir(parents=True)
-    (lab / "nested.json").write_text("[" * 100_000 + "]" * 100_000, encoding="utf8")
-    (lab / "probe.json").write_text(json.dumps(_definition()), encoding="utf8")
-    statuses = {Path(s.source).name: s for s in definition_statuses(str(tmp_path))}
-    assert statuses["probe.json"].active
-    assert not statuses["nested.json"].active and statuses["nested.json"].problems
+    for folder in (LAB_READERS, LAB_INSTRUMENTS):
+        (tmp_path / folder).mkdir(parents=True)
+        (tmp_path / folder / "nested.json").write_text("[" * 100_000 + "]" * 100_000, encoding="utf8")
+    (tmp_path / LAB_READERS / "probe.json").write_text(json.dumps(_definition()), encoding="utf8")
+    (tmp_path / LAB_INSTRUMENTS / "probe.json").write_text(
+        json.dumps({"name": "probe", "type": "probe", "folder_name": "Probe"}), encoding="utf8")
+    statuses = {(s.kind, Path(s.source).name): s for s in lab_statuses(str(tmp_path))}
+    assert statuses["reader", "probe.json"].active and statuses["instrument", "probe.json"].active
+    for kind in ("reader", "instrument"):
+        assert not statuses[kind, "nested.json"].active and statuses[kind, "nested.json"].problems
 
 
 def test_app_messages_show_markdown_as_text():

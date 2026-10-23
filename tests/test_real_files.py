@@ -2,8 +2,9 @@
 
 Point ``MFETHULS_REAL_DATA`` at a folder laid out like a data folder (one subfolder per
 instrument). The test finds every experiment in it as **Register new data** does, reads
-each with every instrument that can read it, and compares which readers succeed, their
-row counts and columns with what was recorded the first time.
+each with the reader of its instrument that recognises it, and compares which reader that
+is, its row count and columns with what was recorded the first time. Every file is also
+checked to be recognised by at most one reader of its folder's instrument (the reader matrix).
 
 The record is a JSON file outside the repo: ``MFETHULS_REAL_DATA_EXPECTED``, by default
 ``~/.mfethuls/real_data_expected.json``. The first run writes it (and skips); after a
@@ -31,29 +32,50 @@ needs_real_files = pytest.mark.skipif(not REAL or not Path(REAL).is_dir(),
 
 
 def _read_all(data_root: str) -> dict:
-    """``{"Folder/name": {instrument: {"rows": n, "columns": [...]}}}`` for every experiment found."""
+    """``{"Folder/name": {reader: {"rows": n, "columns": [...]}}}`` for every experiment found."""
     from mfethuls.discovery import discover_unregistered
     from mfethuls.experiments import Registry
-    from mfethuls.instruments.configured import parser_for
+    from mfethuls.instruments.configured import reader_for
 
     empty = Registry.from_frame(pd.DataFrame(columns=["name", "instrument_name", "raw_data_filename"]))
     found = {}
     for item in discover_unregistered(empty, data_root):
         readings = {}
-        for instrument in item.instruments:
-            try:
-                data = parser_for(instrument).parse({item.raw_data_filename: item.files}, experiment_id="real",
-                                                    instrument_name=instrument).data
-            except Exception:  # noqa: BLE001 - this instrument does not read these files
-                continue
-            if len(data):
-                readings[instrument] = {"rows": int(len(data)), "columns": [str(c) for c in data.columns]}
+        try:
+            reader = reader_for(item.suggested, item.files)
+            files = [f for f in item.files if reader.claims(f)]
+            data = reader.parser.parse({item.raw_data_filename: files}, experiment_id="real",
+                                       instrument_name=item.suggested).data
+        except Exception:  # noqa: BLE001 - no reader of its instrument reads these files
+            data = None
+        if data is not None and len(data):
+            readings[reader.name] = {"rows": int(len(data)), "columns": [str(c) for c in data.columns]}
         found[f"{item.folder_name}/{item.raw_data_filename}"] = readings
     return found
 
 
+def _ambiguous(data_root: str) -> list:
+    """Files more than one reader of their folder's instrument recognises: a reader bug."""
+    from mfethuls.discovery import instrument_folders
+    from mfethuls.instruments.configured import instrument_for_folder, readers_of, recognising_readers
+
+    problems = []
+    for folder in instrument_folders(data_root):
+        instrument = instrument_for_folder(folder.name)
+        if instrument is None:
+            continue
+        candidates = readers_of(instrument)
+        for path in sorted(Path(folder.path).rglob("*")):
+            if not path.is_file() or path.name.startswith(".") or ".mfethuls" in path.parts:
+                continue
+            names = [r.name for r in recognising_readers(candidates, path)]
+            if len(names) > 1:
+                problems.append(f"{path.relative_to(data_root)}: recognised by {', '.join(names)}")
+    return problems
+
+
 def _differences(expected: dict, found: dict) -> list:
-    problems = [f"{key}: no instrument reads it any more" for key, readings in found.items() if not readings]
+    problems = [f"{key}: no reader reads it any more" for key, readings in found.items() if not readings]
     for key in sorted(set(expected) - set(found)):
         problems.append(f"{key}: no longer found in the data folder")
     for key in sorted(set(found) - set(expected)):
@@ -94,6 +116,16 @@ def test_the_labs_files_read_as_recorded(monkeypatch):
     assert not problems, "The lab's files read differently than recorded:\n" + "\n".join(problems)
 
 
+@needs_real_files
+def test_each_of_the_labs_files_is_recognised_by_one_reader_at_most(monkeypatch):
+    from mfethuls.settings import configure
+
+    monkeypatch.setenv("PATH_TO_DATA", REAL)
+    configure(None)
+    problems = _ambiguous(REAL)
+    assert not problems, "Readers of one type that both claim a file:\n" + "\n".join(problems)
+
+
 def test_differences_are_reported():
     # The comparison itself, on made-up results: runs everywhere.
     before = {"DSC/a": {"dsc": {"rows": 10, "columns": ["temperature_C", "heat_flow_mW"]}}, "DSC/gone": {"dsc": {}}}
@@ -103,4 +135,4 @@ def test_differences_are_reported():
     assert "DSC/a (dsc): 9 rows instead of 10" in problems
     assert any("missing ['heat_flow_mW']" in p for p in problems)
     assert "DSC/a: tga now reads it too" in problems and "DSC/gone: no longer found in the data folder" in problems
-    assert "DSC/new: no instrument reads it any more" in problems
+    assert "DSC/new: no reader reads it any more" in problems

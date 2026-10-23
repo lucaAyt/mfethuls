@@ -1,6 +1,7 @@
-"""Build an experiment's instrument (parser + characterizer) and parse its raw files into a Dataset."""
+"""Build an experiment's instrument (reader + characterizer) and parse its raw files into a Dataset."""
 
 import os
+from typing import List, Tuple
 
 from mfethuls.parsers.registry import reader_fingerprint
 from mfethuls.instruments.definition import CHARACTERIZERS
@@ -13,28 +14,26 @@ from mfethuls.registry_validator import RegistryValidator, RegistryValidationErr
 from mfethuls.settings import get_settings
 
 
-def get_data_root_path(folder_name: str) -> str:
-    """The instrument's raw-data folder: ``folder_name`` from instrument_params.json under PATH_TO_DATA."""
-    return os.path.join(get_settings().data_root, folder_name)
+def prepare_experiment(instrument_name: str, raw_data_filename: str) -> Tuple[GenericInstrument, List[str], List[str]]:
+    """How to read one experiment: its instrument (with the reader of its files), the data files that
+    reader reads, and the other files found with them (plots, notes), which are not read.
 
-
-def instrument_data_path_constructor(path, raw_filenames):
-    """``{raw_data_filename: [sorted file paths]}`` for each name in ``raw_filenames``.
-
-    Looks in ``path`` (the instrument folder) for the files with that stem, or a
-    folder named after it (see ``manifest.find_data_files``).
+    The files are found in the instrument's folder (``manifest.find_data_files``); the reader is the
+    one of the instrument's type that reads them (:func:`~mfethuls.instruments.configured.reader_for`).
+    ``ValueError`` / ``FileNotFoundError`` saying why when the instrument, files or reader are not found.
     """
+    from mfethuls.instruments.configured import get_instrument, reader_for
     from mfethuls.manifest import find_data_files
 
-    return {raw_filename: find_data_files(path, raw_filename)[1] for raw_filename in raw_filenames}
-
-
-def create_instrument(type_, name, model, characterizer=None, data_root_path=None):
-    """The instrument ``name`` (its type and model), with the reader looked up by its name."""
-    from mfethuls.instruments.configured import parser_for
-
-    parser = parser_for(name)
-    return GenericInstrument(type_, name, model, parser, characterizer, data_root_path)
+    instrument = get_instrument(instrument_name)
+    folder = os.path.join(get_settings().data_root, instrument.folder_name)
+    _, files = find_data_files(folder, raw_data_filename)
+    reader = reader_for(instrument, files)
+    data = [f for f in files if reader.claims(f)]
+    characterizer = create_characterizer(instrument.type, reader.characterizer)
+    read_by = GenericInstrument(instrument.type, instrument.name, reader.model, reader.parser, characterizer, folder,
+                                reader=reader.name)
+    return read_by, data, [f for f in files if f not in data]
 
 
 # How to build each characterizer in ``definition.CHARACTERIZERS`` (which says the type it works on).
@@ -119,4 +118,5 @@ def parse_experiment(
     )
     parsed = parser.parse(dict_data_paths, **parse_kwargs)
     parsed.metadata["reader_fingerprint"] = reader_fingerprint(parser)
+    parsed.metadata["reader"] = getattr(instrument, "reader", None)
     return _apply_characterizer(parsed, instrument)

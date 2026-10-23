@@ -115,6 +115,46 @@ def _walk(folder: str) -> list:
     return scans[key]
 
 
+def operation_cache() -> Optional[Dict[Any, Any]]:
+    """A dict kept for the current :func:`one_scan_per_folder` block, or None outside one.
+
+    For other lookups that may be done once per operation (e.g. the instruments' definitions).
+    """
+    return _SCANS.get()
+
+
+class _FolderIndex:
+    """An instrument folder's walk, by name: what :func:`find_data_files` looks up for each experiment."""
+
+    def __init__(self, walk: list) -> None:
+        self.by_stem: Dict[str, list] = {}  # stem_key(file stem) -> [(position, root, file)]
+        self.by_name: Dict[str, list] = {}  # stem_key(file name) -> [(position, root, file)]
+        self.dirs: Dict[str, list] = {}  # stem_key(directory name) -> [path]
+        position = 0
+        for root, dirs, files in walk:
+            for fname in files:
+                fpath = Path(fname)
+                if fpath.suffix.lower() == ".parquet":
+                    continue
+                entry = (position, root, fname)
+                position += 1
+                self.by_stem.setdefault(stem_key(fpath.stem), []).append(entry)
+                self.by_name.setdefault(stem_key(fpath.name), []).append(entry)
+            for dirname in dirs:
+                self.dirs.setdefault(stem_key(dirname), []).append(os.path.join(root, dirname))
+
+
+def _index(folder: str) -> _FolderIndex:
+    """The :class:`_FolderIndex` of ``folder``; kept within :func:`one_scan_per_folder` like its walk."""
+    scans = _SCANS.get()
+    if scans is None:
+        return _FolderIndex(_walk(folder))
+    key = ("index", os.path.normcase(os.path.abspath(folder)))
+    if key not in scans:
+        scans[key] = _FolderIndex(_walk(folder))
+    return scans[key]
+
+
 def _walk_below(folder: str, within: str) -> list:
     """The walk of ``folder``, taken from the kept walk of ``within`` (a folder above it) when there is one."""
     scans = _SCANS.get()
@@ -177,22 +217,17 @@ def find_data_files(instrument_data_path: str, raw_data_filename: str) -> tuple[
     # Names can contain dots that are not an extension (Agilent's "…01-00-01.dx_RID1A.CSV"):
     # files whose whole stem is the name come first; only without any is the part after the
     # last dot taken as an extension ("LUB055.txt").
-    whole_stem: dict[str, list[str]] = {}
-    file_matches: dict[str, list[str]] = {}
-    dir_matched_folders: list[str] = []
+    index = _index(instrument_data_path)
 
-    for root, dirs, files in _walk(instrument_data_path):
-        for fname in files:
-            fpath = Path(fname)
-            if fpath.suffix.lower() == ".parquet":
-                continue
-            if stem_key(fpath.stem) == target_name:
-                whole_stem.setdefault(root, []).append(os.path.join(root, fname))
-            if stem_key(fpath.stem) == target_stem or stem_key(fpath.name) == target_name:
-                file_matches.setdefault(root, []).append(os.path.join(root, fname))
-        for dirname in dirs:
-            if stem_key(dirname) == target_name:
-                dir_matched_folders.append(os.path.join(root, dirname))
+    def by_folder(entries) -> dict[str, list[str]]:
+        found: dict[str, list[str]] = {}
+        for _, root, fname in sorted(set(entries)):  # in walk order, each file once
+            found.setdefault(root, []).append(os.path.join(root, fname))
+        return found
+
+    whole_stem = by_folder(index.by_stem.get(target_name, []))
+    file_matches = by_folder(index.by_stem.get(target_stem, []) + index.by_name.get(target_name, []))
+    dir_matched_folders = list(index.dirs.get(target_name, []))
     if whole_stem:
         file_matches = whole_stem
 

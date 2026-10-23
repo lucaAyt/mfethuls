@@ -62,7 +62,7 @@ CHARACTERIZERS = {"dsc_profiling": ("dsc", {"sensitivity"}), "tga": ("tga", set(
 _PLOT_KEYS = {"x", "y", "group_by"}
 
 _TOP_KEYS = {
-    "spec_version", "name", "type", "model", "folder_name", "data_layout", "description",
+    "spec_version", "name", "type", "model", "data_layout", "description",
     "file", "columns", "formats", "derived", "characterizer", "plot", "check", "name_from", "from_file_name", "from_sheet_name",
     "from_header", "tables",
 }
@@ -79,9 +79,9 @@ AUTO_ENCODING = "auto"
 _HEADER_KEYS = {"starts_at", "skip_lines", "rows", "names_from"}
 _VALUE_KEYS = {"column", "pattern", "type", "values", "timezone"}
 
-# Keys that do not change how files are read (left out of the fingerprint): renaming an
-# instrument or its folder does not ask for its data to be read again.
-_NOT_READING = {"description", "check", "name", "folder_name", "data_layout"}
+# Keys that do not change how files are read (left out of the fingerprint): renaming a
+# reader does not ask for its data to be read again.
+_NOT_READING = {"description", "check", "name", "data_layout"}
 
 
 class DefinitionError(ValueError):
@@ -222,7 +222,6 @@ class InstrumentDefinition:
     name: str
     type: str
     model: str
-    folder_name: str
     data_layout: str
     formats: Tuple[Format, ...]
     derived: Tuple[Derived, ...] = ()
@@ -250,26 +249,11 @@ class InstrumentDefinition:
         """Short hash of everything that decides how files are read.
 
         Changes when the definition is edited in a way that can change the data
-        (not for its ``description``, ``check``, ``name``, ``folder_name`` or
-        ``data_layout``).
+        (not for its ``description``, ``check``, ``name`` or ``data_layout``).
         """
         reading = {k: v for k, v in self.raw.items() if k not in _NOT_READING}
         text = json.dumps(reading, sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(text.encode("utf8")).hexdigest()[:12]
-
-    def instrument_entry(self) -> Dict[str, Any]:
-        """The instrument's entry in the instrument list (as in ``instrument_params.json``)."""
-        entry = {
-            "type": self.type,
-            "model": self.model,
-            "name": self.name,
-            "folder_name": self.folder_name,
-            "data_layout": self.data_layout,
-            "definition": self.source or "built-in",
-        }
-        if self.characterizer:
-            entry["characterizer"] = dict(self.characterizer)
-        return entry
 
 
 def _sources(value: Any) -> Tuple[str, ...]:
@@ -294,7 +278,7 @@ def parse_definition(data: Dict[str, Any], source: Optional[str] = None) -> Inst
     problems: List[str] = []
     if not isinstance(data, dict):
         raise DefinitionError(["the file must contain one JSON object { ... }"], source)
-    _unknown(data, _TOP_KEYS, "", problems)
+    _unknown({k: v for k, v in data.items() if k != "folder_name"}, _TOP_KEYS, "", problems)
 
     def text(key: str, *, required: bool = True, default: str = "") -> str:
         value = data.get(key, default)
@@ -318,9 +302,9 @@ def parse_definition(data: Dict[str, Any], source: Optional[str] = None) -> Inst
     if type_ and not _NAME_RE.match(type_):
         problems.append(f"'type' {type_!r} may only contain a-z, 0-9, '_' and '-'")
     model = text("model")
-    folder_name = text("folder_name")
-    if folder_name and (issue := file_name_problem(folder_name)):
-        problems.append(f"'folder_name' {folder_name!r} {issue}: it is the instrument's folder in the data folder")
+    if "folder_name" in data:
+        problems.append("'folder_name' belongs to the instrument, not to its reader: give the folder in the "
+                        "instrument's own file (see .mfethuls/instruments)")
     data_layout = text("data_layout", required=False, default="file")
     if data_layout not in LAYOUTS:
         problems.append(f"'data_layout' must be 'file' or 'folder', not {data_layout!r}")
@@ -398,7 +382,6 @@ def parse_definition(data: Dict[str, Any], source: Optional[str] = None) -> Inst
         name=name,
         type=type_,
         model=model,
-        folder_name=folder_name,
         data_layout=data_layout,
         formats=tuple(formats),
         derived=tuple(derived),
@@ -819,9 +802,9 @@ def load_definition(path: Union[str, Path]) -> InstrumentDefinition:
     return parse_definition(definition_json(text, str(path)), source=str(path))
 
 
-BUILTIN_DIR = Path(__file__).resolve().parent.parent / "config" / "instruments"
+BUILTIN_DIR = Path(__file__).resolve().parent.parent / "config" / "readers"
 
 
 def builtin_definitions() -> List[InstrumentDefinition]:
-    """Definitions shipped with mfethuls (``config/instruments/*.json``)."""
+    """Readers shipped with mfethuls (``config/readers/*.json``)."""
     return [load_definition(path) for path in sorted(BUILTIN_DIR.glob("*.json"))]

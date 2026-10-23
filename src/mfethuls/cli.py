@@ -238,18 +238,23 @@ def cmd_plot(args) -> int:
 
 
 def cmd_instruments(args) -> int:
-    """The instruments mfethuls knows, and any of the lab's definitions it could not use."""
-    from .instruments.configured import builtin_names, definition_statuses, instrument_entries
+    """The instruments mfethuls knows, the readers of their files, and any lab file it could not use."""
+    from .instruments.configured import instruments, lab_statuses, readers, readers_of
 
     data_root = _settings.get_settings().data_root
-    builtin = builtin_names()
+    print("Instruments (the registry's instrument_name):")
     _print_table(pd.DataFrame([
-        {"name": entry["name"], "type": entry.get("type"), "model": entry.get("model"),
-         "folder": entry.get("folder_name"), "source": "built-in" if entry["name"] in builtin else "lab definition"}
-        for entry in instrument_entries(data_root)
+        {"name": i.name, "type": i.type, "folder": i.folder_name,
+         "readers": ", ".join(r.name for r in readers_of(i, data_root)),
+         "source": "built-in" if i.source is None else ("built-in, moved" if i.builtin else "lab")}
+        for i in instruments(data_root)
     ]))
-    problems = [status for status in definition_statuses(data_root) if status.problems or status.warnings]
-    for status in problems:
+    print("\nReaders (export formats):")
+    _print_table(pd.DataFrame([
+        {"name": r.name, "type": r.type, "model": r.model, "layout": r.layout, "source": "lab" if r.lab else "built-in"}
+        for r in readers(data_root)
+    ]))
+    for status in lab_statuses(data_root):
         for message in status.problems:
             print(f"NOT USED {status.source}: {message}")
         for message in status.warnings:

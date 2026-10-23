@@ -298,12 +298,13 @@ def _resolve_plot_kind(dataset: Dataset, kind: Optional[str]) -> Optional[str]:
 
 
 def _definition_with_plot(dataset: Dataset):
-    """The instrument definition that read ``dataset``, when it names a plot."""
-    from mfethuls.instruments.configured import definition_for
+    """The definition of the reader that read ``dataset``, when it names a plot."""
+    from mfethuls.instruments.configured import get_reader
 
     metadata = dataset.metadata if isinstance(dataset.metadata, dict) else {}
-    name = metadata.get("instrument_definition") or metadata.get("instrument_name")
-    definition = definition_for(name) if name else None
+    name = metadata.get("reader") or metadata.get("instrument_definition")
+    reader = get_reader(name) if name else None
+    definition = reader.definition if reader is not None else None
     return definition if definition is not None and definition.plot else None
 
 

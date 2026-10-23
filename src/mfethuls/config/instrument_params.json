@@ -1,9 +1,0 @@
-[
-  {
-    "type": "nmr",
-    "model": "bruker_nmr",
-    "name": "nmr",
-    "folder_name": "NMR",
-    "data_layout": "folder"
-  }
-]

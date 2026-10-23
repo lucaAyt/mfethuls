@@ -24,7 +24,7 @@ def test_walkthrough_workspace_registers_only_some_examples(tmp_path):
 
 def test_existing_workspace_is_kept_and_fresh_starts_again(tmp_path):
     workspace = create_workspace(tmp_path / "example")
-    pd.DataFrame([{"name": "mine", "instrument_name": "dsc_mettler_toledo_v0"}]).to_csv(workspace.registry_path, index=False)
+    pd.DataFrame([{"name": "mine", "instrument_name": "dsc"}]).to_csv(workspace.registry_path, index=False)
 
     assert list(pd.read_csv(create_workspace(tmp_path / "example").registry_path)["name"]) == ["mine"]
     again = create_workspace(tmp_path / "example", fresh=True, register_all=True)

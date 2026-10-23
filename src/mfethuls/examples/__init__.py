@@ -29,7 +29,7 @@ DEFAULT_WORKSPACE = Path.home() / "mfethuls-example"
 
 # Registered when a walkthrough workspace is created; the other examples are left to
 # register in the app ("Review & register").
-WALKTHROUGH_REGISTERED = ("dsc_mettler_toledo_v1", "tga")
+WALKTHROUGH_REGISTERED = ("dsc", "tga")
 
 
 @dataclass(frozen=True)

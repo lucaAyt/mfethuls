@@ -3,7 +3,6 @@
   "name": "rheometer",
   "type": "rheometer",
   "model": "anton_paar",
-  "folder_name": "Rheology",
   "data_layout": "file",
   "description": "Anton Paar RheoCompass export (tab separated): Project/Test/Result lines, then one table per interval. Each interval starts with 'Interval and data points:<tab>1<tab>60', then a line of column names ('Interval data:<tab>Point No.<tab>Time ...'), a line of tabs and a line of units ([min], [°C], ...). The interval number fills the 'interval' column.",
   "file": {

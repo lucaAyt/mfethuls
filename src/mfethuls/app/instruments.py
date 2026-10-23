@@ -1,13 +1,15 @@
-"""Instruments in the app: the list in ⚙ Settings and the "Add instrument" dialog.
+"""Instruments in the app: the list in ⚙ Settings, a folder's instrument, and the "Add instrument" dialog.
 
-An experimentalist adds an instrument from one of its files. By default a chatbot
-drafts the instrument definition: the dialog gives a ready prompt (the format's
-rules, mfethuls' own reading of the file and its first lines) and takes the answer
-back. Alternatively mfethuls fills in its own guesses
-(:mod:`mfethuls.instruments.detect`). Either way the result lands in the same plain
-form (the instrument, how the file is read, what each column is), checked against
-the file with a table, a plot and warnings, before it is saved next to the data
-(``.mfethuls/instruments``), where everyone using that data folder gets it.
+An instrument is a folder of the data folder; its files are read by the readers of its
+measurement type (see :mod:`mfethuls.instruments.configured`). A folder no instrument reads gets
+one by choosing its type (:func:`link_folder_controls`). For an export format mfethuls cannot read,
+an experimentalist adds a reader from one of its files ("Add instrument"). By default a chatbot
+drafts the definition: the dialog gives a ready prompt (the format's rules, mfethuls' own reading
+of the file and its first lines) and takes the answer back. Alternatively mfethuls fills in its own
+guesses (:mod:`mfethuls.instruments.detect`). Either way the result lands in the same plain form
+(the reader, how the file is read, what each column is), checked against the file with a table, a
+plot and warnings, before it is saved next to the data (``.mfethuls/readers``), where everyone
+using that data folder gets it; the folder of its files gets an instrument if it has none.
 
 When the app may not write to the data folder (``backend.writes_definitions``
 false, e.g. a team server whose data folder is synced from OneDrive), the
@@ -29,15 +31,22 @@ import pandas as pd
 import streamlit as st
 
 from mfethuls.instruments.configured import (
+    assign_folder,
     builtin_names,
-    definition_statuses,
     definition_text,
-    instrument_entries,
+    folder_taker,
+    instrument_for_folder,
+    instruments,
     lab_dir,
-    link_folder,
+    lab_statuses,
+    measurement_types,
+    name_from_folder,
     prepare_definition,
+    readers,
+    readers_of,
     remove_definition,
     save_definition,
+    set_folder,
 )
 from mfethuls.instruments.definition import (
     COLUMN_OPS,
@@ -328,16 +337,15 @@ def layout_for(seed_layouts: List[Dict[str, Any]], sample: Path) -> int:
     return 0
 
 
-def seed_from_detection(detection, folder: Optional[str] = None) -> Dict[str, Any]:
-    return detection.definition(name="", type=detection.type_guess or "", model="", folder_name=folder or "",
-                                data_layout="file")
+def seed_from_detection(detection) -> Dict[str, Any]:
+    return detection.definition(name="", type=detection.type_guess or "", model="", data_layout="file")
 
 
 def known_types() -> List[str]:
     from mfethuls.schema_normalization import _get_schema_file_path
 
     folder = Path(_get_schema_file_path("x")).parent
-    return sorted({p.stem for p in folder.glob("*.json")} | {e["type"] for e in instrument_entries()})
+    return sorted({p.stem for p in folder.glob("*.json")} | set(measurement_types()))
 
 
 def required_columns(instrument_type: str) -> List[Any]:
@@ -381,28 +389,28 @@ def open_requested_dialog(backend) -> None:
         add_instrument_dialog(backend, folder=request.get("folder"))
 
 
-def _read_by(entry: Dict[str, Any]) -> str:
-    from mfethuls.instruments.definition import BUILTIN_DIR
-
-    if entry.get("same_as"):
-        return f"same as {entry['same_as']} (lab file)"
-    source = entry.get("definition")
-    if source is None:
-        return "built-in code"
-    # Built-in definitions are loaded from their files too: the path tells them apart.
-    builtin = source == "built-in" or Path(source).resolve().parent == BUILTIN_DIR.resolve()
-    return "built-in definition" if builtin else "lab definition"
+def _source(reader) -> str:
+    if reader.lab:
+        return "lab"
+    return "built-in code" if reader.definition is None else "built-in"
 
 
 def render_instruments_section(backend, registry_path: str = "") -> None:
-    """⚙ Settings → Instruments: what mfethuls can read; add or remove the lab's instruments."""
-    st.caption("The instruments mfethuls can read. Add one from a file it exports. The lab's instruments are "
-               "saved in the data folder (`.mfethuls/instruments`), so everyone using it gets them.")
-    entries = sorted(instrument_entries(), key=lambda e: e["name"])
-    st.dataframe(pd.DataFrame([{"instrument": e["name"], "type": e["type"], "model": e["model"],
-                                "folder": _folder_text(e), "read by": _read_by(e)} for e in entries]),
+    """⚙ Settings → Instruments: the instruments and the readers of their files; add, move or remove the lab's."""
+    st.caption("An **instrument** is where data comes from: one folder of the data folder, and the name the "
+               "registry's instrument_name uses. Its files are read by the **readers** of its measurement type, "
+               "one per export format; each file by the one that recognises it. The lab's instruments and readers "
+               "are saved in the data folder (`.mfethuls`), so everyone using it gets them.")
+    st.dataframe(pd.DataFrame([{"instrument": i.name, "type": i.type, "folder": _folder_text(i),
+                                "readers": ", ".join(r.name for r in readers_of(i)),
+                                "source": "built-in" if i.builtin else "lab"} for i in instruments()]),
                  hide_index=True, width="stretch")
-    statuses = definition_statuses()
+    with st.expander("Readers (export formats)"):
+        st.dataframe(pd.DataFrame([{"reader": r.name, "type": r.type, "model": r.model,
+                                    "one experiment is": "a folder of files" if r.layout == "folder" else "a file",
+                                    "source": _source(r)} for r in readers()]),
+                     hide_index=True, width="stretch")
+    statuses = lab_statuses()
     for status in statuses:
         name = Path(status.source).name
         for problem in status.problems:
@@ -412,7 +420,8 @@ def render_instruments_section(backend, registry_path: str = "") -> None:
 
     data_root = get_settings().data_root
     if st.button("Add instrument", icon=":material/add_circle:", width="stretch", type="primary",
-                 disabled=not data_root, help=None if data_root else "Choose the data folder first."):
+                 disabled=not data_root, help="A reader for an export format mfethuls cannot read yet, from one of "
+                                              "its files." if data_root else "Choose the data folder first."):
         request_dialog()
 
     if data_root:
@@ -420,84 +429,135 @@ def render_instruments_section(backend, registry_path: str = "") -> None:
         change_folder_controls(backend, registry_path)
 
     if statuses:
-        st.markdown("**The lab's instruments**")
+        st.markdown("**The lab's files**")
         for status in statuses:
             _remove_row(backend, status, registry_path)
 
 
-def _folder_text(entry: Dict[str, Any]) -> str:
-    default = entry.get("default_folder")
-    return f"{entry['folder_name']} (instead of {default})" if default else entry["folder_name"]
+def _folder_text(instrument) -> str:
+    default = instrument.default_folder
+    return f"{instrument.folder_name} (instead of {default})" if default else instrument.folder_name
 
 
-def group_label(folder: str, entries: List[Dict[str, Any]]) -> str:
-    """``DSC (dsc_default, dsc_mettler_toledo_v0, +2)``: an instrument folder and who reads it."""
-    names = [e["name"] for e in entries]
+def _type_label(type_: str) -> str:
+    """``dsc (dsc_mettler_toledo_v0, dsc_mettler_toledo_v1, +1)``: a measurement type and its readers."""
+    names = [r.name for r in readers() if r.type == type_]
     shown = ", ".join(names[:2]) + (f", +{len(names) - 2}" if len(names) > 2 else "")
-    return f"{folder} ({shown})"
-
-
-def _link(names: List[str], folder: str, key: str) -> None:
-    """Button callback: link the instruments to ``folder`` and say how it went."""
-    from mfethuls.app.register import clear_registry_caches
-
-    try:
-        link_folder(names, folder)
-    except Exception as exc:  # noqa: BLE001 - shown to the user
-        st.session_state[LINKED] = (key, _plain(exc), False)
-        return
-    clear_registry_caches()
-    st.session_state[LINKED] = (key, f"{_plain(', '.join(names))} now read{'s' if len(names) == 1 else ''} the "
-                                     f"folder **{_plain(folder)}**.", True)
+    return f"{type_} ({shown})"
 
 
 def _link_result(key: str) -> None:
-    """The message of a folder link made by the controls with ``key`` (Markdown, already escaped)."""
+    """The message of a folder change made by the controls with ``key`` (Markdown, already escaped)."""
     result = st.session_state.get(LINKED)
     if result and result[0] == key:
         st.session_state.pop(LINKED)
         (st.success if result[2] else st.error)(result[1])
 
 
+def _set_folder(name: str, folder: str, key: str) -> None:
+    """Button callback: the instrument ``name`` reads ``folder``; says how it went."""
+    from mfethuls.app.register import clear_registry_caches
+
+    try:
+        set_folder(name, folder)
+    except Exception as exc:  # noqa: BLE001 - shown to the user
+        st.session_state[LINKED] = (key, _plain(exc), False)
+        return
+    clear_registry_caches()
+    st.session_state[LINKED] = (key, f"{_plain(name)} now reads the folder **{_plain(folder)}**.", True)
+
+
+def _assign(folder: str, type_key: str, name_key: str, key: str) -> None:
+    """Button callback: an instrument of the chosen type reads ``folder`` (see ``assign_folder``)."""
+    from mfethuls.app.register import clear_registry_caches
+
+    type_ = st.session_state.get(type_key)
+    name = str(st.session_state.get(name_key) or "").strip() or None
+    try:
+        instrument = assign_folder(folder, type_, name)
+    except Exception as exc:  # noqa: BLE001 - shown to the user
+        st.session_state[LINKED] = (key, _plain(exc), False)
+        return
+    clear_registry_caches()
+    st.session_state[LINKED] = (key, f"The instrument **{_plain(instrument)}** ({_plain(type_)}) now reads the "
+                                     f"folder **{_plain(folder)}**.", True)
+
+
 UNCLAIMED = "unclaimed"
 
 
-def link_folder_controls(folder: str, suggested: Optional[str], key: str, *, writes: bool) -> None:
-    """For a folder no instrument reads: choose the known instrument whose data it holds.
+@st.cache_data(show_spinner=False, ttl=60)
+def _recognised(folder: str, files: Tuple[str, ...]) -> Dict[str, int]:
+    from mfethuls.discovery import recognise_files
 
-    The outcome is shown by ``_link_result(UNCLAIMED)``: once linked, the folder is no longer listed.
+    base = Path(get_settings().data_root or "") / folder
+    return recognise_files([str(base / f) for f in files])
+
+
+def recognised_type(counts: Dict[str, int]) -> Optional[str]:
+    """The one measurement type the readers in ``counts`` (from ``recognise_files``) read, or None."""
+    types = {r.type for r in readers() if r.name in counts}
+    return types.pop() if len(types) == 1 else None
+
+
+def link_folder_controls(folder: str, suggested: Optional[str], key: str, *, writes: bool,
+                         files: Tuple[str, ...] = ()) -> None:
+    """For a folder no instrument reads: which type of data it holds, then the instrument that reads it.
+
+    The type is chosen for the user when a few of ``files`` read as one type (see
+    :func:`~mfethuls.discovery.recognise_files`), else when the folder's name says it (``suggested``).
+    The type's built-in instrument takes the folder when its own folder is not in the data folder;
+    otherwise a new instrument (named after the folder) reads it, and the built-in one keeps its
+    folder (see :func:`~mfethuls.instruments.configured.assign_folder`). The outcome is shown by
+    ``_link_result(UNCLAIMED)``: once read, the folder is no longer listed.
     """
-    from mfethuls.discovery import instrument_groups
-
-    groups = instrument_groups()
-    options = list(groups)
+    counts = _recognised(folder, tuple(files)) if files else {}
+    found = recognised_type(counts)
+    types = measurement_types()
+    wanted = found or suggested
     left, right = st.columns([3, 1], vertical_alignment="bottom")
+    type_key = f"{key}-type"
     chosen = left.selectbox(
-        f"Instrument for **{_plain(folder)}**", options, key=f"{key}-group",
-        index=options.index(suggested) if suggested in options else None,
-        placeholder="Choose the instrument whose files these are", format_func=lambda f: group_label(f, groups[f]),
-        help="mfethuls then reads this folder for that instrument, instead of its usual folder.")
+        f"Measurement type of **{_plain(folder)}**", types, key=type_key, format_func=_type_label,
+        index=types.index(wanted) if wanted in types else None,
+        placeholder="Choose the type of data these files hold",
+        help="If mfethuls cannot read these files, use New instrument instead.")
+    if counts:
+        checked = min(len(files), 5)
+        st.caption("Of the first files: " + ", ".join(f"{n} of {checked} read as **{_plain(r)}**"
+                                                      for r, n in sorted(counts.items(), key=lambda x: -x[1])))
+    name_key = f"{key}-name-{chosen}"
+    if chosen:
+        taker = folder_taker(chosen)
+        if taker is not None:
+            st.caption(f"There is no folder **{_plain(taker.folder_name)}** in the data folder: the built-in "
+                       f"instrument **{_plain(taker.name)}** reads **{_plain(folder)}** instead.")
+        else:
+            st.text_input("Name of the new instrument", value=name_from_folder(folder, chosen), key=name_key,
+                          help="Lower-case letters, digits, '_' or '-'. The registry's instrument_name for this "
+                               "folder's data. The other instruments of this type keep their folders.")
     right.button("Use this folder", key=f"{key}-link", width="stretch", disabled=chosen is None or not writes,
                  help=None if writes else "This app does not change the data folder.",
-                 on_click=_link, args=([e["name"] for e in groups.get(chosen, [])], folder, UNCLAIMED))
+                 on_click=_assign, args=(folder, type_key, name_key, UNCLAIMED))
 
 
 def change_folder_controls(backend, registry_path: str = "") -> None:
-    """⚙ Settings → Instruments: point an instrument (and the others sharing its folder) at another folder."""
-    from mfethuls.discovery import instrument_folders, instrument_groups
+    """⚙ Settings → Instruments: point an instrument at another folder."""
+    from mfethuls.discovery import instrument_folders
 
     key = "change-folder"
     _link_result(key)
-    groups = instrument_groups()
+    found = instruments()
     c1, c2 = st.columns(2)
-    current = c1.selectbox("Instrument", list(groups), key=f"{key}-group", format_func=lambda f: group_label(f, groups[f]))
-    names = [e["name"] for e in groups[current]]
+    name = c1.selectbox("Instrument", [i.name for i in found], key=f"{key}-instrument",
+                        format_func=lambda n: f"{n} ({next(i.folder_name for i in found if i.name == n)})")
+    current = next(i.folder_name for i in found if i.name == name)
     folders = [entry.name for entry in instrument_folders()]
     options = folders + [_NEW_FOLDER]
-    target = c2.selectbox("Reads the folder", options, key=f"{key}-{current}",
+    target = c2.selectbox("Reads the folder", options, key=f"{key}-{name}",
                           index=options.index(current) if current in options else len(options) - 1)
     if target == _NEW_FOLDER:
-        target = c2.text_input("New folder name", value=current, key=f"{key}-{current}-new")
+        target = c2.text_input("New folder name", value=current, key=f"{key}-{name}-new")
     target = (target or "").strip()
     if target and target != current and target not in folders:
         st.caption(f"There is no folder **{_plain(target)}** in the data folder yet: create it and put the "
@@ -506,17 +566,16 @@ def change_folder_controls(backend, registry_path: str = "") -> None:
         from mfethuls.app.register import registry_frame
 
         try:
-            frame = registry_frame(registry_path)
-            rows = sum(usage(name, frame, [])[0] for name in names)
+            rows = usage(name, registry_frame(registry_path), [])[0]
         except Exception:  # noqa: BLE001 - the count is a courtesy
             rows = 0
         if rows:
-            st.caption(f"{rows} registry row(s) use {'these instruments' if len(names) > 1 else names[0]}: "
-                       f"their raw data is then looked for in **{_plain(target)}**.")
+            st.caption(f"{rows} registry row(s) use {name}: their raw data is then looked for in "
+                       f"**{_plain(target)}**.")
     st.button("Change folder", key=f"{key}-apply", width="stretch",
               disabled=not target or target == current or not backend.writes_definitions,
               help=None if backend.writes_definitions else "This app does not change the data folder.",
-              on_click=_link, args=(names, target, key))
+              on_click=_set_folder, args=(name, target, key))
 
 
 def _set_removing(source: Optional[str]) -> None:
@@ -529,15 +588,17 @@ def _set_removing(source: Optional[str]) -> None:
 def _remove_row(backend, status, registry_path: str) -> None:
     path = Path(status.source)
     label = status.name or path.stem
+    instrument = status.kind == "instrument"
     left, edit, right = st.columns([3, 1, 1], vertical_alignment="center")
-    left.markdown(f"`{label}` · {_plain(path.name)}" +("" if status.active else " *(not used)*"))
+    left.markdown(f"{'instrument' if instrument else 'reader'} `{label}` · {_plain(path.name)}"
+                  + ("" if status.active else " *(not used)*"))
     if st.session_state.get(_REMOVING) != status.source:
-        if status.same_as:  # read like another instrument: only its folder changes (above)
-            edit.caption(f"same as `{status.same_as}`")
+        if instrument:  # nothing to edit but its folder (above)
+            edit.caption("folder: see above")
         elif edit.button("Edit", key=f"edit-{path.name}", icon=":material/edit:", width="stretch",
                          help="Change how its files are read: header, columns, values. Checked before saving."):
             request_dialog(edit=status.source)
-        right.button("Remove", key=f"remove-{path.name}", icon=":material/delete:", width="stretch",
+        right.button("Remove", key=f"remove-{status.kind}-{path.name}", icon=":material/delete:", width="stretch",
                      on_click=_set_removing, args=(status.source,))
         return
 
@@ -549,25 +610,32 @@ def _remove_row(backend, status, registry_path: str) -> None:
             frame = registry_frame(registry_path)
         except Exception:  # noqa: BLE001 - the counts are a courtesy
             frame = None
-    try:
-        datasets = backend.list_datasets()
-    except Exception:  # noqa: BLE001
-        datasets = []
-    rows, ingested = usage(label, frame, datasets)
-    lines = [f"Used by **{rows}** registry row(s) and **{ingested}** ingested experiment(s). Their data stays; "
-             "the registry rows can't be ingested again until an instrument reads them."]
-    if label in builtin_names():
-        lines.append(f"mfethuls' built-in `{label}` reads its files again afterwards; **Clean up** then offers "
-                     "to read them again.")
-    lines.append("The files are moved to `.mfethuls/instruments/removed/`, not deleted: move them back to undo.")
+    folder = f"`.mfethuls/{path.parent.name}/removed/`"
+    if instrument:
+        try:
+            datasets = backend.list_datasets()
+        except Exception:  # noqa: BLE001
+            datasets = []
+        rows, ingested = usage(label, frame, datasets)
+        lines = [f"Used by **{rows}** registry row(s) and **{ingested}** ingested experiment(s). Their data stays; "
+                 "the registry rows can't be ingested again until an instrument of that name reads them."]
+        if any(i.name == label and i.default_folder for i in instruments()):
+            lines.append(f"mfethuls' built-in `{label}` reads its own folder again afterwards.")
+    else:
+        lines = ["Data already read with it stays. Files of its format are not read any more, unless another "
+                 "reader recognises them."]
+        if label in builtin_names():
+            lines.append(f"mfethuls' built-in reader `{label}` is used again afterwards; **Clean up** then offers "
+                         "to read its data again.")
+    lines.append(f"The files are moved to {folder}, not deleted: move them back to undo.")
     st.warning("  \n".join(lines), icon=":material/warning:")
     if not backend.writes_definitions:
-        st.info(f"This app does not change the data folder. On OneDrive, move `{path.name}` and its sample file "
-                "out of the data folder's `.mfethuls/instruments` folder, then sync.")
+        st.info(f"This app does not change the data folder. On OneDrive, move `{path.name}` out of the data "
+                f"folder's `.mfethuls/{path.parent.name}` folder, then sync.")
         st.button("Close", key=f"remove-close-{path.name}", on_click=_set_removing, args=(None,))
         return
     confirm, cancel = st.columns(2)
-    if confirm.button(f"Remove {label}", key=f"remove-yes-{path.name}", type="primary", width="stretch"):
+    if confirm.button(f"Remove {label}", key=f"remove-yes-{status.kind}-{path.name}", type="primary", width="stretch"):
         try:
             remove_definition(path)
         except Exception as exc:  # noqa: BLE001
@@ -577,12 +645,11 @@ def _remove_row(backend, status, registry_path: str) -> None:
 
         clear_registry_caches()
         st.session_state.pop(_REMOVING, None)
-        st.session_state["reconcile_message"] = f"Removed the instrument {label}."
+        st.session_state["reconcile_message"] = f"Removed the {status.kind} {label}."
         st.rerun()
-    cancel.button("Cancel", key=f"remove-no-{path.name}", width="stretch", on_click=_set_removing, args=(None,))
+    cancel.button("Cancel", key=f"remove-no-{status.kind}-{path.name}", width="stretch", on_click=_set_removing,
+                  args=(None,))
 
-
-# -- Streamlit: the dialog --------------------------------------------------------
 
 def _stats(folder: Path, files: List[str]) -> List[Tuple[str, int, float]]:
     stats = []
@@ -689,13 +756,15 @@ def _plain(text: Any) -> str:
 
 
 def _identity_section(seed: Dict[str, Any], key: str, sample: Path, folder: Optional[str], name: str
-                      ) -> Dict[str, Any]:
+                      ) -> Tuple[Dict[str, Any], str, Optional[str]]:
+    """The reader's identity (name, type, model, layout, ...), the folder whose instrument reads its
+    files, and why that folder cannot be used (or None)."""
     from mfethuls.discovery import instrument_folders
 
     data_root = get_settings().data_root
     folders = [entry.name for entry in instrument_folders(data_root)]
     in_data = bool(data_root) and sample.resolve().is_relative_to(Path(data_root).resolve())
-    default_folder = str(seed.get("folder_name") or folder or (sample.parent.name if in_data else ""))
+    default_folder = str(folder or seed.get("folder_name") or (sample.parent.name if in_data else ""))
 
     c1, c2 = st.columns(2)
     options = folders + [_NEW_FOLDER]
@@ -734,12 +803,36 @@ def _identity_section(seed: Dict[str, Any], key: str, sample: Path, folder: Opti
     description = st.text_input("Notes (optional)", value=str(seed.get("description") or ""), key=f"{key}-notes",
                                 placeholder="e.g. Netzsch TG 209 F1 in room 2.14, Proteus 8 text export")
     identity = {"spec_version": 1, "name": name.strip().casefold(), "type": (type_ or "").strip().casefold(),
-                "model": model.strip(), "folder_name": (chosen or "").strip(), "data_layout": layout}
+                "model": model.strip(), "data_layout": layout}
     if name_from != "file":
         identity["name_from"] = name_from
     if description.strip():
         identity["description"] = description.strip()
-    return identity
+    chosen = (chosen or "").strip()
+    problem = _folder_outcome(chosen, identity["type"])
+    return identity, chosen, problem
+
+
+def _folder_outcome(folder: str, type_: str) -> Optional[str]:
+    """Say which instrument will read ``folder`` with this reader; the problem when none can."""
+    if not (folder and type_):
+        return None
+    owner = instrument_for_folder(folder)
+    if owner is not None and owner.type != type_:
+        problem = (f"{folder} is the folder of the instrument {owner.name}, which holds {owner.type} data: "
+                   f"each folder holds one type of data. Choose another folder for {type_} data.")
+        st.error(_plain(problem), icon=":material/folder_off:")
+        return problem
+    if owner is not None:
+        st.caption(f"The instrument **{_plain(owner.name)}** reads **{_plain(folder)}**; this reader reads those of "
+                   "its files that are in this format.")
+    elif (taker := folder_taker(type_)) is not None:
+        st.caption(f"The built-in instrument **{_plain(taker.name)}** will read **{_plain(folder)}** (there is no "
+                   f"folder {_plain(taker.folder_name)}).")
+    else:
+        st.caption(f"A new instrument **{_plain(name_from_folder(folder, type_))}** will read **{_plain(folder)}**: "
+                   "the registry's instrument_name for its data.")
+    return None
 
 
 def _choice(options: List[str], value: Any, fallback: str) -> Tuple[List[str], int]:
@@ -870,7 +963,7 @@ def _file_columns(settings: Dict[str, Any], sample: Path) -> Tuple[Optional[List
     from mfethuls.parsers.tabular import read_table
 
     try:
-        fmt = parse_definition({"name": "x", "type": "x", "model": "x", "folder_name": "x", "file": settings,
+        fmt = parse_definition({"name": "x", "type": "x", "model": "x", "file": settings,
                                 "columns": [{"source": "x", "column": "x"}]}).formats[0].file
         return [str(c) for c in read_table(sample, fmt).columns], None
     except DefinitionError as exc:
@@ -1087,20 +1180,22 @@ def _check_section(data: Dict[str, Any], sample: Path, file_columns: List[str], 
 
 
 def _save_controls(backend, data: Dict[str, Any], sample: Path, key: str, *,
-                   editing: Optional[str] = None, unread: Optional[List[str]] = None) -> None:
+                   editing: Optional[str] = None, unread: Optional[List[str]] = None, folder: str = "",
+                   folder_problem: Optional[str] = None) -> None:
     """Download and Save. ``unread``: other files of the folder it cannot read (shown above); saving
-    then needs a tick, since those files would fail at ingest."""
+    then needs a tick, since those files would fail at ingest. ``folder``: where its files are; when
+    no instrument reads it, one is given to it on saving (see ``assign_folder``)."""
     name = data.get("name", "")
     # Compared as save_definition writes it: "TGA" replaces tga.json and the built-in tga.
     stored_name = str(name).strip().casefold()
-    folder = lab_dir()
-    existing = folder / f"{stored_name}.json" if folder else None
+    lab = lab_dir()
+    existing = lab / f"{stored_name}.json" if lab else None
     if editing is not None and stored_name == str(editing).strip().casefold():
         allowed = True  # changing it is the point
     elif existing is not None and existing.exists():
-        allowed = st.checkbox(f"Replace the lab's existing instrument {name!r}", key=f"{key}-replace")
+        allowed = st.checkbox(f"Replace the lab's existing reader {name!r}", key=f"{key}-replace")
     elif stored_name in builtin_names():
-        allowed = st.checkbox(f"Replace mfethuls' built-in instrument {name!r} for everyone using this data "
+        allowed = st.checkbox(f"Replace mfethuls' built-in reader {name!r} for everyone using this data "
                               "folder", key=f"{key}-replace-builtin")
     else:
         allowed = True
@@ -1111,6 +1206,9 @@ def _save_controls(backend, data: Dict[str, Any], sample: Path, key: str, *,
             key=f"{key}-save-anyway",
             help="Those files will fail when they are ingested. Fine if they are not this instrument's data, "
                  "or if you will add another layout for them later.") and allowed
+    if folder_problem:
+        st.error("Choose another folder (see Adjust details → Instrument).", icon=":material/folder_off:")
+        allowed = False
     try:
         prepared = prepare_definition(data, sample)
     except Exception as exc:  # noqa: BLE001
@@ -1123,7 +1221,7 @@ def _save_controls(backend, data: Dict[str, Any], sample: Path, key: str, *,
         right.download_button("Download its sample file", data=sample.read_bytes(),
                               file_name=prepared["check"]["sample"], width="stretch")
         st.info("This app does not write to the data folder. Put both files in the data folder's "
-                "`.mfethuls/instruments` folder (e.g. on OneDrive), then sync.")
+                "`.mfethuls/readers` folder (e.g. on OneDrive), then sync.")
         return
     if right.button("Save changes" if editing else "Save instrument", type="primary", disabled=not allowed,
                     width="stretch", key=f"{key}-save"):
@@ -1132,6 +1230,20 @@ def _save_controls(backend, data: Dict[str, Any], sample: Path, key: str, *,
         except Exception as exc:  # noqa: BLE001
             st.error(_plain(exc))
             return
+        # After the reader: an instrument of a new type needs its reader to exist.
+        try:
+            reads = instrument_for_folder(folder) if folder else None
+            if folder and reads is None:
+                reads = assign_folder(folder, data["type"])
+            elif reads is not None:
+                reads = reads.name
+        except Exception as exc:  # noqa: BLE001
+            from mfethuls.app.register import clear_registry_caches
+
+            clear_registry_caches()
+            st.error(f"Saved the reader {name} ({path.name}), but no instrument reads {folder} yet: {_plain(exc)}. "
+                     "Choose it an instrument under Review & register.", icon=":material/folder_off:")
+            return
         from mfethuls.app.register import clear_registry_caches
 
         clear_registry_caches()
@@ -1139,7 +1251,8 @@ def _save_controls(backend, data: Dict[str, Any], sample: Path, key: str, *,
             st.session_state[_MESSAGE] = (f"Saved the changes to {name}. Data already ingested is read again "
                                           "when you ingest it, or under ⚙ Settings → Clean up (Read again).")
         else:
-            st.session_state[_MESSAGE] = f"Added the instrument {name} ({path.name}). Its data can now be registered."
+            where = f" The instrument {reads} reads {folder}: its data can now be registered." if reads else ""
+            st.session_state[_MESSAGE] = f"Added the reader {name} ({path.name}).{where}"
         st.rerun()
 
 
@@ -1181,10 +1294,10 @@ def definition_form(backend, seed: Dict[str, Any], sample: Path, key: str, *, fo
     index = layout_for(seed_layouts, sample)
     layout = seed_layouts[index]
 
-    name_help = ("What the registry's instrument_name column says for this instrument: lower case letters, "
-                 "digits, _ and -.")
+    name_help = ("Names this export format (its reader), e.g. tga_netzsch: lower case letters, digits, _ and -. "
+                 "The registry names the instrument, the folder the files are in (see Adjust details).")
     if editing:
-        name_help += " Registry rows use it, so it stays when editing; to rename, add the instrument again."
+        name_help += " Stored data records it, so it stays when editing; to rename, add the reader again."
     name = st.text_input("Name", value=str(seed.get("name") or ""), key=f"{key}-name", placeholder="e.g. tga_netzsch",
                          disabled=editing is not None, help=name_help)
     slots = {"name": st.container()}
@@ -1198,7 +1311,7 @@ def definition_form(backend, seed: Dict[str, Any], sample: Path, key: str, *, fo
                        "what is wrong.")
         tabs = st.tabs([*_TABS.values(), "Stored data", "Definition (JSON)"])
         with tabs[0]:
-            identity = _identity_section(seed, key, sample, folder, name)
+            identity, data_folder, folder_problem = _identity_section(seed, key, sample, folder, name)
             slots["instrument"] = st.container()
         with tabs[1]:
             if len(seed_layouts) > 1:
@@ -1262,7 +1375,8 @@ def definition_form(backend, seed: Dict[str, Any], sample: Path, key: str, *, fo
                            "the details below.")
                 st.code(problems_prompt(problems, data), language="markdown", height=200)
         if ok:
-            _save_controls(backend, data, sample, key, editing=editing, unread=unread)
+            _save_controls(backend, data, sample, key, editing=editing, unread=unread, folder=data_folder,
+                           folder_problem=folder_problem)
 
 
 def _chatbot_flow(backend, sample: Path, others: List[Path], folder: Optional[str], key: str) -> None:
@@ -1319,6 +1433,10 @@ def _chatbot_flow(backend, sample: Path, others: List[Path], folder: Optional[st
     if not isinstance(seed, dict):
         st.error("The answer must be one JSON object { ... }.")
         return
+    # An answer in the older layout names the folder: it is where the files are, not part of the reader.
+    if isinstance(seed.get("folder_name"), str) and not folder:
+        folder = seed["folder_name"].strip() or None
+    seed = {k: v for k, v in seed.items() if k != "folder_name"}
     st.success("Read below. If the plot looks right, press **Save instrument**; if not, change it under "
                "**Adjust details**, or paste another answer.", icon=":material/arrow_downward:")
     definition_form(backend, seed, sample, f"{key}-{_digest(seed)}", folder=folder, others=others,
@@ -1336,7 +1454,7 @@ def _manual_flow(backend, sample: Path, others: List[Path], folder: Optional[str
         st.caption(note)
     with st.expander("The whole file, part by part"):
         st.code("\n".join(detection.outline), language=None)
-    definition_form(backend, seed_from_detection(detection, folder), sample, f"{key}-auto", folder=folder,
+    definition_form(backend, seed_from_detection(detection), sample, f"{key}-auto", folder=folder,
                     others=others, guess_columns=True)
 
 
@@ -1372,7 +1490,8 @@ def edit_instrument_dialog(backend, source: str) -> None:
         st.error(f"{path.name} is not an instrument definition.")
         return
     name = str(seed.get("name") or path.stem)
-    folder = seed.get("folder_name") if isinstance(seed.get("folder_name"), str) else None
+    # The folder of an instrument reading with it: checked against that folder's files.
+    folder = next((i.folder_name for i in instruments() if name.casefold() in {r.name for r in readers_of(i)}), None)
     sample = saved_sample(path, seed)
     if sample is None:
         st.info("The file this instrument was made from is not next to it any more: choose one of its files.")

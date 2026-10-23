@@ -102,7 +102,7 @@ def test_renamed_experiment_is_refreshed_and_keeps_its_id(lab):
 def test_sample_change_refreshes_and_removes_the_old_file(lab):
     _, storage_root, frame = lab
     _, manifest = _state()
-    experiment_dir = storage_root / "dsc_mettler_toledo_v1" / manifest["LB_dsc_002"]["experiment_id"]
+    experiment_dir = storage_root / "dsc" / manifest["LB_dsc_002"]["experiment_id"]
     old_files = sorted(p.name for p in experiment_dir.iterdir())
     changed = frame.copy()
     changed.loc[changed["name"] == "LB_dsc_002", "sample_id"] = "S009"
@@ -135,7 +135,7 @@ def test_renamed_raw_file_is_relinked_and_keeps_its_id_and_data(lab):
     assert manifest["LB_dsc_002"]["experiment_id"] == old["experiment_id"]
     assert manifest["LB_dsc_002"]["raw_data_filename"] == "polymer2"
     assert catalog["LB_dsc_002"]["raw_data_filename"] == "polymer2"
-    assert (storage_root / "dsc_mettler_toledo_v1" / old["experiment_id"]).exists()
+    assert (storage_root / "dsc" / old["experiment_id"]).exists()
     assert _plan(moved).actions == []
 
 
@@ -170,7 +170,7 @@ def test_new_rows_are_pending_and_unknown_stored_data_is_removed(lab):
     stray = storage_root / "dsc" / "0123456789ab"
     stray.mkdir(parents=True)
     (stray / "0123456789ab_S001_R001.parquet").write_bytes(b"")
-    extra = pd.concat([frame, pd.DataFrame([{"name": "LB_dsc_009", "instrument_name": "dsc_mettler_toledo_v1",
+    extra = pd.concat([frame, pd.DataFrame([{"name": "LB_dsc_009", "instrument_name": "dsc",
                                              "sample_id": "S009", "raw_data_filename": "poly9"}])])
 
     current = _plan(extra)
@@ -184,7 +184,7 @@ def test_new_rows_are_pending_and_unknown_stored_data_is_removed(lab):
 def test_identical_raw_data_is_reported_as_duplicates(lab):
     data_root, _, frame = lab
     shutil.copyfile(data_root / "DSC" / "poly1.txt", data_root / "DSC" / "poly9.txt")  # raw data: copy bytes, not text
-    extra = pd.concat([frame, pd.DataFrame([{"name": "LB_dsc_009", "instrument_name": "dsc_mettler_toledo_v1",
+    extra = pd.concat([frame, pd.DataFrame([{"name": "LB_dsc_009", "instrument_name": "dsc",
                                              "sample_id": "S009", "raw_data_filename": "poly9"}])])
     registry = Registry.from_frame(extra)
     with open_stores() as stores:
@@ -209,8 +209,10 @@ def test_a_plan_resolves_each_instrument_once(lab, monkeypatch):
     _, _, frame = lab
     registry = Registry.from_frame(frame)  # loading the registry checks its rows; not part of the plan
     calls = []
-    real = configured.instrument_entries
-    monkeypatch.setattr(configured, "instrument_entries", lambda *a, **k: calls.append(1) or real(*a, **k))
+    real = configured.get_reader
+    monkeypatch.setattr(configured, "get_reader", lambda *a, **k: calls.append(a) or real(*a, **k))
     with open_stores() as stores:
         current = plan(registry, stores)
-    assert current.actions == [] and len(calls) == 1  # 7 experiments, 1 resolution
+    # 7 experiments read by 4 readers: each resolved once.
+    assert current.actions == [] and sorted(c[0] for c in calls) == [
+        "dsc_mettler_toledo_v1", "fluorescence_insitu", "ftir", "tga"]

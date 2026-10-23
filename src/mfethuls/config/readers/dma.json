@@ -3,7 +3,6 @@
   "name": "dma",
   "type": "dma",
   "model": "ta_q800",
-  "folder_name": "DMA",
   "data_layout": "file",
   "description": "TA Instruments Q800 text export: a header with the method and sample, the signals listed one per line ('Sig1<tab>Time (min)', ...), then the tab-separated table after 'StartOfData'.",
   "file": {

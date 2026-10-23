@@ -1,9 +1,8 @@
 {
   "spec_version": 1,
-  "name": "uv_insitu",
-  "type": "uv_vis",
+  "name": "fluorescence_insitu",
+  "type": "fluorescence",
   "model": "flame",
-  "folder_name": "UV_Vis",
   "data_layout": "folder",
   "description": "Ocean Optics Flame in-situ series: one file per spectrum in the experiment's folder. A header ('Date: Sun May 11 18:11:09 CEST 2025', integration time, ...) ends with '>>>>>Begin Spectral Data<<<<<'; then wavelength and signal, tab-separated. The file name ends with the time to the millisecond (..._18-11-09-757): the header date plus those milliseconds give each spectrum's timestamp.",
   "file": {
@@ -14,7 +13,7 @@
   },
   "columns": [
     { "source": "column_1", "quantity": "wavelength", "unit": "nm" },
-    { "source": "column_2", "quantity": "transmittance", "unit": "%" }
+    { "source": "column_2", "quantity": "emission", "unit": "counts" }
   ],
   "name_from": "folder",
   "from_header": [

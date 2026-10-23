@@ -31,21 +31,18 @@ def reads(parser, path) -> bool:
 
 
 def get_parser(type_, model):
-    """The parser of the instrument with this type and model.
+    """The parser of the reader with this type and model; ``ValueError`` if there is none, or several.
 
-    Instruments are looked up by name (:func:`mfethuls.instruments.configured.parser_for`), since
-    several may share a type and model; this finds the one instrument that has them, or the
-    code parser registered for them. ``ValueError`` if none, or if several read them differently.
+    Experiments are read by their instrument's reader (``mfethuls.instruments.configured.reader_for``);
+    this is for code that knows the export format it has.
     """
-    from mfethuls.instruments.configured import instrument_entries, parser_for
+    from mfethuls.instruments.configured import readers
 
-    names = [e["name"] for e in instrument_entries() if (e["type"], e["model"]) == (type_, model)]
-    parsers = {id(p): p for p in (parser_for(name) for name in names)}
-    if len(parsers) == 1:
-        return next(iter(parsers.values()))
-    if len(parsers) > 1:
-        raise ValueError(f"Several instruments are {type_} {model} ({', '.join(sorted(names))}): "
-                         "look the parser up by instrument name (parser_for).")
+    found = {id(r.parser): r.parser for r in readers() if (r.type, r.model) == (type_, model)}
+    if len(found) == 1:
+        return next(iter(found.values()))
+    if len(found) > 1:
+        raise ValueError(f"Several readers are {type_} {model}: look the reader up by name (get_reader).")
     if (type_, model) in _PARSER_REGISTRY:
         return _PARSER_REGISTRY[(type_, model)]
     raise ValueError(f"No parser for {type_} {model}")

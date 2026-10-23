@@ -567,6 +567,48 @@ def _to_numbers(column: pd.Series, fmt: FileFormat) -> pd.Series:
     return column.astype(object).where(filled, None)  # empty cells are missing, not ""
 
 
+# Lines searched for a format's header marker when telling which of several readers a file is.
+MARKER_LINES = 500
+
+
+def _head(file: FileFormat, path, lines: int) -> Optional[str]:
+    """The first ``lines`` lines of ``path`` as ``file`` reads it (a workbook: of each sheet); None if unreadable."""
+    try:
+        if file.workbook:
+            return "\n".join(line for heads in workbook.sheet_heads(path, lines).values() for line in heads)
+        with open(path, encoding="cp1252" if file.encoding == AUTO_ENCODING else file.encoding, errors="replace") as f:
+            return "".join(line for _, line in zip(range(lines), f))
+    except (OSError, ValueError):
+        return None
+
+
+def recognised_format(definition: InstrumentDefinition, path) -> Optional[int]:
+    """Index of the first format that recognises ``path``, or None.
+
+    Stricter than :func:`select_format`, to tell which of several readers a file is: the extension,
+    the ``contains`` / ``not_contains`` text, and the header marker (``header.starts_at``) in the
+    first lines. A format with neither text nor marker recognises every file with its extension.
+    """
+    extension = Path(path).suffix.casefold()
+    for i, fmt in enumerate(definition.formats):
+        file = fmt.file
+        if extension not in file.extensions:
+            continue
+        if file.contains is None and file.not_contains is None and not file.header_starts_at:
+            return i
+        head = _head(file, path, MARKER_LINES)
+        if head is None:
+            continue
+        # The text is looked for where select_format (ingest) looks: the first lines (of each sheet).
+        top = _head(file, path, CONTAINS_LINES) if file.workbook else "".join(head.splitlines(keepends=True)[:CONTAINS_LINES])
+        if top is None:
+            continue
+        if ((file.contains is None or file.contains in top) and (file.not_contains is None or file.not_contains not in top)
+                and (not file.header_starts_at or file.header_starts_at in head)):
+            return i
+    return None
+
+
 def select_format(definition: InstrumentDefinition, path) -> int:
     """Index of the first format that reads ``path``: its extension, then its ``contains`` (and
     ``not_contains``) text in the first lines."""
@@ -578,17 +620,8 @@ def select_format(definition: InstrumentDefinition, path) -> int:
         contains, excluded = definition.formats[i].file.contains, definition.formats[i].file.not_contains
         if contains is None and excluded is None:
             return i
-        try:
-            if definition.formats[i].file.workbook:
-                head = "\n".join(line for lines in workbook.sheets(path).values() for line in lines[:CONTAINS_LINES])
-            else:
-                encoding = definition.formats[i].file.encoding
-                with open(path, encoding="cp1252" if encoding == AUTO_ENCODING else encoding,
-                          errors="replace") as f:
-                    head = "".join(line for _, line in zip(range(CONTAINS_LINES), f))
-        except (OSError, ValueError):
-            continue
-        if (contains is None or contains in head) and (excluded is None or excluded not in head):
+        head = _head(definition.formats[i].file, path, CONTAINS_LINES)
+        if head is not None and (contains is None or contains in head) and (excluded is None or excluded not in head):
             return i
 
     def looked_for(file) -> str:

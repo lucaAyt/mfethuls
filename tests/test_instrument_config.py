@@ -1,4 +1,4 @@
-"""Every configured instrument can be ingested: parser, schema and data folder are all present."""
+"""mfethuls' own instruments and readers are complete, and each reader tells its files apart from the others'."""
 
 from pathlib import Path
 
@@ -6,35 +6,52 @@ import pytest
 
 import mfethuls.config
 import mfethuls.parsers  # noqa: F401  (registers the parsers)
-from mfethuls.instruments.configured import instrument_entries
-from mfethuls.parsers.registry import _PARSER_REGISTRY
+from mfethuls.examples import DATA_DIR
+from mfethuls.instruments.configured import instrument_for_folder, instruments, readers, readers_of, recognising_readers
+from mfethuls.parsers.registry import _PARSER_REGISTRY, data_extensions
 
 CONFIG_DIR = Path(mfethuls.config.__file__).parent
-INSTRUMENTS = instrument_entries(data_root="")  # built-in only, never the developer's data folder
+# Built-in only, never the developer's data folder.
+INSTRUMENTS = instruments(data_root="")
+READERS = readers(data_root="")
 
 
-@pytest.mark.parametrize("instrument", INSTRUMENTS, ids=[entry["name"] for entry in INSTRUMENTS])
+@pytest.mark.parametrize("reader", READERS, ids=[r.name for r in READERS])
+def test_reader_is_complete(reader):
+    assert (reader.type, reader.model) in _PARSER_REGISTRY, "no parser registered for type/model"
+    assert (CONFIG_DIR / "schemas" / f"{reader.type}.json").exists(), "no schema file for the type"
+    assert reader.layout in {"file", "folder"}
+    if reader.layout == "file":
+        # Discovery finds one-file-per-experiment data by the reader's extensions.
+        assert data_extensions(reader.parser), "a single-file reader must say which files it reads"
+
+
+@pytest.mark.parametrize("instrument", INSTRUMENTS, ids=[i.name for i in INSTRUMENTS])
 def test_instrument_is_complete(instrument):
-    assert (instrument["type"], instrument["model"]) in _PARSER_REGISTRY, "no parser registered for type/model"
-    assert (CONFIG_DIR / "schemas" / f"{instrument['type']}.json").exists(), "no schema file for the type"
-    assert instrument.get("folder_name"), "no folder_name: raw files cannot be located"
+    assert instrument.builtin and instrument.folder_name
+    assert readers_of(instrument, data_root=""), "no reader for its type"
 
 
-def test_instrument_names_are_unique():
-    names = [entry["name"] for entry in INSTRUMENTS]
-    assert len(names) == len(set(names))
+def test_names_and_folders_are_unique():
+    for values in ([i.name for i in INSTRUMENTS], [i.folder_name.casefold() for i in INSTRUMENTS],
+                   [r.name for r in READERS], [(r.type, r.model) for r in READERS]):
+        assert len(values) == len(set(values))
 
 
-def test_every_parser_is_used_by_an_instrument():
-    configured = {(entry["type"], entry["model"]) for entry in INSTRUMENTS}
-    assert sorted(set(_PARSER_REGISTRY) - configured) == []
+def test_every_type_has_an_instrument_and_every_parser_a_reader():
+    assert {r.type for r in READERS} == {i.type for i in INSTRUMENTS}
+    assert sorted(set(_PARSER_REGISTRY) - {(r.type, r.model) for r in READERS}) == []
 
 
-@pytest.mark.parametrize("instrument", INSTRUMENTS, ids=[entry["name"] for entry in INSTRUMENTS])
-def test_instrument_declares_its_data_layout(instrument):
-    from mfethuls.parsers.registry import get_parser
+def _example_files():
+    for path in sorted(DATA_DIR.rglob("*")):
+        if path.is_file() and not path.name.startswith("."):
+            yield path
 
-    assert instrument.get("data_layout") in {"file", "folder"}
-    if instrument["data_layout"] == "file":
-        # Discovery finds one-file-per-experiment data by the parser's extension.
-        assert getattr(get_parser(instrument["type"], instrument["model"]), "file_extension", None)
+
+@pytest.mark.parametrize("path", list(_example_files()), ids=lambda p: str(p.relative_to(DATA_DIR)))
+def test_each_example_file_is_recognised_by_exactly_one_reader_of_its_instrument(path):
+    """The reader matrix: two readers of one type that both claim a file are a definition bug."""
+    instrument = instrument_for_folder(path.relative_to(DATA_DIR).parts[0], data_root="")
+    recognising = [r.name for r in recognising_readers(readers_of(instrument, data_root=""), path)]
+    assert len(recognising) == 1, recognising

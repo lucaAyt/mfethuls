@@ -3,7 +3,6 @@
   "name": "ms",
   "type": "ms",
   "model": "bruker",
-  "folder_name": "MS",
   "data_layout": "file",
   "description": "Bruker DataAnalysis profile spectrum (.bsc): a title line, then 'm/z, intensity' rows without a header, then a peak table from 'MS Peak List' to 'End'. Repeated rows (the first and last points are written twice) are left out. The peak table is kept in the metadata (tables.peak_list).",
   "file": { "extensions": [".bsc"], "encoding": "auto", "delimiter": "comma", "header": { "rows": 0 },
