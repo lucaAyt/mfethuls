@@ -18,10 +18,29 @@ jobs:
 
       - uses: astral-sh/setup-uv@v5
 
-      # uv.lock is not tracked, so install from pyproject.toml into a fresh environment.
+      # Exact versions from uv.lock; fails if the lock is out of date with pyproject.toml.
+      - name: Install
+        run: uv sync --locked --python ${{ matrix.python }} --extra dev --extra viz
+
+      - name: Lint
+        run: uv run --no-sync ruff check
+
+      - name: Test
+        run: uv run --no-sync pytest -q
+
+  # Ignores uv.lock and installs the newest releases allowed by pyproject.toml,
+  # so breaking upstream releases (e.g. pandas 3) show up before users hit them.
+  latest-deps:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
       - name: Install
         run: |
-          uv venv --python ${{ matrix.python }}
+          uv venv --python 3.13
           uv pip install -e ".[dev,viz]"
 
       - name: Lint
