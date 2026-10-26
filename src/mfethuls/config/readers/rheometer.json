@@ -20,6 +20,7 @@
     { "source": ["Loss Modulus [Pa]", "G'' [Pa]"], "quantity": "loss_modulus", "unit": "Pa" },
     { "source": "Loss Factor [1]", "quantity": "tan_delta", "unit": "1" },
     { "source": ["Shear Strain [%]", "Strain [%]", "γ [%]", "gamma [%]"], "quantity": "strain", "unit": "%" },
+    { "source": ["Shear Strain [1]", "Strain [1]", "γ [1]", "gamma [1]"], "quantity": "strain", "unit": "1" },
     { "source": ["Shear Stress [Pa]", "τ [Pa]"], "quantity": "shear_stress", "unit": "Pa" },
     { "source": ["Angular Frequency [rad/s]", "ω [rad/s]", "w [rad/s]"], "quantity": "angular_frequency", "unit": "rad/s" },
     { "source": ["Shear Rate [1/s]", "γ̇ [1/s]"], "quantity": "shear_rate", "unit": "1/s" },
