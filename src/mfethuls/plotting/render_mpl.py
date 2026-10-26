@@ -110,7 +110,8 @@ def draw_panel(axis, panel: Panel, *, colorbar: bool = True) -> None:
 
     for trace in panel.traces:
         if trace.mode == "markers":
-            kwargs: dict[str, Any] = {"linestyle": "none", "marker": trace.marker, "markersize": 2}
+            # The style's marker size (lines.markersize), the same as in the legend.
+            kwargs: dict[str, Any] = {"linestyle": "none", "marker": trace.marker}
         else:
             kwargs = {"linestyle": trace.linestyle}
         if trace.label is not None:
