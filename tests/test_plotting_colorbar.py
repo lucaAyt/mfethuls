@@ -136,3 +136,35 @@ def test_outside_legend_or_colorbar_does_not_shrink_axes(outside):
     finally:
         plt.close(fig)
         plt.close(plain_fig)
+
+
+def test_outside_legends_fit_on_a_figure_without_agg_canvas(monkeypatch):
+    """The app's SVG download got a bare FigureCanvasBase, which has no get_renderer."""
+    from matplotlib.figure import Figure
+
+    import mfethuls.plotting.render_mpl as render_mpl
+
+    def bare_figure(**kwargs):
+        fig = Figure(**kwargs)
+        return fig, fig.add_subplot()
+
+    monkeypatch.setattr(render_mpl, "new_figure", bare_figure)
+    series = [_spectra_series("A"), _spectra_series("B")]
+    fig, _ = render_mpl.render(build_experiments_spec(series, mode="overlay"))
+    assert type(fig.canvas).__name__ == "FigureCanvasBase"
+    assert fig.get_figwidth() > plt.rcParams["figure.figsize"][0]
+
+
+def test_markers_are_as_large_as_in_their_legend():
+    from mfethuls.plotting.render_mpl import render
+    from mfethuls.plotting.spec import Panel, PlotSpec, Trace
+    from mfethuls.plotting.style import PUBLICATION_RC
+
+    spec = PlotSpec([Panel([Trace(np.arange(3.0), np.arange(3.0), label="G'", mode="markers")], legend=True)])
+    fig, ax = render(spec)
+    try:
+        drawn = ax.get_lines()[0].get_markersize()
+        in_legend = ax.get_legend().legend_handles[0].get_markersize()
+        assert drawn == in_legend == PUBLICATION_RC["lines.markersize"]
+    finally:
+        plt.close(fig)

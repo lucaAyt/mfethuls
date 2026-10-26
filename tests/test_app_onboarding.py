@@ -176,6 +176,37 @@ def test_progress_on_own_data_is_kept_across_restarts(new_user):
     assert _steps_done(restarted) == "5 of 5 steps done"
 
 
+def test_a_closed_ingest_section_does_not_scan_the_data_folder(new_user, monkeypatch):
+    """Counting new data scans the whole data folder (15-20 s on a synced drive): only while Ingest is open."""
+    import shutil
+
+    import pandas as pd
+
+    import mfethuls.app.register as register
+    from mfethuls.settings import save_settings
+
+    lab = new_user / "lab-data"
+    (lab / "DSC").mkdir(parents=True)
+    shutil.copyfile(examples.DATA_DIR / "DSC" / "poly1.txt", lab / "DSC" / "poly1.txt")
+    registry = new_user / "experiments.csv"
+    pd.DataFrame([{"name": "LB_dsc_001", "instrument_name": "dsc", "sample_id": "S001",
+                   "raw_data_filename": "poly1"}]).to_csv(registry, index=False)
+    save_settings(data_root=str(lab), registry_path=str(registry))
+
+    at = _app()
+    [c for c in at.checkbox if c.label == "Select all"][0].check().run()
+    _click(at, "Ingest")  # then Ingest closes and Datasets opens
+
+    scans = []
+    real = register.discover_unregistered
+    monkeypatch.setattr(register, "discover_unregistered", lambda *a, **k: scans.append(1) or real(*a, **k))
+    register.clear_registry_caches()
+    [m for m in at.multiselect if m.label == "Select experiments to plot"][0].select("LB_dsc_001").run()
+    at.run()
+    assert not at.exception, at.exception
+    assert scans == []
+
+
 def test_a_backend_serving_other_people_offers_nothing_that_changes_the_host(new_user):
     """edits_settings / offers_example False (the team server): no folder form, example or tutorial."""
     script = (

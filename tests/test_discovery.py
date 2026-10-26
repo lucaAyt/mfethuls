@@ -1,5 +1,6 @@
 """Finding raw data that the registry does not describe yet."""
 
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -362,10 +363,32 @@ def test_counting_an_unclaimed_folder_stops_at_max_count(tmp_path, monkeypatch):
     assert (folder.file_count, folder.more, folder.count_label) == (12, False, "12")
 
 
-def _tree(tmp_path):
+def _tree(tmp_path, same_age=True):
+    """The tree of everything under ``tmp_path``; files written in one go get one time, so rows are in path order."""
+    if same_age:
+        for path in tmp_path.rglob("*"):
+            if path.is_file():
+                os.utime(path, (1_700_000_000, 1_700_000_000))
     rows = tree_rows(discover_unregistered(_registry(), str(tmp_path)), _registry(), str(tmp_path))
     rows.insert(0, "include", False)
     return rows
+
+
+def test_tree_rows_are_newest_first_with_run_ids_in_file_name_order(tmp_path):
+    _aged(_touch(tmp_path / "DSC" / "aaa.txt"), 5)
+    _aged(_touch(tmp_path / "DSC" / "batch" / "b_run1.txt"), 3)
+    _aged(_touch(tmp_path / "DSC" / "batch" / "b_run2.txt"), 1)
+    _aged(_touch(tmp_path / "DSC" / "poly2.txt"), 2)
+    rows = _tree(tmp_path, same_age=False)
+
+    # The folder counts from its newest file; its files are newest first, still numbered by name.
+    assert rows[["_kind", "raw_data_filename", "run_id"]].values.tolist() == [
+        ["folder", "batch", "R001"],
+        ["run", "b_run2", "R002"],
+        ["run", "b_run1", "R001"],
+        ["file", "poly2", "R001"],
+        ["file", "aaa", "R001"],
+    ]
 
 
 def test_tree_rows_show_each_folder_followed_by_its_files(tmp_path):
@@ -375,7 +398,7 @@ def test_tree_rows_show_each_folder_followed_by_its_files(tmp_path):
     _touch(tmp_path / "DSC" / "aaa.txt")
     rows = _tree(tmp_path)
 
-    # In path order, each folder followed by its files; a DSC folder is not one experiment.
+    # Same age: in path order, each folder followed by its files; a DSC folder is not one experiment.
     assert rows[["_kind", "raw_data_filename", "run_id", "_folder", "_whole"]].values.tolist() == [
         ["file", "aaa", "R001", "DSC", False],
         ["folder", "batch", "R001", "DSC/batch", False],

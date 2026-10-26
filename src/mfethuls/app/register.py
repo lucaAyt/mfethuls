@@ -307,13 +307,18 @@ def _registry_frame(path: str, modified: float) -> pd.DataFrame:
     return Registry.load(path).frame
 
 
-@st.cache_data(show_spinner=False, ttl=60)
+# Scanning the data folder takes seconds on a synced drive: kept 10 minutes. "Scan the data folder
+# again" and opening Review & register scan at once.
+_SCAN_TTL = 600
+
+
+@st.cache_data(show_spinner=False, ttl=_SCAN_TTL)
 def _discovered(registry_path: str, data_root: str, modified: float) -> List[NewData]:
     """:func:`~mfethuls.discovery.discover_unregistered`, cached: the dialog asks on every tick."""
     return discover_unregistered(Registry.load(registry_path), data_root)
 
 
-@st.cache_data(show_spinner=False, ttl=60)
+@st.cache_data(show_spinner=False, ttl=_SCAN_TTL)
 def _count_new_data(registry_path: str, data_root: str, modified: float) -> int:
     return sum(1 for item in _discovered(registry_path, data_root, modified) if not item.issue)
 
@@ -326,7 +331,7 @@ def registry_frame(path: str) -> pd.DataFrame:
 def count_new_data(registry_path: str, data_root: str) -> int:
     """How many items under ``data_root`` the registry does not describe yet.
 
-    Cached until the registry changes, and for at most a minute, so new raw files show up.
+    Cached until the registry changes, and for at most 10 minutes, so new raw files show up.
     """
     return _count_new_data(registry_path, data_root, _modified(registry_path))
 
