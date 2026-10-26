@@ -28,7 +28,7 @@ from dateutil.tz import gettz
 
 from ..naming import file_name_problem
 from . import patterns
-from .units import QUANTITIES, conversion
+from .units import QUANTITIES, conversion, normalize_unit
 
 SPEC_VERSION = 1
 
@@ -514,7 +514,7 @@ def _parse_format(data: Dict[str, Any], type_: str, where: str,
     if not isinstance(raw_columns, list) or not raw_columns:
         problems.append(f"{where}'columns' must list at least one column")
         raw_columns = []
-    stored: Dict[str, int] = {}
+    stored: Dict[str, Tuple[int, ColumnMapping]] = {}
     for i, item in enumerate(raw_columns, start=1):
         mapping = _parse_column(item, i, type_, where, problems)
         if mapping is None:
@@ -522,8 +522,13 @@ def _parse_format(data: Dict[str, Any], type_: str, where: str,
         columns.append(mapping)
         target = mapping.column or QUANTITIES[mapping.quantity].target(type_, mapping.unit)[0]
         if target in stored:
-            problems.append(f"{where}columns {stored[target]} and {i} are both stored as {target!r}")
-        stored.setdefault(target, i)
+            first, other = stored[target]
+            # One quantity in another unit is an alternative (a file writes one of them): allowed.
+            alternative = (mapping.quantity and mapping.quantity == other.quantity
+                           and normalize_unit(mapping.unit) != normalize_unit(other.unit))
+            if not alternative:
+                problems.append(f"{where}columns {first} and {i} are both stored as {target!r}")
+        stored.setdefault(target, (i, mapping))
     return file_format, tuple(columns)
 
 
