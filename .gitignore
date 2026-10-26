@@ -192,3 +192,6 @@ cython_debug/
 # Figures saved from notebooks or the CLI into the repo root
 /*.svg
 notebooks/
+
+# Agent skills installed locally (e.g. the Streamlit skill)
+/.agents/
