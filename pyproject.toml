@@ -45,7 +45,7 @@ viz = [
     "matplotlib>=3.10.1",
     "kaleido>=1.0.0",
     "plotly>=6.0.0",
-    "streamlit>=1.36.0",
+    "streamlit>=1.66.0",  # popover wrap (labels cut short in Firefox otherwise)
 ]
 dev = [
     "pytest>=9.0.3",

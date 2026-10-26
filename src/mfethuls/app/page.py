@@ -417,7 +417,8 @@ def _plot_toolbar(*, axis_options: bool = True, layouts: bool = False, waterfall
                 label_visibility="collapsed", help="Spacing: how far apart the curves are, in multiples of the "
                                                    "tallest curve.")
     row.space("stretch")
-    downloads = row.popover("Download", icon=":material/download:",
+    # wrap: Streamlit 1.66 in Firefox cuts popover labels in a row short ("Downlo…"); a second line instead.
+    downloads = row.popover("Download", icon=":material/download:", wrap=True,
                             help="The figure as SVG or HTML, or its data as CSV.")
     return limits_col, downloads, options
 
@@ -684,7 +685,7 @@ def _plot_filter(container, data: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     column = st.session_state.get(f"{_FILTER_KEY}-column", _NO_STYLE)
     kept = st.session_state.get(f"{_FILTER_KEY}-values-{column}") if column != _NO_STYLE else None
     with container.popover(_filter_label(kept, suggested), icon=":material/filter_alt:",
-                           type="primary" if kept else "secondary", key="plot-filter-menu",
+                           type="primary" if kept else "secondary", key="plot-filter-menu", wrap=True,
                            help="Plot only the rows with some values, e.g. one DSC segment."):
         column = st.selectbox("Column", [_NO_STYLE, *columns], key=f"{_FILTER_KEY}-column",
                               format_func=_column_title)
@@ -716,7 +717,7 @@ def _normalise_menu(container) -> str | None:
     method = st.session_state.get(_NORMALISE_KEY)
     label = f"Normalised: {NORMALISE_METHODS[method].lower()}" if method else "Normalise"
     with container.popover(label, icon=":material/height:", type="primary" if method else "secondary",
-                           key="plot-normalise-menu",
+                           key="plot-normalise-menu", wrap=True,
                            help="Compare curves by their shape: scale each experiment, without changing the data."):
         method = st.radio("Scale each experiment so that", [None, *NORMALISE_METHODS], key=_NORMALISE_KEY,
                           on_change=_clear_y_limits,
