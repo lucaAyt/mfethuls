@@ -655,8 +655,9 @@ def map_columns(
 
     Returns the new frame and ``{stored column: file column}``. A mapping whose
     file column is absent is skipped (the type's required columns are checked
-    later). A file column that already has a stored name used by a mapping is
-    kept as ``"<name> (file)"``.
+    later). Mappings of one quantity in other units are alternatives: the first
+    found is stored, the others stay file columns. A file column that already has
+    a stored name used by a mapping is kept as ``"<name> (file)"``.
 
     Text in a column mapped to a quantity cannot be stored as a number and becomes
     missing; with ``not_numbers``, each such file column gets the list of those texts.
@@ -673,6 +674,8 @@ def map_columns(
             continue
         quantity = QUANTITIES[mapping.quantity]
         target, _ = quantity.target(instrument_type, mapping.unit)
+        if target in mapped:
+            continue
         values = df[source]
         if decimal == "," and values.dtype == object:
             # A column with some text rows was left as text; its numbers still use a decimal comma.

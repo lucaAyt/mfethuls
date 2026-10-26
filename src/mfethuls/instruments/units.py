@@ -98,7 +98,8 @@ QUANTITIES: Dict[str, Quantity] = _quantities(
     Quantity("frequency", "Frequency", "frequency_hz", "Hz", {"kHz": (1000.0, 0.0)}),
     Quantity("angular_frequency", "Angular frequency", "angular_frequency_rad_s", "rad/s"),
     # Relative strain (rheology, DMA) in %, or a strain written as a length (tensile testers: mm).
-    Quantity("strain", "Strain", "strain_pct", "%", {"fraction": (100.0, 0.0)},
+    # "1" is a plain ratio (Anton Paar "Strain [1]": 0.01 is 1 %).
+    Quantity("strain", "Strain", "strain_pct", "%", {"fraction": (100.0, 0.0), "1": (100.0, 0.0)},
              families=(("strain_mm", "mm", {"um": (0.001, 0.0), "cm": (10.0, 0.0), "m": (1000.0, 0.0)}),)),
     Quantity("storage_modulus", "Storage modulus", "storage_modulus_pa", "Pa", _PRESSURE,
              by_type={"dma": ("storage_modulus_mpa", "MPa")}),

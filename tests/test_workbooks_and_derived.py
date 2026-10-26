@@ -209,6 +209,8 @@ def test_strain_in_mm_and_in_percent_never_share_a_column():
     assert strain.target("dma") == ("strain_pct", "%")
     assert conversion(strain, "um") == (0.001, 0.0)  # into mm, never into %
     assert conversion(strain, "fraction") == (100.0, 0.0)
+    assert strain.target("rheometer", "1") == ("strain_pct", "%")
+    assert conversion(strain, "1") == (100.0, 0.0)  # a plain ratio: 0.01 is 1 %
 
 
 def test_shear_stress_is_mpa_for_tensile_and_pa_for_rheology():

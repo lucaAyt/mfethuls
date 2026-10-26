@@ -111,8 +111,28 @@ def test_two_columns_cannot_be_stored_under_one_name():
     with pytest.raises(DefinitionError, match="both stored as 'mass_mg'"):
         _definition(columns=[
             {"source": "a", "quantity": "mass", "unit": "mg"},
-            {"source": "b", "quantity": "mass", "unit": "g"},
+            {"source": "b", "quantity": "mass", "unit": "mg"},
         ])
+    with pytest.raises(DefinitionError, match="both stored as 'mass_mg'"):
+        _definition(columns=[
+            {"source": "a", "quantity": "mass", "unit": "mg"},
+            {"source": "b", "column": "mass_mg"},
+        ])
+
+
+def test_one_quantity_in_other_units_is_an_alternative(tmp_path):
+    """A file writes mass in mg or in g: the first found is stored, the other stays a file column."""
+    definition = _definition(columns=[
+        {"source": "m_mg", "quantity": "mass", "unit": "mg"},
+        {"source": "m_g", "quantity": "mass", "unit": "g"},
+    ])
+    path = tmp_path / "t.txt"
+    path.write_text("m_g\n0.5\n", encoding="utf-8")
+    assert _parse(definition, path).data["mass_mg"].tolist() == [500.0]
+    path.write_text("m_mg m_g\n7 0.5\n", encoding="utf-8")
+    data = _parse(definition, path).data
+    assert data["mass_mg"].tolist() == [7.0]
+    assert data["m_g"].tolist() == [0.5]  # both in the file: nothing is lost
 
 
 def test_decimal_comma_needs_another_delimiter():
@@ -599,6 +619,19 @@ def test_one_table_per_interval_labels_its_rows(tmp_path):
     text = dataset.metadata["file_text"]["CL081.csv"]
     assert text["preamble"] == ["Project:\tUV", "Test:\tCL081_sampleCL061", "Result:\tMeasurement 1"]
     assert text["blocks"] == ["Interval and data points:\t1\t2", "Interval and data points:\t2\t1"]
+
+
+def test_strain_as_a_ratio_is_stored_in_percent(tmp_path):
+    """Anton Paar may write strain as a plain ratio ('Strain [1]'): stored as strain_pct like 'Strain [%]'."""
+    path = tmp_path / "CL082.csv"
+    text = RHEO_TEXT.replace("Storage Modulus", "Strain").replace("[Pa]", "[1]")
+    for modulus, ratio in (("7831.7", "0.001"), ("8178.7", "0.01"), ("8274.5", "0.1")):
+        text = text.replace(modulus, ratio)
+    path.write_text(text, encoding="utf-8")
+    definition = parse_definition(json.loads((BUILTIN / "rheometer.json").read_text(encoding="utf8")))
+    data = _parse(definition, path).data
+    assert data["strain_pct"].tolist() == pytest.approx([0.1, 1.0, 10.0])
+    assert "Strain" not in data.columns
 
 
 def test_blocks_without_a_label_are_numbered_and_may_differ_in_columns(tmp_path):
