@@ -114,9 +114,13 @@ class LocalBackend:
     def render_status(self) -> None:
         """Anything shown at the top of the sidebar (nothing locally)."""
 
+    def registry_path(self) -> str:
+        """The registry in use ("" without one)."""
+        return get_settings().registry_path or ""
+
     def render_ingest(self) -> str:
         """The Ingest sidebar section; returns the registry path in use."""
-        registry_path = get_settings().registry_path or ""
+        registry_path = self.registry_path()
         if not is_set_up():
             st.caption("Choose your data folder first: **⚙ Settings** → Data folder and registry.")
             return registry_path

@@ -477,8 +477,11 @@ def guide_steps(datasets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     new: Optional[int] = None
     registered: List[str] = []
     try:
-        new = count_new_data(settings.registry_path, settings.data_root)
         registered = _registry_names(settings.registry_path)
+        # Counting scans the whole data folder (seconds on a synced drive): with your own data only
+        # while registering is still to do, where it words the hint.
+        if example or not (registered or _done("register")):
+            new = count_new_data(settings.registry_path, settings.data_root)
     except Exception:
         pass
     ingested = {d.get("experiment_name") for d in datasets}

@@ -79,6 +79,8 @@ class NewData:
     issue: Optional[str] = None
     # Files next to the data that no instrument here reads (plots, notes); ingest skips them.
     ignored: List[str] = field(default_factory=list)
+    # For a subfolder: when each run's files were last changed (by stem), read during the scan.
+    run_modified: Dict[str, datetime] = field(default_factory=dict)
 
     @property
     def key(self) -> str:
@@ -90,15 +92,34 @@ def _visible(name: str) -> bool:
     return not name.startswith(".") and name not in _IGNORED_NAMES and not name.lower().endswith(".parquet")
 
 
-def _modified(paths: Iterable[str]) -> datetime:
-    return datetime.fromtimestamp(max(os.path.getmtime(path) for path in paths))
+def _modified(paths: Iterable[str], mtimes: Optional[Dict[str, float]] = None) -> datetime:
+    """When the newest of ``paths`` was changed; from ``mtimes`` (read with the listing) where it has them."""
+    mtimes = mtimes or {}
+    return datetime.fromtimestamp(max(mtimes[p] if p in mtimes else os.path.getmtime(p) for p in paths))
 
 
-def _walk_files(directory: str) -> List[str]:
-    found = []
-    for root, dirs, files in os.walk(directory):
-        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
-        found.extend(os.path.join(root, f) for f in sorted(files) if _visible(f))
+def _walk_files(directory: str, mtimes: Optional[Dict[str, float]] = None) -> List[str]:
+    """Visible files under ``directory`` in ``os.walk`` order (sorted, hidden folders skipped).
+
+    One ``os.scandir`` per folder; their modification times go into ``mtimes``. On Windows the
+    listing already holds them, so no file is opened or stat'ed again (65,000 files on OneDrive
+    took 7 s that way).
+    """
+    found: List[str] = []
+    with os.scandir(directory) as listing:
+        entries = sorted(listing, key=lambda e: e.name)
+    dirs = []
+    for entry in entries:
+        if entry.is_dir():
+            # Like os.walk: a link to a folder is not followed.
+            if not entry.name.startswith(".") and not entry.is_symlink():
+                dirs.append(entry.path)
+        elif _visible(entry.name):
+            found.append(entry.path)
+            if mtimes is not None:
+                mtimes[entry.path] = entry.stat().st_mtime
+    for path in dirs:
+        found.extend(_walk_files(path, mtimes))
     return found
 
 
@@ -151,25 +172,33 @@ def _scan_instrument(instrument: Instrument, data_root: str, registered: set[str
     # Extensions any reader here reads (None: one of them reads every file).
     data = None if None in readable.values() else set().union(*readable.values())
 
+    # Every path below starts with ``folder`` and a separator: cut it off instead of os.path.relpath.
+    cut = len(os.path.join(folder, ""))
+
     def ignored(paths: Iterable[str]) -> List[str]:
         if data is None:
             return []
-        return [os.path.relpath(p, folder) for p in paths if os.path.splitext(p)[1].casefold() not in data]
+        return [p[cut:] for p in paths if os.path.splitext(p)[1].casefold() not in data]
 
     items: List[NewData] = []
-    top_files = [os.path.join(folder, f) for f in sorted(os.listdir(folder)) if os.path.isfile(os.path.join(folder, f))]
+    mtimes: Dict[str, float] = {}
+    with os.scandir(folder) as listing:
+        entries = sorted(listing, key=lambda e: e.name)
+    top_files = [e.path for e in entries if e.is_file()]
+    mtimes.update((e.path, e.stat().st_mtime) for e in entries if e.is_file())
     for stem, files in _by_stem(top_files, extensions, registered).items():
         others = ignored(f for f in top_files if os.path.splitext(os.path.basename(f))[0] == stem)
-        items.append(NewData(folder_name, "file", stem, files, _modified(files), every, suggested=instrument.name,
-                             ignored=others))
+        items.append(NewData(folder_name, "file", stem, files, _modified(files, mtimes), every,
+                             suggested=instrument.name, ignored=others))
 
-    for child in sorted(os.listdir(folder)):
-        path = os.path.join(folder, child)
-        if not os.path.isdir(path) or child.startswith(".") or stem_key(child) in registered:
+    for entry in entries:
+        child, path = entry.name, entry.path
+        if not entry.is_dir() or child.startswith(".") or stem_key(child) in registered:
             continue
-        found = _walk_files(path)
+        found = _walk_files(path, mtimes)
         others = ignored(found)
-        files = [f for f in found if os.path.relpath(f, folder) not in others]
+        skipped = set(others)
+        files = [f for f in found if f[cut:] not in skipped]
         if not files:
             continue  # no data in it, e.g. a folder of plots
         runs = _by_stem(files, extensions, registered)
@@ -179,7 +208,7 @@ def _scan_instrument(instrument: Instrument, data_root: str, registered: set[str
         if len(every_run) == 1 and list(runs) == list(every_run) and len(runs[next(iter(runs))]) == len(files):
             # A folder around a single experiment (LUB055/LUB055.txt) is just that file.
             (stem,) = runs
-            items.append(NewData(folder_name, "file", stem, runs[stem], _modified(files), every,
+            items.append(NewData(folder_name, "file", stem, runs[stem], _modified(files, mtimes), every,
                                  suggested=instrument.name, ignored=others))
             continue
         items.append(
@@ -188,7 +217,7 @@ def _scan_instrument(instrument: Instrument, data_root: str, registered: set[str
                 "folder",
                 child,
                 files,
-                _modified(files),
+                _modified(files, mtimes),
                 every,
                 suggested=instrument.name,
                 runs=runs,
@@ -196,6 +225,7 @@ def _scan_instrument(instrument: Instrument, data_root: str, registered: set[str
                 # Folders of single-file instruments are usually runs; series instruments keep them whole.
                 split_by_default=bool(runs) and not folder_layout,
                 ignored=others,
+                run_modified={stem: _modified(paths, mtimes) for stem, paths in runs.items()},
             )
         )
 
@@ -290,7 +320,8 @@ def proposed_rows(
             runs = [(stem, files) for stem, files in item.runs.items() if stem not in item.run_issues]
             for number, (stem, files) in enumerate(runs, start=1):
                 raw = os.path.basename(files[0]) if stem == item.raw_data_filename else stem
-                rows.append(row(raw, item.suggested_for_runs, f"R{number:03d}", item.key, _modified(files), stem))
+                modified = item.run_modified.get(stem) or _modified(files)
+                rows.append(row(raw, item.suggested_for_runs, f"R{number:03d}", item.key, modified, stem))
         else:
             folder = item.key if item.layout == "folder" else item.folder_name
             rows.append(row(item.raw_data_filename, item.suggested, "R001", folder, item.modified))
@@ -307,7 +338,7 @@ def tree_rows(items: Iterable[NewData], registry: Registry, data_root: str) -> p
 
     Each file experiment is a row; each subfolder is a row followed by a row per file in it,
     which registers that file as its own experiment (run R001, R002, ... in file-name order).
-    Rows are ordered by path.
+    Newest first: items by when they last changed (then by path), a subfolder's files too.
 
     Columns are those of :func:`proposed_rows` plus ``_kind`` (``"file"``, ``"folder"`` or
     ``"run"``), ``_data``, the path shown, ``_open``: whether a subfolder's files are shown (False
@@ -319,6 +350,7 @@ def tree_rows(items: Iterable[NewData], registry: Registry, data_root: str) -> p
     """
 
     items = sorted((item for item in items if not item.issue), key=lambda item: item.key.casefold())
+    items.sort(key=lambda item: item.modified, reverse=True)  # stable: same time stays in path order
     whole = proposed_rows(items, registry, split=set())
     folders = [item for item in items if item.layout == "folder"]
     per_file = proposed_rows(folders, registry, split={item.key for item in folders})
@@ -336,8 +368,9 @@ def tree_rows(items: Iterable[NewData], registry: Registry, data_root: str) -> p
         if runs:
             base = os.path.join(data_root, item.folder_name, item.raw_data_filename)
             labels = [f"\u2003\u2003└ {_files_label(files, base)}" for files in runs]
-            parts.append(per_file[per_file["_folder"] == item.key].assign(_kind="run", _data=labels, _whole=False,
-                                                                           _open=None))
+            files = per_file[per_file["_folder"] == item.key].assign(_kind="run", _data=labels, _whole=False,
+                                                                     _open=None)
+            parts.append(files.sort_values("_modified", ascending=False, kind="stable"))
     columns = list(whole.columns) + ["_kind", "_data", "_whole", "_open"]
     if not parts:
         return pd.DataFrame(columns=columns)

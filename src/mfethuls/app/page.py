@@ -1240,9 +1240,14 @@ def run(app_backend) -> None:
         st.session_state[_INGEST_KEY] = False
         st.session_state[_DATASETS_KEY] = True
     # Open while nothing is ingested yet: that is where a new user goes next.
-    with st.sidebar.expander(":material/input: **Ingest**", expanded=not datasets, key=_INGEST_KEY,
-                             on_change="rerun"):
-        registry_path = backend.render_ingest()
+    ingest = st.sidebar.expander(":material/input: **Ingest**", expanded=not datasets, key=_INGEST_KEY,
+                                 on_change="rerun")
+    # Drawn only while open: its count of new data scans the whole data folder (seconds on a synced drive).
+    if ingest.open:
+        with ingest:
+            registry_path = backend.render_ingest()
+    else:
+        registry_path = backend.registry_path()
 
     with settings_row:
         st.header("mfethuls", anchor=False)  # no link icon on hover
