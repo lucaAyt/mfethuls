@@ -169,8 +169,8 @@ def _add_colorbars_keeping_axes_width(fig, data_axes, panels) -> None:
     # Make room for the widest legend first: a legend of several columns can be wider than
     # the axes, and constrained layout gives up (axes collapse) instead of narrowing them.
     if legends:
-        renderer = fig.canvas.get_renderer()
-        widest = max(legend.get_window_extent(renderer).width for legend in legends) / fig.dpi
+        # No renderer passed: the figure finds one whatever its canvas (only Agg has get_renderer).
+        widest = max(legend.get_window_extent().width for legend in legends) / fig.dpi
         fig.set_figwidth(fig.get_figwidth() + widest)
 
     for axis, panel in zip(data_axes, panels):
