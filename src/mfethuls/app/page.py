@@ -1101,7 +1101,7 @@ def _explore(data: pd.DataFrame, datasets: list, selected_names: list) -> None:
 
                     several = plot_type in {"line", "scatter"} and data["_experiment"].nunique() > 1
                     limits_col, downloads, axis = _plot_toolbar(layouts=several,
-                                                                waterfall=plot_type == "line" and _numeric_colour(data, color))
+                                                                waterfall=plot_type == "line" and _numeric_colour(long_df, color))
                     use_log_x, use_log_y, invert_x = axis["log_x"], axis["log_y"], axis["invert_x"]
                     if plot_type in {"line", "scatter"}:
                         # WebGL (Plotly) on screen, thinned above MAX_POINTS (plotting.thin); Matplotlib for the SVG.
