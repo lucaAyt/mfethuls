@@ -307,8 +307,8 @@ def _registry_frame(path: str, modified: float) -> pd.DataFrame:
     return Registry.load(path).frame
 
 
-# Scanning the data folder takes seconds on a synced drive: kept 10 minutes. "Scan the data folder
-# again" and opening Review & register scan at once.
+# Scanning the data folder takes seconds on a synced drive: kept 10 minutes. Opening Ingest, "Scan
+# the data folder again" and opening Review & register scan at once.
 _SCAN_TTL = 600
 
 
@@ -334,6 +334,13 @@ def count_new_data(registry_path: str, data_root: str) -> int:
     Cached until the registry changes, and for at most 10 minutes, so new raw files show up.
     """
     return _count_new_data(registry_path, data_root, _modified(registry_path))
+
+
+def clear_scan_caches() -> None:
+    """Forget what the data folder held, so the next look scans it again."""
+    _discovered.clear()
+    _count_new_data.clear()
+    unclaimed.clear()
 
 
 def clear_registry_caches() -> None:
@@ -373,9 +380,7 @@ def new_data_prompt(backend, registry_path: str) -> None:
         )
     if st.button("Scan the data folder again", icon=":material/refresh:", type="tertiary", width="stretch",
                  help="Look for raw files added since the app started"):
-        _discovered.clear()
-        _count_new_data.clear()
-        unclaimed.clear()
+        clear_scan_caches()
         st.rerun()
 
 

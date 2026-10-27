@@ -98,26 +98,45 @@ def _modified(paths: Iterable[str], mtimes: Optional[Dict[str, float]] = None) -
     return datetime.fromtimestamp(max(mtimes[p] if p in mtimes else os.path.getmtime(p) for p in paths))
 
 
+def _entries(directory: str) -> list:
+    """``os.scandir(directory)`` sorted by name; empty when the folder cannot be read (as ``os.walk``)."""
+    try:
+        with os.scandir(directory) as listing:
+            return sorted(listing, key=lambda e: e.name)
+    except OSError:
+        return []
+
+
+def _mtime(entry) -> Optional[float]:
+    """When ``entry`` was changed; None for a broken link or a file deleted during the scan."""
+    try:
+        return entry.stat().st_mtime
+    except OSError:
+        return None
+
+
 def _walk_files(directory: str, mtimes: Optional[Dict[str, float]] = None) -> List[str]:
     """Visible files under ``directory`` in ``os.walk`` order (sorted, hidden folders skipped).
 
     One ``os.scandir`` per folder; their modification times go into ``mtimes``. On Windows the
     listing already holds them, so no file is opened or stat'ed again (65,000 files on OneDrive
-    took 7 s that way).
+    took 7 s that way). Like ``os.walk``, a folder that cannot be read is skipped, and so is a
+    file that cannot be stat'ed (a broken link, or one deleted during the scan).
     """
     found: List[str] = []
-    with os.scandir(directory) as listing:
-        entries = sorted(listing, key=lambda e: e.name)
     dirs = []
-    for entry in entries:
+    for entry in _entries(directory):
         if entry.is_dir():
             # Like os.walk: a link to a folder is not followed.
             if not entry.name.startswith(".") and not entry.is_symlink():
                 dirs.append(entry.path)
         elif _visible(entry.name):
-            found.append(entry.path)
             if mtimes is not None:
-                mtimes[entry.path] = entry.stat().st_mtime
+                mtime = _mtime(entry)
+                if mtime is None:
+                    continue
+                mtimes[entry.path] = mtime
+            found.append(entry.path)
     for path in dirs:
         found.extend(_walk_files(path, mtimes))
     return found
@@ -182,10 +201,12 @@ def _scan_instrument(instrument: Instrument, data_root: str, registered: set[str
 
     items: List[NewData] = []
     mtimes: Dict[str, float] = {}
-    with os.scandir(folder) as listing:
-        entries = sorted(listing, key=lambda e: e.name)
-    top_files = [e.path for e in entries if e.is_file()]
-    mtimes.update((e.path, e.stat().st_mtime) for e in entries if e.is_file())
+    entries = _entries(folder)
+    for entry in entries:
+        mtime = _mtime(entry) if entry.is_file() else None
+        if mtime is not None:
+            mtimes[entry.path] = mtime
+    top_files = [e.path for e in entries if e.path in mtimes]
     for stem, files in _by_stem(top_files, extensions, registered).items():
         others = ignored(f for f in top_files if os.path.splitext(os.path.basename(f))[0] == stem)
         items.append(NewData(folder_name, "file", stem, files, _modified(files, mtimes), every,

@@ -122,6 +122,64 @@ def test_ignores_hidden_parquet_manifest_and_other_extensions(tmp_path):
     assert _items(tmp_path) == {}
 
 
+def test_a_folder_that_cannot_be_read_is_skipped(tmp_path, monkeypatch):
+    _touch(tmp_path / "DSC" / "poly1.txt")
+    _touch(tmp_path / "DSC" / "locked" / "poly2.txt")
+    scandir = os.scandir
+
+    def refuse_locked(path):
+        if os.path.basename(path) == "locked":
+            raise PermissionError(path)
+        return scandir(path)
+
+    monkeypatch.setattr(os, "scandir", refuse_locked)
+
+    # Like os.walk: the rest of the data folder is still scanned.
+    assert set(_items(tmp_path)) == {"DSC/poly1"}
+
+
+def test_a_file_that_cannot_be_stated_is_skipped(tmp_path, monkeypatch):
+    _touch(tmp_path / "DSC" / "poly1.txt")
+    _touch(tmp_path / "DSC" / "gone.txt")
+    _touch(tmp_path / "DSC" / "runs" / "gone.txt")
+    _touch(tmp_path / "DSC" / "runs" / "poly3.txt")
+    scandir = os.scandir
+
+    class Gone:
+        """A directory entry whose file was deleted during the scan (or a broken link)."""
+
+        def __init__(self, entry):
+            self._entry = entry
+            self.name, self.path = entry.name, entry.path
+
+        def is_dir(self):
+            return self._entry.is_dir()
+
+        def is_file(self):
+            return self._entry.is_file()
+
+        def is_symlink(self):
+            return self._entry.is_symlink()
+
+        def stat(self):
+            raise FileNotFoundError(self.path)
+
+    class Listing:
+        def __init__(self, path):
+            self._listing = scandir(path)
+
+        def __enter__(self):
+            return [Gone(e) if e.name == "gone.txt" else e for e in self._listing.__enter__()]
+
+        def __exit__(self, *exc):
+            return self._listing.__exit__(*exc)
+
+    monkeypatch.setattr(os, "scandir", Listing)
+
+    # At the top of the instrument folder and in a subfolder alike (left with one file: proposed as it).
+    assert set(_items(tmp_path)) == {"DSC/poly1", "DSC/poly3"}
+
+
 def test_same_name_in_two_folders_cannot_be_registered_per_file(tmp_path):
     _touch(tmp_path / "DSC" / "2025" / "poly1.txt")
     _touch(tmp_path / "DSC" / "2025" / "poly3.txt")

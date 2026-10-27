@@ -24,6 +24,7 @@ from plotly.colors import convert_colors_to_same_type
 
 from mfethuls.app.appearance import ACCENTS, apply_appearance, apply_style, save_accent, saved_accent
 from mfethuls.app.instruments import open_requested_dialog, render_instruments_section
+from mfethuls.app.register import clear_scan_caches
 from mfethuls.app.welcome import (
     ensure_registry,
     example_folder,
@@ -376,6 +377,7 @@ def _builtin_datasets(data: pd.DataFrame, datasets_meta: dict) -> list[Dataset]:
 
 # The sidebar's sections; INGESTED (set after an ingest) closes Ingest and opens Datasets.
 _INGEST_KEY = "sidebar_ingest"
+_INGEST_WAS_OPEN = "sidebar_ingest_was_open"
 _DATASETS_KEY = "sidebar_datasets"
 INGESTED = "just_ingested"
 
@@ -1243,6 +1245,10 @@ def run(app_backend) -> None:
     ingest = st.sidebar.expander(":material/input: **Ingest**", expanded=not datasets, key=_INGEST_KEY,
                                  on_change="rerun")
     # Drawn only while open: its count of new data scans the whole data folder (seconds on a synced drive).
+    # Each time it is opened, that scan is done again, so files copied in since show up.
+    if ingest.open and not st.session_state.get(_INGEST_WAS_OPEN):
+        clear_scan_caches()
+    st.session_state[_INGEST_WAS_OPEN] = ingest.open
     if ingest.open:
         with ingest:
             registry_path = backend.render_ingest()

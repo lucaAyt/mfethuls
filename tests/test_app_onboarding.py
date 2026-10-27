@@ -206,6 +206,17 @@ def test_a_closed_ingest_section_does_not_scan_the_data_folder(new_user, monkeyp
     assert not at.exception, at.exception
     assert scans == []
 
+    # Each opening scans again, even within the cache's 10 minutes, so files copied in since show up;
+    # reruns while it stays open do not.
+    for opened in (1, 2):
+        at.session_state["sidebar_ingest"] = True
+        at.run()
+        at.run()
+        assert not at.exception, at.exception
+        assert scans == [1] * opened
+        at.session_state["sidebar_ingest"] = False
+        at.run()
+
 
 def test_a_backend_serving_other_people_offers_nothing_that_changes_the_host(new_user):
     """edits_settings / offers_example False (the team server): no folder form, example or tutorial."""
