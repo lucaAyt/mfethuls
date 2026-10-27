@@ -1,7 +1,7 @@
 """Draw a :class:`PlotSpec` with Plotly (interactive, WebGL).
 
 Lines use ``Scattergl`` so hundreds of thousands of points stay responsive without
-downsampling. Plotly's own SVG export rasterizes WebGL traces; for a vector SVG,
+downsampling; on a reversed x axis they use ``Scatter`` (SVG) instead, see :func:`_add_panel_traces`. Plotly's own SVG export rasterizes WebGL traces; for a vector SVG,
 render the same spec with the Matplotlib backend.
 """
 
@@ -94,6 +94,9 @@ def _add_panel_traces(fig, panel: Panel, *, row: Optional[int], shown: Optional[
     import plotly.graph_objects as go
 
     position = {"row": row, "col": 1} if row is not None else {}
+    # The plotly.js inside Streamlit (1.66) draws WebGL lines on a reversed x axis squeezed against
+    # its edge, so those panels are drawn in SVG (the app thins them more, see SVG_MAX_POINTS).
+    scatter = go.Scatter if panel.x_reversed else go.Scattergl
 
     for trace in panel.traces:
         color = panel.trace_color(trace)
@@ -104,7 +107,7 @@ def _add_panel_traces(fig, panel: Panel, *, row: Optional[int], shown: Optional[
             in_legend = group not in shown
             shown.add(group)
         fig.add_trace(
-            go.Scattergl(
+            scatter(
                 x=trace.x,
                 y=trace.y,
                 mode=trace.mode,

@@ -56,7 +56,14 @@ from mfethuls.plotting.normalise import (
     window_text,
 )
 from mfethuls.plotting.spec import LINESTYLES, MARKERS, Colorbar, Legend, LegendEntry, Panel, Trace
-from mfethuls.plotting.thin import MAX_SERIES_LINES, spread_values, thin_spec, thinned_note
+from mfethuls.plotting.thin import (
+    MAX_POINTS,
+    MAX_SERIES_LINES,
+    SVG_MAX_POINTS,
+    spread_values,
+    thin_spec,
+    thinned_note,
+)
 from mfethuls.reconcile import LABELS as _RECONCILE_LABELS
 from mfethuls.schema_normalization import add_elapsed_time
 
@@ -617,9 +624,11 @@ def _heatmap_plot(data: pd.DataFrame, x_col: str, y_cols: list[str], numeric_col
 
 
 def _screen_figure(spec: PlotSpec):
-    """The Plotly figure of ``spec`` for the page: thinned above MAX_POINTS points, with a caption
-    saying so (the downloads draw ``spec`` itself, every point)."""
-    shown, kept, total = thin_spec(spec)
+    """The Plotly figure of ``spec`` for the page: thinned above MAX_POINTS points (SVG_MAX_POINTS
+    with a reversed x axis, drawn in SVG), with a caption saying so (the downloads draw ``spec``
+    itself, every point)."""
+    svg = any(panel.x_reversed for panel in spec.panels)
+    shown, kept, total = thin_spec(spec, SVG_MAX_POINTS if svg else MAX_POINTS)
     if kept < total:
         st.caption(f":material/info: {thinned_note(kept, total)}")
     return render(shown, backend="plotly")
