@@ -24,7 +24,7 @@ from .spec import PlotSpec
 
 # A figure with more points than this is thinned for the screen.
 MAX_POINTS = 300_000
-# The same for a figure drawn in SVG (a reversed x axis, see render_plotly), which slows down sooner.
+# The same for a figure with lines drawn in SVG (a reversed x axis, see render_plotly.svg_line), slower.
 SVG_MAX_POINTS = 50_000
 # A series with more lines than this (spectra over time) shows this many, spread over its values.
 MAX_SERIES_LINES = 100

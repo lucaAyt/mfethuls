@@ -52,7 +52,7 @@ def _dsc(name):
     )
 
 
-def test_a_reversed_x_axis_is_drawn_in_svg():
+def test_lines_on_a_reversed_x_axis_are_drawn_in_svg():
     # Streamlit's plotly.js squeezes WebGL lines on a reversed x axis against its edge.
     fig = plot_ftir(
         Dataset(pd.DataFrame({"wavenumber_cm_inv": [500, 1000], "absorbance_a_u": [0.2, 0.5]}),
@@ -62,6 +62,16 @@ def test_a_reversed_x_axis_is_drawn_in_svg():
 
     assert fig.layout.xaxis.autorange == "reversed"
     assert [type(trace) for trace in fig.data] == [go.Scatter]
+
+
+def test_points_on_a_reversed_x_axis_stay_in_webgl():
+    from mfethuls.plotting.backend import render
+    from mfethuls.plotting.spec import Panel, PlotSpec, Trace
+
+    panel = Panel(traces=[Trace([1, 2], [3, 4], mode="markers"), Trace([1, 2], [4, 5])], x_reversed=True)
+    fig = render(PlotSpec([panel]), backend="plotly")
+
+    assert [type(trace) for trace in fig.data] == [go.Scattergl, go.Scatter]
 
 
 def test_plotly_backend_returns_webgl_figure():

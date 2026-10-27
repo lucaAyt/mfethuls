@@ -49,15 +49,20 @@ def test_a_figure_is_thinned_only_above_the_limit():
     assert len(spec.panel.traces[0].x) == 600_000  # the original (used for the SVG) is untouched
 
 
-def test_the_screen_shows_fewer_points_on_a_reversed_x_axis_drawn_in_svg():
+def test_the_screen_shows_fewer_points_when_lines_are_drawn_in_svg():
     pytest.importorskip("streamlit")
     from mfethuls.app.page import _screen_figure
     from mfethuls.plotting.thin import SVG_MAX_POINTS
 
     x = np.arange(200_000, dtype=float)
-    for reversed_, limit in ((False, 200_000), (True, SVG_MAX_POINTS)):
-        fig = _screen_figure(PlotSpec([Panel(traces=[Trace(x, np.sin(x / 1000))], x_reversed=reversed_)]))
-        assert len(fig.data[0].x) <= limit + 1
+
+    def shown(reversed_: bool, mode: str) -> int:
+        trace = Trace(x, np.sin(x / 1000), mode=mode)
+        return len(_screen_figure(PlotSpec([Panel(traces=[trace], x_reversed=reversed_)])).data[0].x)
+
+    assert shown(False, "lines") == 200_000
+    assert shown(True, "lines") <= SVG_MAX_POINTS + 1
+    assert shown(True, "markers") == 200_000  # points stay in WebGL, within MAX_POINTS
 
 
 def test_the_built_in_plot_of_a_long_series_shows_a_spread_of_its_spectra():

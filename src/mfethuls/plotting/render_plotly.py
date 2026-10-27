@@ -1,7 +1,7 @@
 """Draw a :class:`PlotSpec` with Plotly (interactive, WebGL).
 
 Lines use ``Scattergl`` so hundreds of thousands of points stay responsive without
-downsampling; on a reversed x axis they use ``Scatter`` (SVG) instead, see :func:`_add_panel_traces`. Plotly's own SVG export rasterizes WebGL traces; for a vector SVG,
+downsampling; on a reversed x axis lines use ``Scatter`` (SVG) instead, see :func:`_add_panel_traces`. Plotly's own SVG export rasterizes WebGL traces; for a vector SVG,
 render the same spec with the Matplotlib backend.
 """
 
@@ -13,7 +13,7 @@ from typing import Any, Optional
 from matplotlib.colors import to_hex
 
 from .labels import mathtext_to_html as _text
-from .spec import Colorbar, Panel, PlotSpec
+from .spec import Colorbar, Panel, PlotSpec, Trace
 
 
 FACET_PANEL_HEIGHT_PX = 280
@@ -85,6 +85,16 @@ def _add_colorbar(fig, colorbar: Colorbar, *, row: Optional[int]) -> None:
     )
 
 
+def svg_line(panel: Panel, trace: Trace) -> bool:
+    """Whether ``trace`` of ``panel`` is drawn in SVG: a line on a reversed x axis."""
+    return panel.x_reversed and trace.mode != "markers"
+
+
+def svg_lines(spec: PlotSpec) -> bool:
+    """Whether any line of ``spec`` is drawn in SVG (see :func:`svg_line`)."""
+    return any(svg_line(panel, trace) for panel in spec.panels for trace in panel.traces)
+
+
 def _add_panel_traces(fig, panel: Panel, *, row: Optional[int], shown: Optional[set] = None) -> None:
     """Add ``panel``'s traces (to subplot ``row`` of a facet).
 
@@ -94,9 +104,6 @@ def _add_panel_traces(fig, panel: Panel, *, row: Optional[int], shown: Optional[
     import plotly.graph_objects as go
 
     position = {"row": row, "col": 1} if row is not None else {}
-    # The plotly.js inside Streamlit (1.66) draws WebGL lines on a reversed x axis squeezed against
-    # its edge, so those panels are drawn in SVG (the app thins them more, see SVG_MAX_POINTS).
-    scatter = go.Scatter if panel.x_reversed else go.Scattergl
 
     for trace in panel.traces:
         color = panel.trace_color(trace)
@@ -106,8 +113,10 @@ def _add_panel_traces(fig, panel: Panel, *, row: Optional[int], shown: Optional[
             group = group or f"label:{trace.label}"
             in_legend = group not in shown
             shown.add(group)
+        # The plotly.js inside Streamlit (1.66) draws WebGL lines (not points) on a reversed x axis
+        # squeezed against its edge, so those are drawn in SVG (the app thins them more, see svg_lines).
         fig.add_trace(
-            scatter(
+            (go.Scatter if svg_line(panel, trace) else go.Scattergl)(
                 x=trace.x,
                 y=trace.y,
                 mode=trace.mode,

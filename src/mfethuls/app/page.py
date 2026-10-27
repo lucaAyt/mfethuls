@@ -55,6 +55,7 @@ from mfethuls.plotting.normalise import (
     normalised_label,
     window_text,
 )
+from mfethuls.plotting.render_plotly import svg_lines
 from mfethuls.plotting.spec import LINESTYLES, MARKERS, Colorbar, Legend, LegendEntry, Panel, Trace
 from mfethuls.plotting.thin import (
     MAX_POINTS,
@@ -625,10 +626,9 @@ def _heatmap_plot(data: pd.DataFrame, x_col: str, y_cols: list[str], numeric_col
 
 def _screen_figure(spec: PlotSpec):
     """The Plotly figure of ``spec`` for the page: thinned above MAX_POINTS points (SVG_MAX_POINTS
-    with a reversed x axis, drawn in SVG), with a caption saying so (the downloads draw ``spec``
-    itself, every point)."""
-    svg = any(panel.x_reversed for panel in spec.panels)
-    shown, kept, total = thin_spec(spec, SVG_MAX_POINTS if svg else MAX_POINTS)
+    when lines are drawn in SVG, on a reversed x axis), with a caption saying so (the downloads
+    draw ``spec`` itself, every point)."""
+    shown, kept, total = thin_spec(spec, SVG_MAX_POINTS if svg_lines(spec) else MAX_POINTS)
     if kept < total:
         st.caption(f":material/info: {thinned_note(kept, total)}")
     return render(shown, backend="plotly")
