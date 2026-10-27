@@ -4,10 +4,14 @@ A Bruker dataset folder holds one folder per experiment number, each with its
 processed spectra: ``EXP014/1/pdata/1/1r``. Every processed spectrum (a ``pdata``
 folder with a ``1r`` file) is read once; ``source_file`` names it by its place in
 the dataset (``1/pdata/1``), so several experiment numbers (e.g. 1H and 13C) stay
-apart. Each row also gets the spectrum's ``nucleus`` (``1H``, ``13C``, ...; from
-``acqus.NUC1``, else ``procs.AXNUC``) and ``solvent`` (``acqus.SOLVENT``). All the
-acquisition and processing parameters (``acqus``, ``procs``) and the spectrum's
-``title`` are kept in the dataset's metadata (``file_text``).
+apart. An experiment folder may hold several datasets (a series: ``LUB437_000/10``,
+``LUB437_005/10``, ...); their spectra are then named from that folder on
+(``LUB437_000/10/pdata/1``). Each row also gets the spectrum's ``dataset`` (its
+dataset folder's name), ``nucleus`` (``1H``, ``13C``, ...; from ``acqus.NUC1``, else
+``procs.AXNUC``), ``solvent`` (``acqus.SOLVENT``) and ``timestamp`` (when it was
+acquired, ``acqus.DATE``; mfethuls adds ``time_s`` from it). All the acquisition and
+processing parameters (``acqus``, ``procs``) and the spectrum's ``title`` are kept in
+the dataset's metadata (``file_text``).
 """
 
 import logging
@@ -38,7 +42,7 @@ def _parameter_lines(dic: dict) -> List[str]:
 @register_parser('nmr', 'bruker_nmr')
 class BrukerNMRParser:
     # Raised whenever the reading changes, so data read by an older version is read again.
-    version = 4
+    version = 5
 
     def parse(self, dict_paths, *, instrument_model: Optional[str] = None, **context):
         """Parse Bruker NMR data: every processed spectrum among the given files, once each.
@@ -52,13 +56,17 @@ class BrukerNMRParser:
         if not folders:
             folders = sorted({p if os.path.isdir(p) else os.path.dirname(p) for p in paths}, key=natural_key)
 
+        # Spectra of several datasets are named from the folder holding the datasets on.
+        datasets = {_dataset_folder(folder) for folder in folders} - {None}
+        base = os.path.commonpath(sorted(datasets)) if len(datasets) > 1 else None
+
         frames = []
         file_text: dict = {}
         problems: List[str] = []
         for folder in folders:
             parsed = self.parse_raw_data(folder, problems=problems)
             if not parsed.empty:
-                label = _spectrum_label(folder)
+                label = _spectrum_label(folder, base)
                 parsed["source_file"] = label
                 text = parsed.attrs.pop(FILE_TEXT_ATTR, None)
                 if text:
@@ -123,13 +131,16 @@ class BrukerNMRParser:
         if ppm.shape[0] != intensity.shape[0]:
             return failed(f"{ppm.shape[0]} chemical shifts for {intensity.shape[0]} intensities")
 
+        dataset = _dataset_folder(path)
         df = pd.DataFrame(
             {
                 "chemical_shift_ppm": ppm,
                 "intensity_a_u": intensity,
                 "source_file": os.path.basename(os.path.normpath(path)),
+                "dataset": os.path.basename(dataset) if dataset else None,
                 "nucleus": _parameter(dic, ("acqus", "NUC1"), ("procs", "AXNUC")),
                 "solvent": _parameter(dic, ("acqus", "SOLVENT")),
+                "timestamp": _acquired(dic),
             }
         )
         return keep_text(df, parameters=_parameter_lines(dic), title=_title_lines(path))
@@ -144,8 +155,25 @@ def _parameter(dic: dict, *keys) -> Optional[str]:
     return None
 
 
-def _spectrum_label(folder: str) -> str:
-    """``1/pdata/1`` for ``.../EXP014/1/pdata/1``; the folder's name otherwise."""
+def _acquired(dic: dict) -> Optional[pd.Timestamp]:
+    """When the spectrum was acquired (``acqus.DATE``, seconds since 1970, UTC); None if unknown."""
+    seconds = pd.to_numeric((dic.get("acqus") or {}).get("DATE"), errors="coerce")
+    return pd.Timestamp(seconds, unit="s", tz="UTC") if pd.notna(seconds) and seconds > 0 else None
+
+
+def _dataset_folder(folder: str) -> Optional[str]:
+    """``.../EXP014`` for the spectrum ``.../EXP014/1/pdata/1``; None for other folders."""
+    parts = os.path.normpath(folder).split(os.sep)
+    if len(parts) >= 4 and parts[-2] == "pdata":
+        return os.sep.join(parts[:-3])
+    return None
+
+
+def _spectrum_label(folder: str, base: Optional[str] = None) -> str:
+    """``1/pdata/1`` for ``.../EXP014/1/pdata/1``, or from ``base`` on (``EXP014/1/pdata/1``);
+    the folder's name otherwise."""
+    if base and _dataset_folder(folder):
+        return os.path.relpath(folder, base).replace(os.sep, "/")
     parts = os.path.normpath(folder).split(os.sep)
     if len(parts) >= 3 and parts[-2] == "pdata":
         return "/".join(parts[-3:])

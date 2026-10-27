@@ -205,6 +205,32 @@ def test_nmr_reads_each_processed_spectrum_once(tmp_path, monkeypatch):
     assert data["source_file"].tolist() == ["1/pdata/1"] * 2 + ["2/pdata/1"] * 2
 
 
+def test_nmr_series_of_datasets_keeps_each_spectrum_apart(tmp_path, monkeypatch):
+    """A folder of datasets with the same experiment number (a series, FigureS4/LUB437_000/10, ...)
+    names each spectrum from its dataset folder on."""
+    files = []
+    for relative in ["S4/A_000/10/pdata/1/1r", "S4/A_005/10/pdata/1/1r"]:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x", encoding="utf-8")
+        files.append(str(path))
+    parser = get_parser("nmr", "bruker_nmr")
+    monkeypatch.setattr(parser, "parse_raw_data", lambda folder, **_: pd.DataFrame(
+        {"chemical_shift_ppm": [2.0], "intensity_a_u": [5.0]}))
+    data = parser.parse({"S4": files}, experiment_id="e", instrument_type="nmr").data
+    assert data["source_file"].tolist() == ["A_000/10/pdata/1", "A_005/10/pdata/1"]
+
+
+def test_nmr_dataset_and_acquisition_time():
+    from mfethuls.parsers.nmr import _acquired, _dataset_folder
+
+    spectrum = os.path.join("data", "S4", "LUB437_000", "10", "pdata", "1")
+    assert _dataset_folder(spectrum) == os.path.join("data", "S4", "LUB437_000")
+    assert _dataset_folder(os.path.join("data", "S4")) is None
+    assert _acquired({"acqus": {"DATE": 1769422054}}) == pd.Timestamp("2026-01-26 10:07:34", tz="UTC")
+    assert _acquired({"acqus": {}}) is None
+
+
 def test_nmr_keeps_the_spectrum_title(tmp_path):
     from mfethuls.parsers.nmr import _spectrum_label, _title_lines
 

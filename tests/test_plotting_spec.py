@@ -207,6 +207,25 @@ def _nmr(name, nuclei):
     return Dataset(data=pd.DataFrame(rows), metadata={"instrument_type": "nmr", "experiment_name": name})
 
 
+def test_nmr_draws_each_spectrum_as_its_own_line():
+    """Spectra never share chemical shifts, so they are told apart by name, not by repeated x values."""
+    from mfethuls.plotting.nmr import spectrum_column
+
+    def series(datasets, labels, times=None):
+        rows = [{"chemical_shift_ppm": 1.0 + i / 10, "intensity_a_u": 1.0, "dataset": d, "source_file": f,
+                 **({"time_s": times[i]} if times else {})} for i, (d, f) in enumerate(zip(datasets, labels))]
+        return pd.DataFrame(rows)
+
+    s4 = series(["A_000", "A_005"], ["A_000/10/pdata/1", "A_005/10/pdata/1"])
+    assert spectrum_column(s4) == "dataset"
+    assert [t.label for t in build_dataset_spec(Dataset(s4, metadata={}), kind="nmr").panel.traces] == ["A_000", "A_005"]
+    dosy = series(["P", "P_DOSY", "P_DOSY"], ["P/1/pdata/1", "P_DOSY/1/pdata/111", "P_DOSY/1/pdata/112"])
+    assert spectrum_column(dosy) == "source_file"
+    many = series([f"A_{i}" for i in range(25)], [f"A_{i}/10/pdata/1" for i in range(25)], times=list(range(25)))
+    assert spectrum_column(many) == "time_s"  # a long series: a colour scale
+    assert spectrum_column(s4.iloc[:1]) is None
+
+
 def test_nmr_gets_one_panel_per_nucleus_named_on_its_axis():
     from mfethuls.plotting.nmr import build_nmr_spec
 

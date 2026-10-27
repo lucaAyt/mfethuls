@@ -78,7 +78,7 @@ def test_stored_columns_match_the_type_schemas():
     from mfethuls.schema_normalization import _load_instrument_schema
 
     stored = {q.target(t)[0] for q in QUANTITIES.values() for t in ("dma", "other")}
-    not_quantities = {"detector_name", "nucleus", "solvent"}
+    not_quantities = {"dataset", "detector_name", "nucleus", "solvent"}
     for type_ in ("dma", "dsc", "fluorescence", "ftir", "ms", "nmr", "rheometer", "saxs", "sec", "tga", "uv_vis"):
         declared = set(_load_instrument_schema(type_).get("dtypes", {})) - not_quantities
         assert declared <= stored, (type_, sorted(declared - stored))

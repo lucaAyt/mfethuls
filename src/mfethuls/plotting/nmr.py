@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from typing import List, Optional, Tuple
 
+import pandas as pd
+
 from ..dataset import Dataset
 from .backend import Backend, render
 from .core import _default_title, _require_columns, _single_signal_spec
@@ -50,6 +52,26 @@ def nucleus_axis_label(nucleus: Optional[str]) -> str:
     return f"{name} chemical shift (ppm)"
 
 
+def spectrum_column(data: pd.DataFrame, max_groups: int = 20) -> Optional[str]:
+    """The column telling the spectra apart, one line each: ``dataset`` when it names each one
+    (``LUB437_000``), else ``source_file`` (``1/pdata/1``); for more than ``max_groups`` spectra,
+    ``time_s`` (a colour scale). None for a single spectrum.
+
+    Each spectrum has its own chemical shifts, so the rows of two never share an x value and the
+    usual grouping by repeated x values would draw them as one line.
+    """
+    if "source_file" not in data.columns:
+        return None
+    spectra = data["source_file"].nunique()
+    if spectra < 2:
+        return None
+    if spectra > max_groups and "time_s" in data.columns and data["time_s"].nunique() == spectra:
+        return "time_s"
+    if "dataset" in data.columns and data["dataset"].nunique() == spectra:
+        return "dataset"
+    return "source_file"
+
+
 def build_nmr_spec(
     dataset: Dataset,
     *,
@@ -69,7 +91,7 @@ def build_nmr_spec(
             part,
             x_column=x_column,
             y_column=signal,
-            group_by=group_by,
+            group_by=group_by or spectrum_column(part.data, max_groups),
             max_groups=max_groups,
             color="#8c564b",
             title=title or _default_title(dataset, "NMR"),

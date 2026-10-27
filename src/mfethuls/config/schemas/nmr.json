@@ -7,6 +7,7 @@
   "dtypes": {
     "chemical_shift_ppm": "float64",
     "intensity_a_u": "float64",
+    "dataset": "string",
     "nucleus": "string",
     "solvent": "string"
   }

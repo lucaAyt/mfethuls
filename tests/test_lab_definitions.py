@@ -431,12 +431,15 @@ def test_data_read_by_a_code_parser_is_read_again_by_its_definition(tmp_path, mo
 
 def test_read_again_names_both_versions_of_a_code_parser():
     from mfethuls.experiments import Experiment
+    from mfethuls.parsers.nmr import BrukerNMRParser
     from mfethuls.reconcile import _reader_change
 
     exp = Experiment(name="EXP014", instrument_name="nmr")
-    reason = _reader_change([{"reader": "nmr", "reader_fingerprint": "BrukerNMRParser-v5"}], exp)  # a downgrade
-    assert reason == "read by another version of mfethuls' nmr reader (BrukerNMRParser-v5 -> BrukerNMRParser-v4)"
-    assert _reader_change([{"reader": "nmr", "reader_fingerprint": "BrukerNMRParser-v4"}], exp) is None
+    now, newer = BrukerNMRParser.version, BrukerNMRParser.version + 1
+    reason = _reader_change([{"reader": "nmr", "reader_fingerprint": f"BrukerNMRParser-v{newer}"}], exp)  # a downgrade
+    assert reason == (f"read by another version of mfethuls' nmr reader "
+                      f"(BrukerNMRParser-v{newer} -> BrukerNMRParser-v{now})")
+    assert _reader_change([{"reader": "nmr", "reader_fingerprint": f"BrukerNMRParser-v{now}"}], exp) is None
 
 
 def test_a_new_definition_reader_version_offers_read_again(data_root):

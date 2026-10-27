@@ -51,6 +51,7 @@ COLUMN_LABELS: dict[str, ColumnLabel] = {
     "intensity_a_u": ColumnLabel("Intensity", "a.u."),
     "intensity_error_a_u": ColumnLabel("Intensity error", "a.u."),
     "chemical_shift_ppm": ColumnLabel("Chemical shift", "ppm", symbol=r"$\delta$"),
+    "dataset": ColumnLabel("Dataset"),
     "nucleus": ColumnLabel("Nucleus"),
     "solvent": ColumnLabel("Solvent"),
     "mz": ColumnLabel(r"$m/z$"),
